@@ -1,14 +1,24 @@
 const Product = require('../../models/product');
+const imagekit = require('../../utils/imagekit'); 
+const fs = require('fs');
 
 // ✅ Create Product
 const createProduct = async (req, res) => {
   try {
     const { name, description, category, weight, price, oldPrice, quantity } = req.body;
-    const image = req.file ? req.file.filename : null;
 
-    if (!image) return res.status(400).json({ message: 'Image is required' });
+    if (!req.file) return res.status(400).json({ message: 'Image is required' });
 
-    const product = new Product({ name, description, category, weight, price, oldPrice, quantity, image });
+    // Upload image to ImageKit
+    const uploadResponse = await imagekit.upload({
+      file: req.file.buffer.toString('base64'),
+      fileName: req.file.originalname,
+      folder: '/products'
+    });
+
+    const imageUrl = uploadResponse.url;
+
+    const product = new Product({ name, description, category, weight, price, oldPrice, quantity, image: imageUrl });
     await product.save();
 
     res.status(201).json({ message: 'Product created successfully', product });
@@ -45,7 +55,12 @@ const updateProduct = async (req, res) => {
     const updateData = { name, description, category, weight, price, oldPrice, quantity };
 
     if (req.file) {
-      updateData.image = req.file.filename;
+      const uploadResponse = await imagekit.upload({
+        file: req.file.buffer.toString('base64'),
+        fileName: req.file.originalname,
+        folder: '/products'
+      });
+      updateData.image = uploadResponse.url;
     }
 
     const product = await Product.findByIdAndUpdate(req.params.id, updateData, { new: true });
