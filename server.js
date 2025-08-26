@@ -4,7 +4,8 @@ const dotenv = require('dotenv');
 const cors = require('cors');
 const authroutes= require('./routes/user/authRoutes');
 // const productRoutes = require('./routes/product/productRoutes');
-const adminRoutes= require('./routes/admin/adminRoutes')
+const adminRoutes= require('./routes/admin/adminRoutes');
+const adminUserRoutes= require('./routes/admin/user/adminUserRoutes');
 
 dotenv.config(); 
 
@@ -15,9 +16,9 @@ app.use(express.json());
 app.use('/api/user', authroutes);
 // app.use('/api/product', productRoutes);
 
-
 // Admin Routes
 app.use('/api/admin', adminRoutes);
+app.use('/api/admin', adminUserRoutes);
 
 mongoose.connect(process.env.MONGO_URI, {
     useNewUrlParser: true,
