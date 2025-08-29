@@ -1,20 +1,22 @@
+require('dotenv').config();
+
 const express = require('express');
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const cors = require('cors');
 const authroutes= require('./routes/user/authRoutes');
-// const productRoutes = require('./routes/product/productRoutes');
+const productRoutes = require('./routes/product/productRoutes');
 const adminRoutes= require('./routes/admin/adminRoutes');
 const adminUserRoutes= require('./routes/admin/user/adminUserRoutes');
-
-dotenv.config(); 
+const categoryRoutes= require('./routes/category/categoryRoutes');
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 app.use('/api/user', authroutes);
-// app.use('/api/product', productRoutes);
+app.use('/api/product', productRoutes);
+app.use('/api/category', categoryRoutes);
 
 // Admin Routes
 app.use('/api/admin', adminRoutes);
@@ -33,5 +35,5 @@ app.get('/', (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`Server running on port ${PORT}`);
 });

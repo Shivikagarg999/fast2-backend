@@ -2,32 +2,44 @@ const Product = require('../../models/product');
 const imagekit = require('../../utils/imagekit'); 
 const fs = require('fs');
 
-// ✅ Create Product
+//Create Product
 const createProduct = async (req, res) => {
   try {
-    const { name, description, category, weight, price, oldPrice, quantity } = req.body;
-
+    const { name, description, categoryId, weight, price, oldPrice, quantity } = req.body;
+    
+    // Check required fields
     if (!req.file) return res.status(400).json({ message: 'Image is required' });
 
+    // Validate category ID
+    const category = await Category.findById(categoryId);
+    if (!category) return res.status(404).json({ message: 'Category not found' });
+
     // Upload image to ImageKit
-    const uploadResponse = await imagekit.upload({
+    const uploadedImage = await imagekit.upload({
       file: req.file.buffer.toString('base64'),
-      fileName: req.file.originalname,
-      folder: '/products'
+      fileName: `product_${Date.now()}.jpg`
     });
 
-    const imageUrl = uploadResponse.url;
+    const product = new Product({
+      name,
+      description,
+      category: category._id,
+      weight,
+      price,
+      oldPrice: oldPrice || 0,
+      quantity: quantity || 1,
+      image: uploadedImage.url
+    });
 
-    const product = new Product({ name, description, category, weight, price, oldPrice, quantity, image: imageUrl });
     await product.save();
-
-    res.status(201).json({ message: 'Product created successfully', product });
+    res.status(201).json({ message: 'Product created', product });
   } catch (error) {
+    console.error(error);
     res.status(500).json({ message: error.message });
   }
 };
 
-// ✅ Get All Products
+//Get All Products
 const getProducts = async (req, res) => {
   try {
     const products = await Product.find();
@@ -37,7 +49,7 @@ const getProducts = async (req, res) => {
   }
 };
 
-// ✅ Get Single Product
+//Get Single Product
 const getProductById = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
@@ -48,12 +60,23 @@ const getProductById = async (req, res) => {
   }
 };
 
-// ✅ Update Product
+//Update Product
 const updateProduct = async (req, res) => {
   try {
     const { name, description, category, weight, price, oldPrice, quantity } = req.body;
+
+    // Validate category ID if provided
+    if (category) {
+      const categoryExists = await Category.findById(category);
+      if (!categoryExists) return res.status(404).json({ message: 'Category not found' });
+    }
+
     const updateData = { name, description, category, weight, price, oldPrice, quantity };
 
+    // Remove undefined fields so they don't overwrite existing values
+    Object.keys(updateData).forEach(key => updateData[key] === undefined && delete updateData[key]);
+
+    // Handle image update
     if (req.file) {
       const uploadResponse = await imagekit.upload({
         file: req.file.buffer.toString('base64'),
@@ -68,11 +91,12 @@ const updateProduct = async (req, res) => {
 
     res.json({ message: 'Product updated successfully', product });
   } catch (error) {
+    console.error(error);
     res.status(500).json({ message: error.message });
   }
 };
 
-// ✅ Delete Product
+//Delete Product
 const deleteProduct = async (req, res) => {
   try {
     const product = await Product.findByIdAndDelete(req.params.id);
