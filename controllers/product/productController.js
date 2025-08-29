@@ -1,18 +1,19 @@
 const Product = require('../../models/product');
 const imagekit = require('../../utils/imagekit'); 
 const fs = require('fs');
+const Category = require('../../models/category');
 
 //Create Product
 const createProduct = async (req, res) => {
   try {
-    const { name, description, categoryId, weight, price, oldPrice, quantity } = req.body;
-    
+    const { name, description, category, weight, price, oldPrice, quantity } = req.body;
+
     // Check required fields
     if (!req.file) return res.status(400).json({ message: 'Image is required' });
 
     // Validate category ID
-    const category = await Category.findById(categoryId);
-    if (!category) return res.status(404).json({ message: 'Category not found' });
+    const foundCategory = await Category.findById(category); 
+    if (!foundCategory) return res.status(404).json({ message: 'Category not found' });
 
     // Upload image to ImageKit
     const uploadedImage = await imagekit.upload({
@@ -23,7 +24,7 @@ const createProduct = async (req, res) => {
     const product = new Product({
       name,
       description,
-      category: category._id,
+      category: foundCategory._id, 
       weight,
       price,
       oldPrice: oldPrice || 0,
@@ -38,6 +39,7 @@ const createProduct = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
 
 //Get All Products
 const getProducts = async (req, res) => {
