@@ -14,13 +14,19 @@ const userSchema = new mongoose.Schema(
       unique: true,
       sparse: true,
     },
-    password: { type: String, minlength: 6 },
     avatar: {
       type: String,
       default: "https://www.gravatar.com/avatar/?d=mp",
     },
+    address: [
+      {
+        type: String,
+      },
+    ],
+    isVerified: { type: Boolean, default: false },
+    role: { type: String, enum: ["user", "admin"], default: "user" },
 
-    // 🔑 OTP fields
+    // OTP fields
     otp: { type: String },
     otpExpires: { type: Date },
   },

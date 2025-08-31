@@ -10,16 +10,17 @@ const adminRoutes= require('./routes/admin/adminRoutes');
 const adminUserRoutes= require('./routes/admin/user/adminUserRoutes');
 const categoryRoutes= require('./routes/category/categoryRoutes');
 const cartRoutes= require('./routes/cart/cartRoutes');
+const userprofileRoutes= require('./routes/user/profileRoutes');
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
 app.use('/api/user', authroutes);
+app.use('/api/user/profile', userprofileRoutes);
 app.use('/api/product', productRoutes);
 app.use('/api/category', categoryRoutes);
 app.use('/api/cart', cartRoutes);
-
 
 // Admin Routes
 app.use('/api/admin', adminRoutes);
