@@ -1,4 +1,4 @@
-const Product = require('../../models/product');
+const {Product} = require('../../models/product');
 const imagekit = require('../../utils/imagekit'); 
 const fs = require('fs');
 const Category = require('../../models/category');
@@ -97,6 +97,27 @@ const updateProduct = async (req, res) => {
   }
 };
 
+// Get Products by Category ID
+const getProductsByCategory = async (req, res) => {
+  try {
+    const { categoryId } = req.params;
+
+    // Check if category exists
+    const category = await Category.findById(categoryId);
+    if (!category) {
+      return res.status(404).json({ message: 'Category not found' });
+    }
+
+    // Find products with that category
+    const products = await Product.find({ category: categoryId });
+
+    res.json({ category: category.name, products });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
 //Delete Product
 const deleteProduct = async (req, res) => {
   try {
@@ -114,5 +135,6 @@ module.exports = {
   getProducts,
   getProductById,
   updateProduct,
-  deleteProduct
+  deleteProduct,
+  getProductsByCategory
 };

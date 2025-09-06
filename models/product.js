@@ -1,18 +1,151 @@
 const mongoose = require('mongoose');
 
+
 const productSchema = new mongoose.Schema({
+  // Basic Information
   name: { type: String, required: true },
   description: { type: String, required: true },
+  brand: { type: String, required: true },
+  
+  // Category Information
   category: { 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'Category',
     required: true
   },
-  weight: { type: String, required: true },
+  subcategory: { 
+    type: mongoose.Schema.Types.ObjectId, 
+    ref: 'Category'
+  },
+  
+  // Pricing Information
   price: { type: Number, required: true },
   oldPrice: { type: Number, default: 0 },
-  quantity: { type: Number, required: true, default: 1 },
-  image: { type: String, required: true }, 
-}, { timestamps: true });
+  discountPercentage: { type: Number, default: 0 },
+  unit: { type: String, required: true, enum: ['piece', 'kg', 'g', 'l', 'ml', 'pack'] },
+  unitValue: { type: Number, required: true },
+  
+  // Promotor Information
+  promotor: {
+    id: { 
+      type: mongoose.Schema.Types.ObjectId, 
+      ref: 'Promotor',
+      required: true 
+    },
+    commissionRate: { 
+      type: Number, 
+      required: true 
+    },
+    commissionType: {
+      type: String,
+      enum: ['percentage', 'fixed'],
+      required: true
+    },
+    commissionAmount: {
+      type: Number,
+      default: 0
+    }
+  },
+  
+  // Inventory & Stock
+  quantity: { type: Number, required: true, default: 0 },
+  minOrderQuantity: { type: Number, default: 1 },
+  maxOrderQuantity: { type: Number, default: 10 },
+  stockStatus: { 
+    type: String, 
+    enum: ['in-stock', 'out-of-stock', 'low-stock', 'discontinued'],
+    default: 'in-stock'
+  },
+  lowStockThreshold: { type: Number, default: 10 },
+  
+  // Physical Attributes
+  weight: { type: String, required: true },
+  weightUnit: { type: String, enum: ['g', 'kg', 'ml', 'l'], default: 'g' },
+  dimensions: {
+    length: { type: Number },
+    width: { type: Number },
+    height: { type: Number }
+  },
+  volume: { type: Number },
+  
+  // Warehouse Information
+  warehouse: {
+    id: { type: mongoose.Schema.Types.ObjectId, ref: 'Warehouse' },
+    name: { type: String },
+    location: {
+      address: String,
+      city: String,
+      state: String,
+      pincode: String,
+      coordinates: {
+        lat: Number,
+        lng: Number
+      }
+    },
+    storageType: { type: String, enum: ['ambient', 'cold-storage', 'frozen'] },
+    aisle: String,
+    rack: String,
+    shelf: String
+  },
+  // Images & Media
+  images: [{ 
+    url: { type: String, required: true },
+    altText: String,
+    isPrimary: { type: Boolean, default: false }
+  }],
+  
+  // Ratings & Reviews
+  ratings: {
+    average: { type: Number, default: 0, min: 0, max: 5 },
+    count: { type: Number, default: 0 }
+  },
 
-module.exports = mongoose.model('Product', productSchema);
+  // Delivery Information
+  delivery: {
+    estimatedDeliveryTime: String,
+    deliveryCharges: { type: Number, default: 0 },
+    freeDeliveryThreshold: { type: Number, default: 0 },
+    availablePincodes: [String]
+  }
+}, { 
+  timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
+});
+
+// Middleware to calculate commission amount before saving
+productSchema.pre('save', function(next) {
+  if (this.promotor.commissionType === 'percentage') {
+    this.promotor.commissionAmount = (this.price * this.promotor.commissionRate) / 100;
+  } else {
+    this.promotor.commissionAmount = this.promotor.commissionRate;
+  }
+  next();
+});
+
+// Virtual for discount amount
+productSchema.virtual('discountAmount').get(function() {
+  return this.oldPrice > 0 ? this.oldPrice - this.price : 0;
+});
+
+// Virtual for formatted price
+productSchema.virtual('formattedPrice').get(function() {
+  return `₹${this.price.toFixed(2)}`;
+});
+
+// Virtual for formatted old price
+productSchema.virtual('formattedOldPrice').get(function() {
+  return this.oldPrice > 0 ? `₹${this.oldPrice.toFixed(2)}` : null;
+});
+
+// Index for better performance
+productSchema.index({ name: 'text', description: 'text', brand: 'text' });
+productSchema.index({ category: 1, isActive: 1 });
+productSchema.index({ price: 1 });
+productSchema.index({ 'ratings.average': -1 });
+productSchema.index({ sku: 1 }, { unique: true });
+productSchema.index({ 'promotor.id': 1 });
+
+const Product = mongoose.model('Product', productSchema);
+
+module.exports = { Product };
