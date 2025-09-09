@@ -6,11 +6,16 @@ const dotenv = require('dotenv');
 const cors = require('cors');
 const authroutes= require('./routes/user/authRoutes');
 const productRoutes = require('./routes/product/productRoutes');
-const adminRoutes= require('./routes/admin/adminRoutes');
-const adminUserRoutes= require('./routes/admin/user/adminUserRoutes');
 const categoryRoutes= require('./routes/category/categoryRoutes');
 const cartRoutes= require('./routes/cart/cartRoutes');
 const userprofileRoutes= require('./routes/user/profileRoutes');
+
+// admin routes
+
+const adminRoutes= require('./routes/admin/adminRoutes');
+const adminUserRoutes= require('./routes/admin/user/adminUserRoutes');
+const adminpromotorRoutes= require('./routes/admin/promotor/promotor');
+const adminwarehouseRoutes= require('./routes/admin/warehouse/warehouseRoutes');
 
 const app = express();
 
@@ -25,6 +30,9 @@ app.use('/api/cart', cartRoutes);
 // Admin Routes
 app.use('/api/admin', adminRoutes);
 app.use('/api/admin', adminUserRoutes);
+app.use('/api/admin/promotor', adminpromotorRoutes);
+app.use('/api/admin/warehouse', adminwarehouseRoutes);
+
 
 mongoose.connect(process.env.MONGO_URI, {
     useNewUrlParser: true,

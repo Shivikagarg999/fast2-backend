@@ -1,8 +1,6 @@
 const mongoose = require('mongoose');
 
-// Promotor Schema
 const promotorSchema = new mongoose.Schema({
-  // Basic Information
   name: { 
     type: String, 
     required: true 
@@ -30,11 +28,10 @@ const promotorSchema = new mongoose.Schema({
     }
   },
   
-  // Commission Information
   commissionRate: { 
     type: Number, 
     required: true, 
-    default: 5, // Default 5% commission
+    default: 5, 
     min: 0,
     max: 100 
   },
@@ -86,3 +83,6 @@ promotorSchema.virtual('formattedAddress').get(function() {
 });
 
 const Promotor = mongoose.model('Promotor', promotorSchema);
+
+
+module.exports = Promotor;
