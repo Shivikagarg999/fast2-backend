@@ -22,6 +22,7 @@ const app = express();
 // ✅ Allowed origins
 const allowedOrigins = [
   "https://fast2.in",
+  "https://www.fast2.in",
   "http://localhost:5173",
   "http://localhost:3000",
   "https://fast2-admin.vercel.app"
