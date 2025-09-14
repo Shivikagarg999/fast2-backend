@@ -1,6 +1,5 @@
 const mongoose = require('mongoose');
 
-
 const productSchema = new mongoose.Schema({
   // Basic Information
   name: { type: String },
@@ -11,7 +10,6 @@ const productSchema = new mongoose.Schema({
   category: { 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'Category',
-
   },
   subcategory: { 
     type: mongoose.Schema.Types.ObjectId, 
@@ -23,28 +21,14 @@ const productSchema = new mongoose.Schema({
   oldPrice: { type: Number, default: 0 },
   discountPercentage: { type: Number, default: 0 },
   unit: { type: String, enum: ['piece', 'kg', 'g', 'l', 'ml', 'pack'] },
-  unitValue: { type: Number},
+  unitValue: { type: Number, default: 1 },   // ✅ made optional with default 1
   
   // Promotor Information
   promotor: {
-    id: { 
-      type: mongoose.Schema.Types.ObjectId, 
-      ref: 'Promotor',
-      // required: true 
-    },
-    commissionRate: { 
-      type: Number, 
-      // required: true 
-    },
-    commissionType: {
-      type: String,
-      enum: ['percentage', 'fixed'],
-      // required: true
-    },
-    commissionAmount: {
-      type: Number,
-      default: 0
-    }
+    id: { type: mongoose.Schema.Types.ObjectId, ref: 'Promotor' },
+    commissionRate: { type: Number },
+    commissionType: { type: String, enum: ['percentage', 'fixed'] },
+    commissionAmount: { type: Number, default: 0 }
   },
   
   // Inventory & Stock
@@ -87,6 +71,7 @@ const productSchema = new mongoose.Schema({
     rack: String,
     shelf: String
   },
+  
   // Images & Media
   images: [{ 
     url: { type: String },
@@ -118,7 +103,7 @@ productSchema.pre('save', function(next) {
   if (this.promotor.commissionType === 'percentage') {
     this.promotor.commissionAmount = (this.price * this.promotor.commissionRate) / 100;
   } else {
-    this.promotor.commissionAmount = this.promotor.commissionRate;
+    this.promotor.commissionAmount = this.promotor.commissionRate || 0;
   }
   next();
 });
@@ -138,7 +123,7 @@ productSchema.virtual('formattedOldPrice').get(function() {
   return this.oldPrice > 0 ? `₹${this.oldPrice.toFixed(2)}` : null;
 });
 
-// Index for better performance
+// Indexes for performance
 productSchema.index({ name: 'text', description: 'text', brand: 'text' });
 productSchema.index({ category: 1, isActive: 1 });
 productSchema.index({ price: 1 });
@@ -146,6 +131,6 @@ productSchema.index({ 'ratings.average': -1 });
 productSchema.index({ sku: 1 }, { unique: true });
 productSchema.index({ 'promotor.id': 1 });
 
-const Product = mongoose.model('Product', productSchema);
-
-module.exports = { Product };
+// ✅ Proper export (prevents overwrite & required cache issue)
+const Product = mongoose.models.Product || mongoose.model('Product', productSchema);
+module.exports = Product;
