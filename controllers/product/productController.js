@@ -1,4 +1,4 @@
-const { Product } = require('../../models/product');
+
 const imagekit = require('../../utils/imagekit');
 const fs = require('fs');
 const Category = require('../../models/category');
