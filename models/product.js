@@ -21,7 +21,7 @@ const productSchema = new mongoose.Schema({
   oldPrice: { type: Number, default: 0 },
   discountPercentage: { type: Number, default: 0 },
   unit: { type: String, enum: ['piece', 'kg', 'g', 'l', 'ml', 'pack'] },
-  unitValue: { type: Number, default: 1 },   // ✅ made optional with default 1
+  unitValue: { type: Number, default: 1 },
   
   // Promotor Information
   promotor: {

@@ -3,6 +3,7 @@ const imagekit = require('../../utils/imagekit');
 const fs = require('fs');
 const Category = require('../../models/category');
 const Promotor = require('../../models/promotor'); 
+const Product= require('../../models/product');
 
 // Create Product
 const createProduct = async (req, res) => {
