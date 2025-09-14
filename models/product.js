@@ -3,15 +3,15 @@ const mongoose = require('mongoose');
 
 const productSchema = new mongoose.Schema({
   // Basic Information
-  name: { type: String, required: true },
-  description: { type: String, required: true },
-  brand: { type: String, required: true },
+  name: { type: String },
+  description: { type: String },
+  brand: { type: String },
   
   // Category Information
   category: { 
     type: mongoose.Schema.Types.ObjectId, 
     ref: 'Category',
-    required: true
+
   },
   subcategory: { 
     type: mongoose.Schema.Types.ObjectId, 
@@ -19,27 +19,27 @@ const productSchema = new mongoose.Schema({
   },
   
   // Pricing Information
-  price: { type: Number, required: true },
+  price: { type: Number },
   oldPrice: { type: Number, default: 0 },
   discountPercentage: { type: Number, default: 0 },
-  unit: { type: String, required: true, enum: ['piece', 'kg', 'g', 'l', 'ml', 'pack'] },
-  unitValue: { type: Number, required: true },
+  unit: { type: String, enum: ['piece', 'kg', 'g', 'l', 'ml', 'pack'] },
+  unitValue: { type: Number},
   
   // Promotor Information
   promotor: {
     id: { 
       type: mongoose.Schema.Types.ObjectId, 
       ref: 'Promotor',
-      required: true 
+      // required: true 
     },
     commissionRate: { 
       type: Number, 
-      required: true 
+      // required: true 
     },
     commissionType: {
       type: String,
       enum: ['percentage', 'fixed'],
-      required: true
+      // required: true
     },
     commissionAmount: {
       type: Number,
@@ -59,7 +59,7 @@ const productSchema = new mongoose.Schema({
   lowStockThreshold: { type: Number, default: 10 },
   
   // Physical Attributes
-  weight: { type: String, required: true },
+  weight: { type: String },
   weightUnit: { type: String, enum: ['g', 'kg', 'ml', 'l'], default: 'g' },
   dimensions: {
     length: { type: Number },
@@ -89,7 +89,7 @@ const productSchema = new mongoose.Schema({
   },
   // Images & Media
   images: [{ 
-    url: { type: String, required: true },
+    url: { type: String },
     altText: String,
     isPrimary: { type: Boolean, default: false }
   }],
