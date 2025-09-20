@@ -35,14 +35,14 @@ exports.createOrder = async (req, res) => {
   }
 };
 
-// Get all orders for logged-in user
-exports.getUserOrders = async (req, res) => {
+//Get my orders
+exports.getMyOrders = async (req, res) => {
   try {
-    const userId = req.user._id; 
+    const userId = req.user._id;
     const orders = await Order.find({ user: userId }).populate("items.product");
     res.json(orders);
   } catch (err) {
-    console.error("Get orders error:", err);
+    console.error("Get my orders error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
