@@ -1,7 +1,7 @@
 const Promotor = require('../../../models/promotor');
 const bcrypt = require('bcrypt');
 
-// ✅ Create Promotor
+//Create Promotor
 exports.createPromotor = async (req, res) => {
   try {
     const { name, email, phone, address, commissionRate, commissionType, password, aadharNumber, panNumber, bankDetails } = req.body;
@@ -31,7 +31,7 @@ exports.createPromotor = async (req, res) => {
   }
 };
 
-// ✅ Get All Promotors
+//Get All Promotors
 exports.getPromotors = async (req, res) => {
   try {
     const promotors = await Promotor.find().select("-password");
@@ -41,7 +41,7 @@ exports.getPromotors = async (req, res) => {
   }
 };
 
-// ✅ Get Single Promotor
+//Get Single Promotor
 exports.getPromotorById = async (req, res) => {
   try {
     const promotor = await Promotor.findById(req.params.id).select("-password");
@@ -52,7 +52,7 @@ exports.getPromotorById = async (req, res) => {
   }
 };
 
-// ✅ Update Promotor
+//Update Promotor
 exports.updatePromotor = async (req, res) => {
   try {
     const updates = { ...req.body };
@@ -69,7 +69,7 @@ exports.updatePromotor = async (req, res) => {
   }
 };
 
-// ✅ Delete Promotor
+//Delete Promotor
 exports.deletePromotor = async (req, res) => {
   try {
     const promotor = await Promotor.findByIdAndDelete(req.params.id);

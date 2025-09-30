@@ -67,7 +67,6 @@ exports.getAllDrivers = async (req, res) => {
   }
 };
 
-// Get driver by ID
 exports.getDriverById = async (req, res) => {
   try {
     const driver = await Driver.findById(req.params.id)
@@ -93,7 +92,6 @@ exports.getDriverById = async (req, res) => {
   }
 };
 
-// Create new driver
 exports.createDriver = async (req, res) => {
   try {
     const {
@@ -160,7 +158,6 @@ exports.createDriver = async (req, res) => {
   }
 };
 
-// Update driver
 exports.updateDriver = async (req, res) => {
   try {
     const {
@@ -209,7 +206,6 @@ exports.updateDriver = async (req, res) => {
   }
 };
 
-// Update driver status
 exports.updateDriverStatus = async (req, res) => {
   try {
     const { status } = req.body;
@@ -253,7 +249,6 @@ exports.updateDriverStatus = async (req, res) => {
   }
 };
 
-// Verify driver documents
 exports.verifyDriver = async (req, res) => {
   try {
     const driver = await Driver.findById(req.params.id);
@@ -283,7 +278,6 @@ exports.verifyDriver = async (req, res) => {
   }
 };
 
-// Delete driver
 exports.deleteDriver = async (req, res) => {
   try {
     const driver = await Driver.findById(req.params.id);
@@ -323,7 +317,6 @@ exports.deleteDriver = async (req, res) => {
   }
 };
 
-// Get driver's orders
 exports.getDriverOrders = async (req, res) => {
   try {
     const { page = 1, limit = 10, status } = req.query;
@@ -362,7 +355,6 @@ exports.getDriverOrders = async (req, res) => {
   }
 };
 
-// Get driver earnings
 exports.getDriverEarnings = async (req, res) => {
   try {
     const { period = 'month' } = req.query; // week, month, year
@@ -396,7 +388,6 @@ exports.getDriverEarnings = async (req, res) => {
   }
 };
 
-// Get driver performance
 exports.getDriverPerformance = async (req, res) => {
   try {
     const driver = await Driver.findById(req.params.id)
@@ -429,7 +420,6 @@ exports.getDriverPerformance = async (req, res) => {
   }
 };
 
-// Update driver location (admin override)
 exports.updateDriverLocation = async (req, res) => {
   try {
     const { lat, lng, address } = req.body;
@@ -458,7 +448,6 @@ exports.updateDriverLocation = async (req, res) => {
   }
 };
 
-// Get nearby available drivers
 exports.getNearbyAvailableDrivers = async (req, res) => {
   try {
     const { lat, lng, maxDistance = 5000 } = req.query; // maxDistance in meters
@@ -489,7 +478,128 @@ exports.getNearbyAvailableDrivers = async (req, res) => {
   }
 };
 
-// Helper functions
+exports.assignOrderToDriver = async (req, res) => {
+  try {
+    const { orderId } = req.body;
+    const { driverId } = req.params;
+
+    // Check if driver exists and is approved
+    const driver = await Driver.findById(driverId);
+    if (!driver) {
+      return res.status(404).json({
+        success: false,
+        message: 'Driver not found'
+      });
+    }
+
+    if (driver.workInfo.status !== 'approved') {
+      return res.status(400).json({
+        success: false,
+        message: 'Driver is not approved for deliveries'
+      });
+    }
+
+    // Check if order exists
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+
+    // Check if order is already assigned
+    if (order.driver) {
+      return res.status(400).json({
+        success: false,
+        message: 'Order is already assigned to a driver'
+      });
+    }
+
+    // Check if order status allows assignment
+    if (!['pending', 'confirmed'].includes(order.status)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Order cannot be assigned in current status'
+      });
+    }
+
+    // Check if driver is available
+    if (driver.workInfo.availability !== 'online' && driver.workInfo.availability !== 'offline') {
+      return res.status(400).json({
+        success: false,
+        message: 'Driver is not available for new orders'
+      });
+    }
+
+    // Assign order to driver
+    await driver.assignOrder(orderId);
+    
+    // Update order with driver assignment
+    order.driver = driverId;
+    order.status = 'confirmed'; // Move to confirmed status when assigned
+    await order.save();
+
+    const updatedOrder = await Order.findById(orderId)
+      .populate('user', 'name email phone')
+      .populate('driver', 'personalInfo.name personalInfo.phone vehicle');
+
+    res.json({
+      success: true,
+      message: 'Order assigned to driver successfully',
+      data: updatedOrder
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error assigning order to driver',
+      error: error.message
+    });
+  }
+};
+
+exports.getAvailableDriversForOrder = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    
+    // Get order to check location
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found'
+      });
+    }
+
+    // Get available drivers (you might want to filter by location)
+    const availableDrivers = await Driver.find({
+      'workInfo.status': 'approved',
+      'workInfo.availability': { $in: ['online', 'offline'] }
+    })
+    .select('personalInfo.name personalInfo.phone personalInfo.email vehicle workInfo.driverId workInfo.availability deliveryStats.averageRating deliveryStats.completedOrders')
+    .sort({ 'deliveryStats.averageRating': -1, 'deliveryStats.completedOrders': -1 });
+
+    res.json({
+      success: true,
+      data: {
+        order: {
+          id: order._id,
+          status: order.status,
+          shippingAddress: order.shippingAddress
+        },
+        availableDrivers,
+        totalAvailable: availableDrivers.length
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching available drivers',
+      error: error.message
+    });
+  }
+};
+
 const getDriverEarningsDetails = async (driverId, period) => {
   const dateFilter = getDateFilter(period);
   

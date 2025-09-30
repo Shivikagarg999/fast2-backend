@@ -18,6 +18,7 @@ const adminUserRoutes = require('./routes/admin/user/adminUserRoutes');
 const adminPromotorRoutes = require('./routes/admin/promotor/promotor');
 const adminWarehouseRoutes = require('./routes/admin/warehouse/warehouseRoutes');
 const adminDriverRoutes = require('./routes/admin/driver/driver');
+const adminOrderRoutes = require('./routes/admin/order/order');
 
 const app = express();
 
@@ -61,6 +62,8 @@ app.use('/api/admin', adminUserRoutes);
 app.use('/api/admin/promotor', adminPromotorRoutes);
 app.use('/api/admin/warehouse', adminWarehouseRoutes);
 app.use('/api/admin/drivers', adminDriverRoutes);
+app.use('/api/admin/orders', adminOrderRoutes);
+
 
 // ✅ MongoDB Connection
 mongoose.connect(process.env.MONGO_URI, {
