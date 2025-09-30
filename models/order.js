@@ -23,7 +23,7 @@ const shippingSchema = new mongoose.Schema({
   state: { type: String, required: true },
   pinCode: { type: String, required: true },
   country: { type: String, default: "India" },
-  phone: { type: String } // optional 
+  phone: { type: String }
 });
 
 const orderSchema = new mongoose.Schema(
@@ -32,6 +32,11 @@ const orderSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
       required: true
+    },
+    driver: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Driver",
+      default: null
     },
     items: [orderItemSchema],
     total: {
@@ -45,7 +50,12 @@ const orderSchema = new mongoose.Schema(
     },
     shippingAddress: shippingSchema, 
     paymentMethod: { type: String, enum: ["cod", "online"], default: "cod" },
-    paymentStatus: { type: String, enum: ["pending", "paid"], default: "pending" }
+    paymentStatus: { type: String, enum: ["pending", "paid"], default: "pending" },
+    
+    // Delivery tracking fields
+    estimatedDelivery: Date,
+    deliveryNotes: String,
+    trackingNumber: String
   },
   { timestamps: true }
 );

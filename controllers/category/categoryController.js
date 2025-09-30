@@ -4,7 +4,16 @@ const imagekit = require('../../utils/imagekit');
 // Create Category
 exports.createCategory = async (req, res) => {
   try {
-    const { name } = req.body;
+    const { 
+      name,
+      hsnCode,
+      gstPercent,
+      taxType,
+      defaultUOM,
+      isActive,
+      sortOrder
+    } = req.body;
+
     if (!req.file) return res.status(400).json({ message: 'Image is required' });
 
     const uploadedImage = await imagekit.upload({
@@ -14,7 +23,13 @@ exports.createCategory = async (req, res) => {
 
     const category = new Category({
       name,
-      image: uploadedImage.url
+      image: uploadedImage.url,
+      hsnCode,
+      gstPercent,
+      taxType,
+      defaultUOM,
+      isActive,
+      sortOrder
     });
 
     await category.save();
@@ -49,8 +64,30 @@ exports.getCategoryById = async (req, res) => {
 // Update category
 exports.updateCategory = async (req, res) => {
   try {
-    const { name } = req.body;
-    const updateData = { name };
+    const { 
+      name,
+      hsnCode,
+      gstPercent,
+      taxType,
+      defaultUOM,
+      isActive,
+      sortOrder
+    } = req.body;
+
+    const updateData = {
+      name,
+      hsnCode,
+      gstPercent,
+      taxType,
+      defaultUOM,
+      isActive,
+      sortOrder
+    };
+
+    // Remove undefined fields (so they don't overwrite existing values)
+    Object.keys(updateData).forEach(
+      key => updateData[key] === undefined && delete updateData[key]
+    );
 
     if (req.file) {
       const uploadedImage = await imagekit.upload({
@@ -60,7 +97,12 @@ exports.updateCategory = async (req, res) => {
       updateData.image = uploadedImage.url;
     }
 
-    const category = await Category.findByIdAndUpdate(req.params.id, updateData, { new: true });
+    const category = await Category.findByIdAndUpdate(
+      req.params.id,
+      updateData,
+      { new: true }
+    );
+
     if (!category) return res.status(404).json({ message: 'Category not found' });
 
     res.json({ message: 'Category updated', category });

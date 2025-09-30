@@ -1,11 +1,9 @@
-
 const imagekit = require('../../utils/imagekit');
-const fs = require('fs');
 const Category = require('../../models/category');
 const Promotor = require('../../models/promotor'); 
-const Product= require('../../models/product');
+const Product = require('../../models/product');
 
-// Create Product
+// Create Product with multiple images and video support
 const createProduct = async (req, res) => {
   try {
     const {
@@ -31,28 +29,72 @@ const createProduct = async (req, res) => {
       estimatedDeliveryTime,
       deliveryCharges,
       freeDeliveryThreshold,
-      availablePincodes
+      availablePincodes,
+      hsnCode,
+      gstPercent,
+      taxType,
+      videoDuration,
+      videoFileSize
     } = req.body;
 
     // Check required fields
-    if (!req.file) return res.status(400).json({ message: 'Image is required' });
+    if (!req.files || !req.files.images) {
+      return res.status(400).json({ message: 'At least one image is required' });
+    }
 
-    // Validate category ID
+    // Validate category
     const foundCategory = await Category.findById(category);
     if (!foundCategory) return res.status(404).json({ message: 'Category not found' });
 
-    // Validate promotor ID
+    // Validate promotor
     const foundPromotor = await Promotor.findById(promotor);
     if (!foundPromotor) return res.status(404).json({ message: 'Promotor not found' });
 
-    // Upload image to ImageKit
-    const uploadedImage = await imagekit.upload({
-      file: req.file.buffer.toString('base64'),
-      fileName: `product_${Date.now()}.jpg`,
-      folder: '/products'
-    });
+    // Handle images upload (max 5)
+    const imageFiles = Array.isArray(req.files.images) ? req.files.images : [req.files.images];
+    
+    if (imageFiles.length > 5) {
+      return res.status(400).json({ message: 'Maximum 5 images allowed per product' });
+    }
 
-    // Parse dimensions if provided
+    const uploadedImages = [];
+    
+    for (let i = 0; i < imageFiles.length; i++) {
+      const imageFile = imageFiles[i];
+      const uploadedImage = await imagekit.upload({
+        file: imageFile.buffer.toString('base64'),
+        fileName: `product_${Date.now()}_${i}.jpg`,
+        folder: '/products/images'
+      });
+      
+      uploadedImages.push({
+        url: uploadedImage.url,
+        altText: `${name} - Image ${i + 1}`,
+        isPrimary: i === 0,
+        order: i
+      });
+    }
+
+    // Handle video upload if provided
+    let videoData = {};
+    if (req.files.video) {
+      const videoFile = Array.isArray(req.files.video) ? req.files.video[0] : req.files.video;
+      
+      const uploadedVideo = await imagekit.upload({
+        file: videoFile.buffer.toString('base64'),
+        fileName: `product_${Date.now()}_video.mp4`,
+        folder: '/products/videos'
+      });
+
+      videoData = {
+        url: uploadedVideo.url,
+        thumbnail: uploadedImages[0]?.url || '', // Use first image as thumbnail
+        duration: videoDuration || 0,
+        fileSize: videoFileSize || videoFile.size
+      };
+    }
+
+    // Parse JSON fields
     let parsedDimensions = {};
     if (dimensions) {
       try {
@@ -62,7 +104,6 @@ const createProduct = async (req, res) => {
       }
     }
 
-    // Parse available pincodes if provided
     let parsedPincodes = [];
     if (availablePincodes) {
       try {
@@ -71,6 +112,13 @@ const createProduct = async (req, res) => {
         console.error('Error parsing pincodes:', error);
       }
     }
+
+    // Inherit tax information from category
+    const productTaxInfo = {
+      hsnCode: hsnCode || foundCategory.hsnCode,
+      gstPercent: gstPercent !== undefined ? gstPercent : foundCategory.gstPercent,
+      taxType: taxType || foundCategory.taxType
+    };
 
     const product = new Product({
       name,
@@ -82,6 +130,7 @@ const createProduct = async (req, res) => {
       discountPercentage: oldPrice > 0 ? Math.round(((oldPrice - price) / oldPrice) * 100) : 0,
       unit,
       unitValue,
+      ...productTaxInfo,
       promotor: {
         id: foundPromotor._id,
         commissionRate,
@@ -96,14 +145,12 @@ const createProduct = async (req, res) => {
       weight,
       weightUnit: weightUnit || 'g',
       dimensions: parsedDimensions,
+      images: uploadedImages,
+      video: videoData,
       warehouse: {
-        id: warehouseId || null
+        id: warehouseId || null,
+        storageType: storageType || null
       },
-      images: [{
-        url: uploadedImage.url,
-        altText: name,
-        isPrimary: true
-      }],
       delivery: {
         estimatedDeliveryTime,
         deliveryCharges: deliveryCharges || 0,
@@ -113,9 +160,12 @@ const createProduct = async (req, res) => {
     });
 
     await product.save();
-    res.status(201).json({ message: 'Product created', product });
+    res.status(201).json({ 
+      message: 'Product created successfully', 
+      product: await product.populate(['category', 'promotor.id'])
+    });
   } catch (error) {
-    console.error(error);
+    console.error('Create product error:', error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -171,16 +221,31 @@ const updateProduct = async (req, res) => {
       estimatedDeliveryTime,
       deliveryCharges,
       freeDeliveryThreshold,
-      availablePincodes
+      availablePincodes,
+      hsnCode,
+      gstPercent,
+      taxType,
+      videoDuration,
+      videoFileSize,
+      primaryImageIndex,
+      imagesToRemove,
+      removeVideo
     } = req.body;
 
-    // Validate category ID if provided
-    if (category) {
-      const categoryExists = await Category.findById(category);
-      if (!categoryExists) return res.status(404).json({ message: 'Category not found' });
+    // Find existing product
+    const existingProduct = await Product.findById(req.params.id);
+    if (!existingProduct) {
+      return res.status(404).json({ message: 'Product not found' });
     }
 
-    // Validate promotor ID if provided
+    // Validate category if provided
+    let foundCategory;
+    if (category) {
+      foundCategory = await Category.findById(category);
+      if (!foundCategory) return res.status(404).json({ message: 'Category not found' });
+    }
+
+    // Validate promotor if provided
     if (promotor) {
       const promotorExists = await Promotor.findById(promotor);
       if (!promotorExists) return res.status(404).json({ message: 'Promotor not found' });
@@ -190,7 +255,6 @@ const updateProduct = async (req, res) => {
       name,
       description,
       brand,
-      category,
       price,
       oldPrice,
       unit,
@@ -200,10 +264,91 @@ const updateProduct = async (req, res) => {
       maxOrderQuantity,
       weight,
       weightUnit,
-      'warehouse.id': warehouseId
+      'warehouse.id': warehouseId,
+      'warehouse.storageType': storageType
     };
 
-    // Parse dimensions if provided
+    // Handle category change and tax inheritance
+    if (category) {
+      updateData.category = category;
+      updateData.hsnCode = foundCategory.hsnCode;
+      updateData.gstPercent = foundCategory.gstPercent;
+      updateData.taxType = foundCategory.taxType;
+    } else {
+      // Allow product-specific tax overrides
+      if (hsnCode !== undefined) updateData.hsnCode = hsnCode;
+      if (gstPercent !== undefined) updateData.gstPercent = gstPercent;
+      if (taxType !== undefined) updateData.taxType = taxType;
+    }
+
+    // Handle image removal
+    if (imagesToRemove) {
+      const removeArray = Array.isArray(imagesToRemove) ? imagesToRemove : [imagesToRemove];
+      updateData.$pull = { images: { _id: { $in: removeArray } } };
+    }
+
+    // Handle new image uploads
+    if (req.files && req.files.images) {
+      const newImageFiles = Array.isArray(req.files.images) ? req.files.images : [req.files.images];
+      const currentImageCount = existingProduct.images.length - (imagesToRemove ? 
+        (Array.isArray(imagesToRemove) ? imagesToRemove.length : 1) : 0);
+      
+      if (currentImageCount + newImageFiles.length > 5) {
+        return res.status(400).json({ 
+          message: `Cannot add ${newImageFiles.length} images. Maximum 5 images allowed.` 
+        });
+      }
+
+      const newImages = [];
+      for (let i = 0; i < newImageFiles.length; i++) {
+        const imageFile = newImageFiles[i];
+        const uploadedImage = await imagekit.upload({
+          file: imageFile.buffer.toString('base64'),
+          fileName: `product_${Date.now()}_${i}.jpg`,
+          folder: '/products/images'
+        });
+        
+        newImages.push({
+          url: uploadedImage.url,
+          altText: `${name} - Image ${currentImageCount + i + 1}`,
+          isPrimary: false,
+          order: currentImageCount + i
+        });
+      }
+
+      if (newImages.length > 0) {
+        updateData.$push = { images: { $each: newImages } };
+      }
+    }
+
+    // Handle primary image change
+    if (primaryImageIndex !== undefined) {
+      updateData.$set = updateData.$set || {};
+      updateData.$set['images.$[].isPrimary'] = false;
+      updateData.$set[`images.${primaryImageIndex}.isPrimary`] = true;
+    }
+
+    // Handle video upload/removal
+    if (req.files && req.files.video) {
+      const videoFile = Array.isArray(req.files.video) ? req.files.video[0] : req.files.video;
+      
+      const uploadedVideo = await imagekit.upload({
+        file: videoFile.buffer.toString('base64'),
+        fileName: `product_${Date.now()}_video.mp4`,
+        folder: '/products/videos'
+      });
+
+      updateData.video = {
+        url: uploadedVideo.url,
+        thumbnail: existingProduct.images[0]?.url || '',
+        duration: videoDuration || 0,
+        fileSize: videoFileSize || videoFile.size
+      };
+    } else if (removeVideo === 'true') {
+      updateData.video = {};
+    }
+
+    // Handle other fields
     if (dimensions) {
       try {
         updateData.dimensions = JSON.parse(dimensions);
@@ -212,7 +357,6 @@ const updateProduct = async (req, res) => {
       }
     }
 
-    // Parse available pincodes if provided
     if (availablePincodes) {
       try {
         updateData['delivery.availablePincodes'] = JSON.parse(availablePincodes);
@@ -221,47 +365,24 @@ const updateProduct = async (req, res) => {
       }
     }
 
-    // Update delivery information if provided
+    // Update other fields
     if (estimatedDeliveryTime) updateData['delivery.estimatedDeliveryTime'] = estimatedDeliveryTime;
     if (deliveryCharges !== undefined) updateData['delivery.deliveryCharges'] = deliveryCharges;
     if (freeDeliveryThreshold !== undefined) updateData['delivery.freeDeliveryThreshold'] = freeDeliveryThreshold;
 
-    // Update promotor information if provided
     if (promotor) updateData['promotor.id'] = promotor;
     if (commissionRate !== undefined) updateData['promotor.commissionRate'] = commissionRate;
     if (commissionType) updateData['promotor.commissionType'] = commissionType;
 
-    // Calculate discount percentage if oldPrice is provided
+    // Calculate discount
     if (oldPrice !== undefined && price !== undefined) {
       updateData.discountPercentage = oldPrice > 0 ? Math.round(((oldPrice - price) / oldPrice) * 100) : 0;
     }
 
-    // Remove undefined fields so they don't overwrite existing values
-    Object.keys(updateData).forEach(key => updateData[key] === undefined && delete updateData[key]);
-
-    // Handle image update
-    if (req.file) {
-      const uploadResponse = await imagekit.upload({
-        file: req.file.buffer.toString('base64'),
-        fileName: req.file.originalname,
-        folder: '/products'
-      });
-      
-      // Add new image and set as primary
-      updateData.$push = {
-        images: {
-          url: uploadResponse.url,
-          altText: name || '',
-          isPrimary: true
-        }
-      };
-      
-      // Set all other images as not primary
-      updateData.$set = { 
-        ...updateData.$set,
-        'images.$[].isPrimary': false 
-      };
-    }
+    // Clean up undefined fields
+    Object.keys(updateData).forEach(key => {
+      if (updateData[key] === undefined) delete updateData[key];
+    });
 
     const product = await Product.findByIdAndUpdate(
       req.params.id,
@@ -269,11 +390,9 @@ const updateProduct = async (req, res) => {
       { new: true, runValidators: true }
     ).populate('category').populate('promotor.id');
     
-    if (!product) return res.status(404).json({ message: 'Product not found' });
-
     res.json({ message: 'Product updated successfully', product });
   } catch (error) {
-    console.error(error);
+    console.error('Update product error:', error);
     res.status(500).json({ message: error.message });
   }
 };
