@@ -122,12 +122,10 @@ const registerDriver = async (req, res) => {
       auth: { password },
       documents: {
         aadharCard: {
-          number: aadharNumber,
           frontImage: aadharFrontUrl,
           backImage: aadharBackUrl
         },
         panCard: {
-          number: panNumber,
           image: panCardUrl
         }
       }

@@ -5,29 +5,29 @@ const driverSchema = new mongoose.Schema({
   personalInfo: {
     name: {
       type: String,
-      required: true,
+      // required: true,
       trim: true
     },
     email: {
       type: String,
-      required: true,
+      // required: true,
       unique: true,
       lowercase: true,
       trim: true
     },
     phone: {
       type: String,
-      required: true,
+      // required: true,
       unique: true
     },
     dateOfBirth: {
       type: Date,
-      required: true
+      // required: true
     },
     gender: {
       type: String,
       enum: ['male', 'female', 'other'],
-      required: true
+      // required: true
     },
     profilePhoto: {
       type: String,
@@ -39,7 +39,7 @@ const driverSchema = new mongoose.Schema({
   auth: {
     password: {
       type: String,
-      required: true,
+      // required: true,
       minlength: 6
     },
     fcmToken: {
@@ -75,28 +75,28 @@ const driverSchema = new mongoose.Schema({
   vehicle: {
     type: {
       type: String,
-      required: true
+      // required: true
     },
     make: {
       type: String,
-      required: true
+      // required: true
     },
     model: {
       type: String,
-      required: true
+      // required: true
     },
     registrationNumber: {
       type: String,
-      required: true,
+      // required: true,
       unique: true
     },
     color: {
       type: String,
-      required: true
+      // required: true
     },
     rcDocument: {
       type: String,
-      required: true
+      // required: true
     }
   },
 
@@ -119,19 +119,19 @@ const driverSchema = new mongoose.Schema({
   bankDetails: {
     accountHolderName: {
       type: String,
-      required: true
+      // required: true
     },
     accountNumber: {
       type: String,
-      required: true
+      // required: true
     },
     ifscCode: {
       type: String,
-      required: true
+      // required: true
     },
     bankName: {
       type: String,
-      required: true
+      // required: true
     },
     upiId: {
       type: String
@@ -262,15 +262,15 @@ const driverSchema = new mongoose.Schema({
   emergencyContact: {
     name: {
       type: String,
-      required: true
+      // required: true
     },
     relationship: {
       type: String,
-      required: true
+      // required: true
     },
     phone: {
       type: String,
-      required: true
+      // required: true
     }
   },
 
