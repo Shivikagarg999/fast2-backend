@@ -59,7 +59,7 @@ const prepareDriverData = (driver) => {
 // @access  Public
 const registerDriver = async (req, res) => {
   try {
-    const { name, email, phone, password, aadharNumber, panNumber } = req.body;
+    const { name, email, phone, password } = req.body;
     
     // Check if files are present
     if (!req.files || !req.files['aadharFront'] || !req.files['aadharBack'] || !req.files['panCard']) {
@@ -70,7 +70,7 @@ const registerDriver = async (req, res) => {
     }
 
     // Basic validation
-    if (!name || !email || !phone || !password || !aadharNumber || !panNumber) {
+    if (!name || !email || !phone || !password ) {
       return res.status(400).json({
         success: false,
         message: 'All fields are required'

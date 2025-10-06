@@ -59,10 +59,10 @@ const driverSchema = new mongoose.Schema({
   // Address Information
   address: {
     currentAddress: {
-      addressLine: { type: String, required: true },
-      city: { type: String, required: true },
-      state: { type: String, required: true },
-      pinCode: { type: String, required: true },
+      addressLine: { type: String },
+      city: { type: String },
+      state: { type: String },
+      pinCode: { type: String },
       country: { type: String, default: 'India' },
       coordinates: {
         lat: { type: Number },
@@ -103,15 +103,15 @@ const driverSchema = new mongoose.Schema({
   // Documents
   documents: {
     drivingLicense: {
-      number: { type: String, required: true },
-      expiryDate: { type: Date, required: true },
-      frontImage: { type: String, required: true },
-      backImage: { type: String, required: true }
+      number: { type: String },
+      expiryDate: { type: Date },
+      frontImage: { type: String },
+      backImage: { type: String }
     },
     aadharCard: {
-      number: { type: String, required: true },
-      frontImage: { type: String, required: true },
-      backImage: { type: String, required: true }
+      number: { type: String },
+      frontImage: { type: String },
+      backImage: { type: String }
     }
   },
 
