@@ -143,13 +143,6 @@ const registerDriver = async (req, res) => {
 
   } catch (error) {
     console.error('Registration error:', error);
-    
-    if (error.code === 11000) {
-      return res.status(409).json({
-        success: false,
-        message: 'Driver already exists'
-      });
-    }
 
     res.status(500).json({
       success: false,
@@ -197,12 +190,7 @@ const loginDriver = async (req, res) => {
     }
 
     // Check driver status
-    if (driver.workInfo.status !== 'approved') {
-      return res.status(403).json({
-        success: false,
-        message: `Your account is ${driver.workInfo.status}. Please contact support.`
-      });
-    }
+    
 
     // Update FCM token and last login
     if (fcmToken) {
