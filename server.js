@@ -12,6 +12,9 @@ const cartRoutes = require('./routes/cart/cartRoutes');
 const userProfileRoutes = require('./routes/user/profileRoutes');
 const orderRoutes= require('./routes/order/orderRoutes');
 
+//Driver Routes imports
+const driverRoutes=require('./routes/driver/driverAuth');
+
 // Admin routes
 const adminRoutes = require('./routes/admin/adminRoutes');
 const adminUserRoutes = require('./routes/admin/user/adminUserRoutes');
@@ -56,6 +59,9 @@ app.use('/api/product', productRoutes);
 app.use('/api/category', categoryRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/order', orderRoutes);
+
+// Driver Routes
+app.use('/api/driver', driverRoutes);
 
 // Admin Routes
 app.use('/api/admin', adminRoutes);

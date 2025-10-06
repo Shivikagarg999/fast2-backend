@@ -95,7 +95,7 @@ const driverSchema = new mongoose.Schema({
       required: true
     },
     rcDocument: {
-      type: String, // URL to RC document
+      type: String,
       required: true
     }
   },
