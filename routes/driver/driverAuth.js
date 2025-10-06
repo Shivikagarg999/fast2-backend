@@ -16,7 +16,8 @@ const upload = require('../../middlewares/upload');
 router.post('/register', 
   upload.fields([
     { name: 'aadharFront', maxCount: 1 },
-    { name: 'aadharBack', maxCount: 1 }
+    { name: 'aadharBack', maxCount: 1 },
+    { name: 'panCard', maxCount: 1 } 
   ]),
   registerDriver
 );

@@ -59,18 +59,18 @@ const prepareDriverData = (driver) => {
 // @access  Public
 const registerDriver = async (req, res) => {
   try {
-    const { name, email, phone, password, aadharNumber } = req.body;
+    const { name, email, phone, password, aadharNumber, panNumber } = req.body;
     
     // Check if files are present
-    if (!req.files || !req.files['aadharFront'] || !req.files['aadharBack']) {
+    if (!req.files || !req.files['aadharFront'] || !req.files['aadharBack'] || !req.files['panCard']) {
       return res.status(400).json({
         success: false,
-        message: 'Aadhar front and back images are required'
+        message: 'Aadhar front, back and PAN card images are required'
       });
     }
 
     // Basic validation
-    if (!name || !email || !phone || !password || !aadharNumber) {
+    if (!name || !email || !phone || !password || !aadharNumber || !panNumber) {
       return res.status(400).json({
         success: false,
         message: 'All fields are required'
@@ -95,6 +95,7 @@ const registerDriver = async (req, res) => {
     // Upload Aadhar images to ImageKit
     const aadharFrontFile = req.files['aadharFront'][0];
     const aadharBackFile = req.files['aadharBack'][0];
+    const panCardFile = req.files['panCard'][0];
     
     const aadharFrontUrl = await uploadBufferToImageKit(
       aadharFrontFile.buffer,
@@ -104,6 +105,11 @@ const registerDriver = async (req, res) => {
     const aadharBackUrl = await uploadBufferToImageKit(
       aadharBackFile.buffer,
       `drivers/aadhar/${phone}_back.jpg`
+    );
+
+    const panCardUrl = await uploadBufferToImageKit(
+      panCardFile.buffer,
+      `drivers/pan/${phone}_pan.jpg`
     );
 
     // Create driver
@@ -119,6 +125,10 @@ const registerDriver = async (req, res) => {
           number: aadharNumber,
           frontImage: aadharFrontUrl,
           backImage: aadharBackUrl
+        },
+        panCard: {
+          number: panNumber,
+          image: panCardUrl
         }
       }
     });
