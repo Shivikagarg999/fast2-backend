@@ -22,10 +22,11 @@ const adminPromotorRoutes = require('./routes/admin/promotor/promotor');
 const adminWarehouseRoutes = require('./routes/admin/warehouse/warehouseRoutes');
 const adminDriverRoutes = require('./routes/admin/driver/driver');
 const adminOrderRoutes = require('./routes/admin/order/order');
+const adminBannerRoutes= require('./routes/admin/banner/banner');
 
 const app = express();
 
-// ✅ Allowed origins
+// Allowed origins
 const allowedOrigins = [
   "https://fast2.in",
   "https://www.fast2.in",
@@ -36,7 +37,7 @@ const allowedOrigins = [
   "https://www.admin.fast2.in"
 ];
 
-// ✅ CORS Middleware
+// CORS Middleware
 app.use(
   cors({
     origin: function (origin, callback) {
@@ -70,14 +71,15 @@ app.use('/api/admin/promotor', adminPromotorRoutes);
 app.use('/api/admin/warehouse', adminWarehouseRoutes);
 app.use('/api/admin/drivers', adminDriverRoutes);
 app.use('/api/admin/orders', adminOrderRoutes);
+app.use('/api/admin/banners', adminBannerRoutes);
 
 
-// ✅ MongoDB Connection
+// MongoDB Connection
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 })
-.then(() => console.log('✅ MongoDB connected'))
+.then(() => console.log('MongoDB connected'))
 .catch((err) => console.error('❌ MongoDB connection error:', err));
 
 // Test route
