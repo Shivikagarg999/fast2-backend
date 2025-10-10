@@ -432,11 +432,42 @@ const deleteProduct = async (req, res) => {
   }
 };
 
+const getProductsByPincode = async (req, res) => {
+  try {
+    const { pincode } = req.query;
+    
+    if (!pincode) {
+      return res.status(400).json({
+        success: false,
+        message: 'Pincode is required'
+      });
+    }
+
+    const products = await Product.find({
+      'delivery.availablePincodes': pincode,
+      isActive: true
+    }).populate('category');
+
+    res.json({
+      success: true,
+      data: products,
+      count: products.length
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching products by pincode',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   createProduct,
   getProducts,
   getProductById,
   updateProduct,
   deleteProduct,
-  getProductsByCategory
+  getProductsByCategory,
+  getProductsByPincode
 };

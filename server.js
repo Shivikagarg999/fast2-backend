@@ -11,6 +11,7 @@ const categoryRoutes = require('./routes/category/categoryRoutes');
 const cartRoutes = require('./routes/cart/cartRoutes');
 const userProfileRoutes = require('./routes/user/profileRoutes');
 const orderRoutes= require('./routes/order/orderRoutes');
+const addressesRoutes= require('./routes/addresses/addressesRoutes');
 
 //Driver Routes imports
 const driverRoutes=require('./routes/driver/driverAuth');
@@ -56,6 +57,7 @@ app.use(express.json());
 // User Routes
 app.use('/api/user', authRoutes);
 app.use('/api/user/profile', userProfileRoutes);
+app.use('/api/user/addresses', addressesRoutes);
 app.use('/api/product', productRoutes);
 app.use('/api/category', categoryRoutes);
 app.use('/api/cart', cartRoutes);

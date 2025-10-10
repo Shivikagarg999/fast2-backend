@@ -1,5 +1,6 @@
 const Driver = require('../../../models/driver');
 const Order = require('../../../models/order');
+const mongoose = require('mongoose');
 
 exports.getAllDrivers = async (req, res) => {
   try {
@@ -99,34 +100,41 @@ exports.createDriver = async (req, res) => {
       address,
       vehicle,
       documents,
-      bankDetails,
-      emergencyContact
+      bankDetails
     } = req.body;
 
     // Check if email or phone already exists
     const existingDriver = await Driver.findOne({
       $or: [
         { 'personalInfo.email': personalInfo.email },
-        { 'personalInfo.phone': personalInfo.phone },
-        { 'vehicle.registrationNumber': vehicle.registrationNumber }
+        { 'personalInfo.phone': personalInfo.phone }
       ]
     });
 
     if (existingDriver) {
       return res.status(400).json({
         success: false,
-        message: 'Driver with this email, phone or registration number already exists'
+        message: 'Driver with this email or phone already exists'
       });
+    }
+
+    // Check vehicle registration if provided
+    if (vehicle && vehicle.registrationNumber) {
+      const existingVehicle = await Driver.findOne({
+        'vehicle.registrationNumber': vehicle.registrationNumber
+      });
+      
+      if (existingVehicle) {
+        return res.status(400).json({
+          success: false,
+          message: 'Vehicle with this registration number already exists'
+        });
+      }
     }
 
     // Create driver with default password
     const driverData = {
       personalInfo,
-      address,
-      vehicle,
-      documents,
-      bankDetails,
-      emergencyContact,
       auth: {
         password: 'default123', // Will be hashed by pre-save middleware
         isVerified: true
@@ -136,6 +144,12 @@ exports.createDriver = async (req, res) => {
         availability: 'offline'
       }
     };
+
+    // Add optional fields if provided
+    if (address) driverData.address = address;
+    if (vehicle) driverData.vehicle = vehicle;
+    if (documents) driverData.documents = documents;
+    if (bankDetails) driverData.bankDetails = bankDetails;
 
     const driver = new Driver(driverData);
     await driver.save();
@@ -166,7 +180,6 @@ exports.updateDriver = async (req, res) => {
       vehicle,
       documents,
       bankDetails,
-      emergencyContact,
       deliveryPreferences
     } = req.body;
 
@@ -180,13 +193,24 @@ exports.updateDriver = async (req, res) => {
     }
 
     // Update fields if provided
-    if (personalInfo) driver.personalInfo = { ...driver.personalInfo, ...personalInfo };
-    if (address) driver.address = { ...driver.address, ...address };
-    if (vehicle) driver.vehicle = { ...driver.vehicle, ...vehicle };
-    if (documents) driver.documents = { ...driver.documents, ...documents };
-    if (bankDetails) driver.bankDetails = { ...driver.bankDetails, ...bankDetails };
-    if (emergencyContact) driver.emergencyContact = { ...driver.emergencyContact, ...emergencyContact };
-    if (deliveryPreferences) driver.deliveryPreferences = { ...driver.deliveryPreferences, ...deliveryPreferences };
+    if (personalInfo) {
+      driver.personalInfo = { ...driver.personalInfo, ...personalInfo };
+    }
+    if (address) {
+      driver.address = { ...driver.address, ...address };
+    }
+    if (vehicle) {
+      driver.vehicle = { ...driver.vehicle, ...vehicle };
+    }
+    if (documents) {
+      driver.documents = { ...driver.documents, ...documents };
+    }
+    if (bankDetails) {
+      driver.bankDetails = { ...driver.bankDetails, ...bankDetails };
+    }
+    if (deliveryPreferences) {
+      driver.deliveryPreferences = { ...driver.deliveryPreferences, ...deliveryPreferences };
+    }
 
     await driver.save();
 
@@ -223,7 +247,7 @@ exports.updateDriverStatus = async (req, res) => {
       req.params.id,
       { 
         'workInfo.status': status,
-        'workInfo.availability': status === 'approved' ? 'offline' : 'offline'
+        'workInfo.availability': 'offline' // Always set to offline when status changes
       },
       { new: true }
     ).select('-auth.password');
@@ -292,7 +316,7 @@ exports.deleteDriver = async (req, res) => {
     // Check if driver has active orders
     const activeOrder = await Order.findOne({
       driver: req.params.id,
-      status: { $in: ['confirmed', 'shipped'] }
+      status: { $in: ['confirmed', 'shipped', 'out_for_delivery'] }
     });
 
     if (activeOrder) {
@@ -357,9 +381,7 @@ exports.getDriverOrders = async (req, res) => {
 
 exports.getDriverEarnings = async (req, res) => {
   try {
-    const { period = 'month' } = req.query; // week, month, year
-    
-    const driver = await Driver.findById(req.params.id).select('earnings deliveryStats');
+    const driver = await Driver.findById(req.params.id).select('earnings');
     
     if (!driver) {
       return res.status(404).json({
@@ -368,15 +390,20 @@ exports.getDriverEarnings = async (req, res) => {
       });
     }
 
-    // Get detailed earnings from orders
-    const earningsData = await getDriverEarningsDetails(req.params.id, period);
+    // Get detailed earnings from orders for different periods
+    const todayEarnings = await getDriverEarningsForPeriod(req.params.id, 'today');
+    const weeklyEarnings = await getDriverEarningsForPeriod(req.params.id, 'week');
+    const monthlyEarnings = await getDriverEarningsForPeriod(req.params.id, 'month');
 
     res.json({
       success: true,
       data: {
         summary: driver.earnings,
-        performance: driver.deliveryStats,
-        detailedEarnings: earningsData
+        detailedEarnings: {
+          today: todayEarnings,
+          week: weeklyEarnings,
+          month: monthlyEarnings
+        }
       }
     });
   } catch (error) {
@@ -391,7 +418,7 @@ exports.getDriverEarnings = async (req, res) => {
 exports.getDriverPerformance = async (req, res) => {
   try {
     const driver = await Driver.findById(req.params.id)
-      .select('deliveryStats performance workInfo');
+      .select('workInfo earnings activity');
 
     if (!driver) {
       return res.status(404).json({
@@ -400,15 +427,16 @@ exports.getDriverPerformance = async (req, res) => {
       });
     }
 
-    // Calculate additional performance metrics
+    // Calculate performance metrics from orders
     const performance = await calculateDriverPerformance(req.params.id);
 
     res.json({
       success: true,
       data: {
-        basicStats: driver.deliveryStats,
-        advancedMetrics: performance,
-        currentStatus: driver.workInfo
+        workInfo: driver.workInfo,
+        earnings: driver.earnings,
+        activity: driver.activity,
+        performance
       }
     });
   } catch (error) {
@@ -463,7 +491,7 @@ exports.getNearbyAvailableDrivers = async (req, res) => {
       parseFloat(lat),
       parseFloat(lng),
       parseInt(maxDistance)
-    ).select('personalInfo.name personalInfo.phone vehicle workInfo.driverId workInfo.currentLocation deliveryStats.averageRating');
+    ).select('personalInfo.name personalInfo.phone vehicle workInfo.driverId workInfo.currentLocation earnings.todayEarnings activity.totalOnlineHours');
 
     res.json({
       success: true,
@@ -516,28 +544,12 @@ exports.assignOrderToDriver = async (req, res) => {
       });
     }
 
-    // Check if order status allows assignment
-    if (!['pending', 'confirmed'].includes(order.status)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Order cannot be assigned in current status'
-      });
-    }
-
-    // Check if driver is available
-    if (driver.workInfo.availability !== 'online' && driver.workInfo.availability !== 'offline') {
-      return res.status(400).json({
-        success: false,
-        message: 'Driver is not available for new orders'
-      });
-    }
-
     // Assign order to driver
     await driver.assignOrder(orderId);
     
     // Update order with driver assignment
     order.driver = driverId;
-    order.status = 'confirmed'; // Move to confirmed status when assigned
+    order.status = 'confirmed';
     await order.save();
 
     const updatedOrder = await Order.findById(orderId)
@@ -562,7 +574,7 @@ exports.getAvailableDriversForOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
     
-    // Get order to check location
+    // Get order to check details
     const order = await Order.findById(orderId);
     if (!order) {
       return res.status(404).json({
@@ -571,21 +583,21 @@ exports.getAvailableDriversForOrder = async (req, res) => {
       });
     }
 
-    // Get available drivers (you might want to filter by location)
+    // Get available drivers
     const availableDrivers = await Driver.find({
       'workInfo.status': 'approved',
       'workInfo.availability': { $in: ['online', 'offline'] }
     })
-    .select('personalInfo.name personalInfo.phone personalInfo.email vehicle workInfo.driverId workInfo.availability deliveryStats.averageRating deliveryStats.completedOrders')
-    .sort({ 'deliveryStats.averageRating': -1, 'deliveryStats.completedOrders': -1 });
+    .select('personalInfo.name personalInfo.phone personalInfo.email vehicle workInfo.driverId workInfo.availability workInfo.currentLocation earnings.todayEarnings activity.totalOnlineHours')
+    .sort({ 'earnings.todayEarnings': -1, 'activity.totalOnlineHours': -1 })
+    .limit(50);
 
     res.json({
       success: true,
       data: {
         order: {
           id: order._id,
-          status: order.status,
-          shippingAddress: order.shippingAddress
+          status: order.status
         },
         availableDrivers,
         totalAvailable: availableDrivers.length
@@ -600,15 +612,16 @@ exports.getAvailableDriversForOrder = async (req, res) => {
   }
 };
 
-const getDriverEarningsDetails = async (driverId, period) => {
+// Helper functions
+const getDriverEarningsForPeriod = async (driverId, period) => {
   const dateFilter = getDateFilter(period);
   
   const earnings = await Order.aggregate([
     {
       $match: {
-        driver: mongoose.Types.ObjectId(driverId),
+        driver: new mongoose.Types.ObjectId(driverId),
         status: 'delivered',
-        createdAt: dateFilter
+        deliveredAt: dateFilter
       }
     },
     {
@@ -639,11 +652,23 @@ const calculateDriverPerformance = async (driverId) => {
   const completionRate = recentOrders.length > 0 ? 
     (completedOrders.length / recentOrders.length) * 100 : 0;
 
+  const totalDeliveryTime = completedOrders.reduce((total, order) => {
+    if (order.deliveredAt && order.confirmedAt) {
+      return total + (order.deliveredAt - order.confirmedAt);
+    }
+    return total;
+  }, 0);
+
+  const averageDeliveryTime = completedOrders.length > 0 ? 
+    totalDeliveryTime / completedOrders.length : 0;
+
   return {
     completionRate: Math.round(completionRate * 100) / 100,
     cancellationRate: recentOrders.length > 0 ? 
       (cancelledOrders.length / recentOrders.length) * 100 : 0,
-    recentActivity: recentOrders.length
+    averageDeliveryTime: Math.round(averageDeliveryTime / (1000 * 60)), // Convert to minutes
+    recentActivity: recentOrders.length,
+    completedOrders: completedOrders.length
   };
 };
 
@@ -652,18 +677,32 @@ const getDateFilter = (period) => {
   const filter = {};
 
   switch (period) {
+    case 'today':
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      filter.$gte = today;
+      break;
     case 'week':
       filter.$gte = new Date(now.setDate(now.getDate() - 7));
       break;
     case 'month':
       filter.$gte = new Date(now.setMonth(now.getMonth() - 1));
       break;
-    case 'year':
-      filter.$gte = new Date(now.setFullYear(now.getFullYear() - 1));
-      break;
     default:
       filter.$gte = new Date(now.setMonth(now.getMonth() - 1));
   }
 
   return filter;
+};
+
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+  const R = 6371; 
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
 };

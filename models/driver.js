@@ -5,7 +5,6 @@ const driverSchema = new mongoose.Schema({
   personalInfo: {
     name: {
       type: String,
-      // required: true,
       trim: true
     },
     email: {
@@ -173,44 +172,6 @@ const driverSchema = new mongoose.Schema({
     }
   },
 
-  // Delivery Performance
-  deliveryStats: {
-    totalOrders: {
-      type: Number,
-      default: 0
-    },
-    completedOrders: {
-      type: Number,
-      default: 0
-    },
-    cancelledOrders: {
-      type: Number,
-      default: 0
-    },
-    failedDeliveries: {
-      type: Number,
-      default: 0
-    },
-    averageRating: {
-      type: Number,
-      default: 0,
-      min: 0,
-      max: 5
-    },
-    totalRatings: {
-      type: Number,
-      default: 0
-    },
-    onTimeDeliveryRate: {
-      type: Number,
-      default: 0
-    },
-    averageDeliveryTime: {
-      type: Number, // in minutes
-      default: 0
-    }
-  },
-
   // Earnings
   earnings: {
     totalEarnings: {
@@ -258,22 +219,6 @@ const driverSchema = new mongoose.Schema({
     }]
   },
 
-  // Emergency Contact
-  emergencyContact: {
-    name: {
-      type: String,
-      // required: true
-    },
-    relationship: {
-      type: String,
-      // required: true
-    },
-    phone: {
-      type: String,
-      // required: true
-    }
-  },
-
   // Activity Tracking
   activity: {
     lastActive: {
@@ -292,7 +237,7 @@ const driverSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Indexes for better query performance
+// Indexes
 driverSchema.index({ 'workInfo.availability': 1 });
 driverSchema.index({ 'workInfo.currentLocation.coordinates': '2dsphere' });
 driverSchema.index({ 'workInfo.status': 1 });

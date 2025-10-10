@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema(
   {
-    name: { type: String, trim: true},
+    name: { type: String, trim: true },
     email: {
       type: String,
       unique: true,
@@ -15,7 +15,7 @@ const userSchema = new mongoose.Schema(
       sparse: true,
       required: true,
     },
-    password: { type: String},
+    password: { type: String },
     avatar: {
       type: String,
       default: "https://www.gravatar.com/avatar/?d=mp",
@@ -24,9 +24,22 @@ const userSchema = new mongoose.Schema(
     isVerified: { type: Boolean, default: false },
     role: { type: String, enum: ["user", "admin"], default: "user" },
 
-    // OTP fields
     otp: { type: String },
     otpExpires: { type: Date },
+
+    wallet: {
+      type: Number,
+      default: 0,
+    },
+
+    referralCode: {
+      type: String,
+      unique: true,
+      sparse: true,
+    },
+    referredBy: {
+      type: String,
+    },
   },
   { timestamps: true }
 );
