@@ -15,6 +15,6 @@ router.get('/history', getReferralHistory);
 
 router.get('/details', getReferralDetails);
 
-router.post('/redeem', redeemReferralCode);
+// router.post('/redeem', redeemReferralCode);
 
 module.exports = router;
