@@ -34,7 +34,8 @@ const createProduct = async (req, res) => {
       gstPercent,
       taxType,
       videoDuration,
-      videoFileSize
+      videoFileSize,
+      variants // New field
     } = req.body;
 
     // Check required fields
@@ -52,13 +53,11 @@ const createProduct = async (req, res) => {
 
     // Handle images upload (max 5)
     const imageFiles = Array.isArray(req.files.images) ? req.files.images : [req.files.images];
-    
     if (imageFiles.length > 5) {
       return res.status(400).json({ message: 'Maximum 5 images allowed per product' });
     }
 
     const uploadedImages = [];
-    
     for (let i = 0; i < imageFiles.length; i++) {
       const imageFile = imageFiles[i];
       const uploadedImage = await imagekit.upload({
@@ -66,7 +65,7 @@ const createProduct = async (req, res) => {
         fileName: `product_${Date.now()}_${i}.jpg`,
         folder: '/products/images'
       });
-      
+
       uploadedImages.push({
         url: uploadedImage.url,
         altText: `${name} - Image ${i + 1}`,
@@ -79,7 +78,6 @@ const createProduct = async (req, res) => {
     let videoData = {};
     if (req.files.video) {
       const videoFile = Array.isArray(req.files.video) ? req.files.video[0] : req.files.video;
-      
       const uploadedVideo = await imagekit.upload({
         file: videoFile.buffer.toString('base64'),
         fileName: `product_${Date.now()}_video.mp4`,
@@ -88,7 +86,7 @@ const createProduct = async (req, res) => {
 
       videoData = {
         url: uploadedVideo.url,
-        thumbnail: uploadedImages[0]?.url || '', // Use first image as thumbnail
+        thumbnail: uploadedImages[0]?.url || '',
         duration: videoDuration || 0,
         fileSize: videoFileSize || videoFile.size
       };
@@ -113,13 +111,24 @@ const createProduct = async (req, res) => {
       }
     }
 
-    // Inherit tax information from category
+    let parsedVariants = [];
+    if (variants) {
+      try {
+        parsedVariants = JSON.parse(variants);
+        if (!Array.isArray(parsedVariants)) parsedVariants = [];
+      } catch (error) {
+        console.error('Error parsing variants:', error);
+      }
+    }
+
+    // Inherit tax info from category if not provided
     const productTaxInfo = {
       hsnCode: hsnCode || foundCategory.hsnCode,
       gstPercent: gstPercent !== undefined ? gstPercent : foundCategory.gstPercent,
       taxType: taxType || foundCategory.taxType
     };
 
+    // Create product
     const product = new Product({
       name,
       description,
@@ -156,12 +165,14 @@ const createProduct = async (req, res) => {
         deliveryCharges: deliveryCharges || 0,
         freeDeliveryThreshold: freeDeliveryThreshold || 0,
         availablePincodes: parsedPincodes
-      }
+      },
+      variants: parsedVariants
     });
 
     await product.save();
-    res.status(201).json({ 
-      message: 'Product created successfully', 
+
+    res.status(201).json({
+      message: 'Product created successfully',
       product: await product.populate(['category', 'promotor.id'])
     });
   } catch (error) {
@@ -175,7 +186,8 @@ const getProducts = async (req, res) => {
   try {
     const products = await Product.find()
       .populate('category')
-      .populate('promotor.id');
+      .populate('promotor.id')
+      .select('+variants');
     res.json(products);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -187,7 +199,8 @@ const getProductById = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id)
       .populate('category')
-      .populate('promotor.id');
+      .populate('promotor.id')
+      .select('-__v');
     if (!product) return res.status(404).json({ message: 'Product not found' });
     res.json(product);
   } catch (error) {
@@ -229,7 +242,8 @@ const updateProduct = async (req, res) => {
       videoFileSize,
       primaryImageIndex,
       imagesToRemove,
-      removeVideo
+      removeVideo,
+      variants // <-- New field
     } = req.body;
 
     // Find existing product
@@ -275,7 +289,6 @@ const updateProduct = async (req, res) => {
       updateData.gstPercent = foundCategory.gstPercent;
       updateData.taxType = foundCategory.taxType;
     } else {
-      // Allow product-specific tax overrides
       if (hsnCode !== undefined) updateData.hsnCode = hsnCode;
       if (gstPercent !== undefined) updateData.gstPercent = gstPercent;
       if (taxType !== undefined) updateData.taxType = taxType;
@@ -292,7 +305,7 @@ const updateProduct = async (req, res) => {
       const newImageFiles = Array.isArray(req.files.images) ? req.files.images : [req.files.images];
       const currentImageCount = existingProduct.images.length - (imagesToRemove ? 
         (Array.isArray(imagesToRemove) ? imagesToRemove.length : 1) : 0);
-      
+
       if (currentImageCount + newImageFiles.length > 5) {
         return res.status(400).json({ 
           message: `Cannot add ${newImageFiles.length} images. Maximum 5 images allowed.` 
@@ -307,7 +320,7 @@ const updateProduct = async (req, res) => {
           fileName: `product_${Date.now()}_${i}.jpg`,
           folder: '/products/images'
         });
-        
+
         newImages.push({
           url: uploadedImage.url,
           altText: `${name} - Image ${currentImageCount + i + 1}`,
@@ -331,7 +344,6 @@ const updateProduct = async (req, res) => {
     // Handle video upload/removal
     if (req.files && req.files.video) {
       const videoFile = Array.isArray(req.files.video) ? req.files.video[0] : req.files.video;
-      
       const uploadedVideo = await imagekit.upload({
         file: videoFile.buffer.toString('base64'),
         fileName: `product_${Date.now()}_video.mp4`,
@@ -365,21 +377,32 @@ const updateProduct = async (req, res) => {
       }
     }
 
-    // Update other fields
+    // Handle delivery fields
     if (estimatedDeliveryTime) updateData['delivery.estimatedDeliveryTime'] = estimatedDeliveryTime;
     if (deliveryCharges !== undefined) updateData['delivery.deliveryCharges'] = deliveryCharges;
     if (freeDeliveryThreshold !== undefined) updateData['delivery.freeDeliveryThreshold'] = freeDeliveryThreshold;
 
+    // Promotor fields
     if (promotor) updateData['promotor.id'] = promotor;
     if (commissionRate !== undefined) updateData['promotor.commissionRate'] = commissionRate;
     if (commissionType) updateData['promotor.commissionType'] = commissionType;
+
+    // Handle variants
+    if (variants) {
+      try {
+        const parsedVariants = JSON.parse(variants);
+        updateData.variants = Array.isArray(parsedVariants) ? parsedVariants : [];
+      } catch (error) {
+        console.error('Error parsing variants:', error);
+      }
+    }
 
     // Calculate discount
     if (oldPrice !== undefined && price !== undefined) {
       updateData.discountPercentage = oldPrice > 0 ? Math.round(((oldPrice - price) / oldPrice) * 100) : 0;
     }
 
-    // Clean up undefined fields
+    // Remove undefined fields
     Object.keys(updateData).forEach(key => {
       if (updateData[key] === undefined) delete updateData[key];
     });
@@ -389,7 +412,7 @@ const updateProduct = async (req, res) => {
       updateData,
       { new: true, runValidators: true }
     ).populate('category').populate('promotor.id');
-    
+
     res.json({ message: 'Product updated successfully', product });
   } catch (error) {
     console.error('Update product error:', error);

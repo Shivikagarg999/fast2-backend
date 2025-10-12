@@ -75,6 +75,19 @@ const productSchema = new mongoose.Schema({
     availablePincodes: [{ type: String }]
   },
   
+    variants: [
+    {
+      name: { type: String, required: true },       // e.g., "Size", "Color"
+      options: [                                    // e.g., ["Red", "Blue"], ["S", "M", "L"]
+        {
+          value: { type: String, required: true },
+          price: { type: Number },                  //if variant affects price
+          quantity: { type: Number, default: 0 },   //if inventory varies per variant
+          sku: { type: String }                     //if you track SKU per variant
+        }
+      ]
+    }
+  ],
   isActive: { type: Boolean, default: true }
 }, { timestamps: true });
 
