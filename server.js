@@ -14,8 +14,9 @@ const orderRoutes= require('./routes/order/orderRoutes');
 const addressesRoutes= require('./routes/addresses/addressesRoutes');
 const referralRoutes=require('./routes/referral/referralRoutes');
 
-//Driver Routes imports
+//Driver Routes
 const driverRoutes=require('./routes/driver/driverAuth');
+const driverOrderRoutes= require('./routes/driver/driverRoutes');
 
 // Admin routes
 const adminRoutes = require('./routes/admin/adminRoutes');
@@ -67,6 +68,7 @@ app.use('/api/referrals', referralRoutes);
 
 // Driver Routes
 app.use('/api/driver', driverRoutes);
+app.use('/api/driverOrder', driverOrderRoutes);
 
 // Admin Routes
 app.use('/api/admin', adminRoutes);
