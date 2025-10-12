@@ -3,7 +3,8 @@ const router = express.Router();
 const { 
   getReferralStats, 
   getReferralHistory, 
-  getReferralDetails 
+  getReferralDetails,
+  redeemReferralCode
 } = require('../../controllers/referral/referralController');
 const auth = require('../../middlewares/userauth');
 
@@ -15,6 +16,6 @@ router.get('/history', getReferralHistory);
 
 router.get('/details', getReferralDetails);
 
-// router.post('/redeem', redeemReferralCode);
+router.post('/redeem', redeemReferralCode);
 
 module.exports = router;
