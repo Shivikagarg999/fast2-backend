@@ -1,7 +1,6 @@
 const Order = require("../../models/order");
 const Cart = require("../../models/cart");
 
-// Create a new order from user's cart
 exports.createOrder = async (req, res) => {
   try {
     const { shippingAddress, paymentMethod } = req.body;
@@ -23,7 +22,6 @@ exports.createOrder = async (req, res) => {
 
     await order.save();
 
-    // Clear cart
     cart.items = [];
     cart.total = 0;
     await cart.save();
