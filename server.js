@@ -17,6 +17,7 @@ const referralRoutes=require('./routes/referral/referralRoutes');
 //Driver Routes
 const driverRoutes=require('./routes/driver/driverAuth');
 const driverOrderRoutes= require('./routes/driver/driverRoutes');
+const driverWithdrawRoutes=require('./routes/withdraw/withdraw');
 
 // Admin routes
 const adminRoutes = require('./routes/admin/adminRoutes');
@@ -69,6 +70,7 @@ app.use('/api/referrals', referralRoutes);
 // Driver Routes
 app.use('/api/driver', driverRoutes);
 app.use('/api/driverOrder', driverOrderRoutes);
+app.use('/api/driver/withdraw', driverWithdrawRoutes);
 
 // Admin Routes
 app.use('/api/admin', adminRoutes);
@@ -80,7 +82,6 @@ app.use('/api/admin/orders', adminOrderRoutes);
 app.use('/api/admin/banners', adminBannerRoutes);
 
 
-// MongoDB Connection
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
@@ -88,13 +89,11 @@ mongoose.connect(process.env.MONGO_URI, {
 .then(() => console.log('MongoDB connected'))
 .catch((err) => console.error('❌ MongoDB connection error:', err));
 
-// Test route
 app.get('/', (req, res) => {
-  res.send('🚀 Backend is running...');
+  res.send('Backend is running...');
 });
 
-// Start server
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });

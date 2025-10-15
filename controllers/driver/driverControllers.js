@@ -167,17 +167,110 @@ exports.markOrderDelivered = async (req, res) => {
     order.status = "delivered";
     await order.save();
 
+    const deliveryEarning = 18;
+
+    driver.earnings.totalEarnings += deliveryEarning;
+    driver.earnings.currentBalance += deliveryEarning;
+    driver.earnings.pendingPayout += deliveryEarning;
+    driver.earnings.todayEarnings += deliveryEarning;
     driver.workInfo.currentOrder = null;
     driver.workInfo.availability = "online";
     await driver.save();
 
     res.status(200).json({
       success: true,
-      message: "Order delivered successfully",
-      data: { orderId: order._id, status: order.status }
+      message: "Order delivered successfully. Earnings added to wallet.",
+      data: {
+        orderId: order._id,
+        status: order.status,
+        driverEarnings: {
+          added: deliveryEarning,
+          currentBalance: driver.earnings.currentBalance,
+          totalEarnings: driver.earnings.totalEarnings
+        }
+      }
     });
   } catch (error) {
     console.error("Error marking delivered:", error);
     res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};
+
+exports.getAvailability = async (req, res) => {
+  try {
+    const driver = await Driver.findById(req.driver.driverId);
+    if (!driver) {
+      return res.status(404).json({ success: false, message: "Driver not found" });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        driverId: driver._id,
+        availability: driver.workInfo.availability,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching driver availability:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
+  }
+};
+
+exports.getOngoingOrders = async (req, res) => {
+  try {
+    const driver = await Driver.findById(req.driver.driverId);
+    if (!driver) {
+      return res.status(404).json({ success: false, message: "Driver not found" });
+    }
+
+    const ongoingOrders = await Order.find({
+      driver: driver._id,
+      status: { $in: ["confirmed", "picked-up"] }
+    })
+      .populate("user", "name email")
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      count: ongoingOrders.length,
+      data: ongoingOrders
+    });
+  } catch (error) {
+    console.error("Error fetching ongoing orders:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error"
+    });
+  }
+};
+
+exports.getWalletDetails = async (req, res) => {
+  try {
+    const driver = await Driver.findById(req.driver.driverId).select("earnings personalInfo.name");
+    if (!driver) {
+      return res.status(404).json({ success: false, message: "Driver not found" });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: {
+        name: driver.personalInfo.name,
+        totalEarnings: driver.earnings.totalEarnings,
+        currentBalance: driver.earnings.currentBalance,
+        pendingPayout: driver.earnings.pendingPayout,
+        todayEarnings: driver.earnings.todayEarnings,
+        weeklyEarnings: driver.earnings.weeklyEarnings,
+        monthlyEarnings: driver.earnings.monthlyEarnings
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching wallet details:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error"
+    });
   }
 };

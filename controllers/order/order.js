@@ -33,7 +33,6 @@ exports.createOrder = async (req, res) => {
   }
 };
 
-//Get my orders
 exports.getMyOrders = async (req, res) => {
   try {
     const userId = req.user._id;
@@ -45,7 +44,6 @@ exports.getMyOrders = async (req, res) => {
   }
 };
 
-// Update order status (admin)
 exports.updateOrderStatus = async (req, res) => {
   try {
     if (req.user.role !== "admin") {
