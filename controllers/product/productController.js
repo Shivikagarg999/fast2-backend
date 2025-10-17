@@ -3,7 +3,6 @@ const Category = require('../../models/category');
 const Promotor = require('../../models/promotor'); 
 const Product = require('../../models/product');
 
-// Create Product with multiple images and video support
 const createProduct = async (req, res) => {
   try {
     const {
@@ -181,7 +180,6 @@ const createProduct = async (req, res) => {
   }
 };
 
-// Get All Products
 const getProducts = async (req, res) => {
   try {
     const products = await Product.find()
@@ -194,7 +192,6 @@ const getProducts = async (req, res) => {
   }
 };
 
-// Get Single Product
 const getProductById = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id)
@@ -208,7 +205,6 @@ const getProductById = async (req, res) => {
   }
 };
 
-// Update Product
 const updateProduct = async (req, res) => {
   try {
     const {
@@ -243,23 +239,20 @@ const updateProduct = async (req, res) => {
       primaryImageIndex,
       imagesToRemove,
       removeVideo,
-      variants // <-- New field
+      variants 
     } = req.body;
 
-    // Find existing product
     const existingProduct = await Product.findById(req.params.id);
     if (!existingProduct) {
       return res.status(404).json({ message: 'Product not found' });
     }
 
-    // Validate category if provided
     let foundCategory;
     if (category) {
       foundCategory = await Category.findById(category);
       if (!foundCategory) return res.status(404).json({ message: 'Category not found' });
     }
 
-    // Validate promotor if provided
     if (promotor) {
       const promotorExists = await Promotor.findById(promotor);
       if (!promotorExists) return res.status(404).json({ message: 'Promotor not found' });
@@ -282,7 +275,6 @@ const updateProduct = async (req, res) => {
       'warehouse.storageType': storageType
     };
 
-    // Handle category change and tax inheritance
     if (category) {
       updateData.category = category;
       updateData.hsnCode = foundCategory.hsnCode;
@@ -294,13 +286,11 @@ const updateProduct = async (req, res) => {
       if (taxType !== undefined) updateData.taxType = taxType;
     }
 
-    // Handle image removal
     if (imagesToRemove) {
       const removeArray = Array.isArray(imagesToRemove) ? imagesToRemove : [imagesToRemove];
       updateData.$pull = { images: { _id: { $in: removeArray } } };
     }
 
-    // Handle new image uploads
     if (req.files && req.files.images) {
       const newImageFiles = Array.isArray(req.files.images) ? req.files.images : [req.files.images];
       const currentImageCount = existingProduct.images.length - (imagesToRemove ? 
@@ -334,14 +324,12 @@ const updateProduct = async (req, res) => {
       }
     }
 
-    // Handle primary image change
     if (primaryImageIndex !== undefined) {
       updateData.$set = updateData.$set || {};
       updateData.$set['images.$[].isPrimary'] = false;
       updateData.$set[`images.${primaryImageIndex}.isPrimary`] = true;
     }
 
-    // Handle video upload/removal
     if (req.files && req.files.video) {
       const videoFile = Array.isArray(req.files.video) ? req.files.video[0] : req.files.video;
       const uploadedVideo = await imagekit.upload({
@@ -360,7 +348,6 @@ const updateProduct = async (req, res) => {
       updateData.video = {};
     }
 
-    // Handle other fields
     if (dimensions) {
       try {
         updateData.dimensions = JSON.parse(dimensions);
@@ -377,17 +364,14 @@ const updateProduct = async (req, res) => {
       }
     }
 
-    // Handle delivery fields
     if (estimatedDeliveryTime) updateData['delivery.estimatedDeliveryTime'] = estimatedDeliveryTime;
     if (deliveryCharges !== undefined) updateData['delivery.deliveryCharges'] = deliveryCharges;
     if (freeDeliveryThreshold !== undefined) updateData['delivery.freeDeliveryThreshold'] = freeDeliveryThreshold;
 
-    // Promotor fields
     if (promotor) updateData['promotor.id'] = promotor;
     if (commissionRate !== undefined) updateData['promotor.commissionRate'] = commissionRate;
     if (commissionType) updateData['promotor.commissionType'] = commissionType;
 
-    // Handle variants
     if (variants) {
       try {
         const parsedVariants = JSON.parse(variants);
@@ -397,12 +381,10 @@ const updateProduct = async (req, res) => {
       }
     }
 
-    // Calculate discount
     if (oldPrice !== undefined && price !== undefined) {
       updateData.discountPercentage = oldPrice > 0 ? Math.round(((oldPrice - price) / oldPrice) * 100) : 0;
     }
 
-    // Remove undefined fields
     Object.keys(updateData).forEach(key => {
       if (updateData[key] === undefined) delete updateData[key];
     });
@@ -420,18 +402,14 @@ const updateProduct = async (req, res) => {
   }
 };
 
-// Get Products by Category ID
 const getProductsByCategory = async (req, res) => {
   try {
     const { categoryId } = req.params;
 
-    // Check if category exists
     const category = await Category.findById(categoryId);
     if (!category) {
       return res.status(404).json({ message: 'Category not found' });
     }
-
-    // Find products with that category
     const products = await Product.find({ category: categoryId })
       .populate('category')
       .populate('promotor.id');
@@ -443,7 +421,6 @@ const getProductsByCategory = async (req, res) => {
   }
 };
 
-// Delete Product
 const deleteProduct = async (req, res) => {
   try {
     const product = await Product.findByIdAndDelete(req.params.id);
@@ -485,6 +462,80 @@ const getProductsByPincode = async (req, res) => {
   }
 };
 
+const getProductStats = async (req, res) => {
+  try {
+    const totalProducts = await Product.countDocuments();
+
+    const allProducts = await Product.find({});
+    
+    const inStockProducts = allProducts.filter(product => product.stockStatus === 'in-stock').length;
+    const outOfStockProducts = allProducts.filter(product => product.stockStatus === 'out-of-stock').length;
+    
+    const lowStockProducts = allProducts.filter(product => 
+      product.stockStatus === 'in-stock' && 
+      product.quantity <= (product.lowStockThreshold || 10)
+    ).length;
+
+    const result = {
+      totalProducts: totalProducts,
+      inStockProducts: inStockProducts,
+      outOfStockProducts: outOfStockProducts,
+      lowStockProducts: lowStockProducts
+    };
+
+    res.json(result);
+  } catch (error) {
+    console.error('Error in getProductStats:', error);
+    res.status(500).json({ 
+      message: "Server error", 
+      error: error.message
+    });
+  }
+};
+
+const getLowStockAlerts = async (req, res) => {
+  try {
+    const { limit = 10 } = req.query;
+
+    const lowStockProducts = await Product.find({
+      $expr: { $lte: ["$quantity", "$lowStockThreshold"] },
+      stockStatus: "in-stock"
+    })
+    .populate('category', 'name')
+    .select('name quantity lowStockThreshold price stockStatus images')
+    .sort({ quantity: 1 })
+    .limit(parseInt(limit));
+
+    res.json({
+      lowStockProducts,
+      count: lowStockProducts.length
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const getOutOfStockProducts = async (req, res) => {
+  try {
+    const { limit = 10 } = req.query;
+
+    const outOfStockProducts = await Product.find({
+      stockStatus: "out-of-stock"
+    })
+    .populate('category', 'name')
+    .select('name quantity price stockStatus images createdAt')
+    .sort({ createdAt: -1 })
+    .limit(parseInt(limit));
+
+    res.json({
+      outOfStockProducts,
+      count: outOfStockProducts.length
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
 module.exports = {
   createProduct,
   getProducts,
@@ -492,5 +543,8 @@ module.exports = {
   updateProduct,
   deleteProduct,
   getProductsByCategory,
-  getProductsByPincode
+  getProductsByPincode,
+  getProductStats,
+  getLowStockAlerts,
+  getOutOfStockProducts
 };

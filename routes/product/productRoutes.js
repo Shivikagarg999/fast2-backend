@@ -6,7 +6,10 @@ const {
   updateProduct,
   getProductsByCategory, 
   deleteProduct,
-  getProductsByPincode
+  getProductsByPincode,
+  getProductStats,
+  getLowStockAlerts,
+  getOutOfStockProducts
 } = require('../../controllers/product/productController');
 const upload = require('../../middlewares/upload');
 
@@ -27,5 +30,9 @@ router.get('/:id', getProductById);
 router.delete('/:id', deleteProduct);
 router.get('/category/:categoryId', getProductsByCategory);
 router.get('/by-pincode', getProductsByPincode);
+
+router.get("/admin/stats",getProductStats);
+router.get("/admin/low-stock-alerts",getLowStockAlerts);
+router.get("/admin/out-of-stock",getOutOfStockProducts);
 
 module.exports = router;

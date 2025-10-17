@@ -7,7 +7,10 @@ const {
   assignDriver,
   updatePaymentStatus,
   cancelOrder,
-  getOrderStats
+  getOrderStats,
+  getFreshOrders,
+  getFreshOrdersNotifications,
+  getFreshOrdersStats
 } = require("../../../controllers/admin/order/order");
 
 router.get("/getall", getAllOrders);
@@ -23,5 +26,11 @@ router.put("/:id/assign-driver", assignDriver);
 router.put("/:id/payment-status", updatePaymentStatus);
 
 router.delete("/:id", cancelOrder);
+
+router.get("/admin/fresh-orders", getFreshOrders);
+
+router.get("/admin/fresh-orders/notifications", getFreshOrdersNotifications);
+
+router.get("/admin/fresh-orders/stats", getFreshOrdersStats);
 
 module.exports = router;

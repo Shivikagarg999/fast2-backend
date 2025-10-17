@@ -15,4 +15,4 @@ router.get("/my-orders", auth, orderController.getMyOrders);
 // Update order status (admin)
 router.put("/:orderId/status", orderController.updateOrderStatus);
 
-module.exports = router;   
+module.exports = router;

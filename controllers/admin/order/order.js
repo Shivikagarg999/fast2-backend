@@ -53,7 +53,6 @@ const getAllOrders = async (req, res) => {
   }
 };
 
-// Get single order by ID
 const getOrderById = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
@@ -71,7 +70,6 @@ const getOrderById = async (req, res) => {
   }
 };
 
-// Update order status
 const updateOrderStatus = async (req, res) => {
   try {
     const { status, deliveryNotes, estimatedDelivery, trackingNumber } = req.body;
@@ -109,7 +107,6 @@ const updateOrderStatus = async (req, res) => {
   }
 };
 
-// Assign driver to order
 const assignDriver = async (req, res) => {
   try {
     const { driverId } = req.body;
@@ -139,7 +136,6 @@ const assignDriver = async (req, res) => {
   }
 };
 
-// Update payment status
 const updatePaymentStatus = async (req, res) => {
   try {
     const { paymentStatus } = req.body;
@@ -169,7 +165,6 @@ const updatePaymentStatus = async (req, res) => {
   }
 };
 
-// Delete order (soft delete - update status to cancelled)
 const cancelOrder = async (req, res) => {
   try {
     const order = await Order.findByIdAndUpdate(
@@ -193,7 +188,6 @@ const cancelOrder = async (req, res) => {
   }
 };
 
-// Get order statistics
 const getOrderStats = async (req, res) => {
   try {
     const { period = "month" } = req.query; // day, week, month, year
@@ -288,6 +282,180 @@ const getOrderStats = async (req, res) => {
   }
 };
 
+const getFreshOrders = async (req, res) => {
+  try {
+    const {
+      page = 1,
+      limit = 10,
+      status,
+      paymentStatus
+    } = req.query;
+
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const filter = {
+      createdAt: { $gte: twentyFourHoursAgo }
+    };
+    
+    if (status) filter.status = status;
+    if (paymentStatus) filter.paymentStatus = paymentStatus;
+
+    const orders = await Order.find(filter)
+      .populate("user", "name email phone")
+      .populate("driver", "name phone")
+      .populate("items.product", "name images")
+      .sort({ createdAt: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
+    const total = await Order.countDocuments(filter);
+
+    res.json({
+      orders,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
+      total,
+      timeRange: "last 24 hours"
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const getFreshOrdersNotifications = async (req, res) => {
+  try {
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const freshOrders = await Order.find({
+      createdAt: { $gte: twentyFourHoursAgo }
+    })
+      .populate("user", "name email")
+      .populate("items.product", "name")
+      .sort({ createdAt: -1 })
+      .limit(20);
+
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000);
+    
+    const ordersLastHour = await Order.countDocuments({
+      createdAt: { $gte: oneHourAgo }
+    });
+
+    const ordersLastSixHours = await Order.countDocuments({
+      createdAt: { $gte: sixHoursAgo }
+    });
+
+    const freshOrdersByStatus = await Order.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: twentyFourHoursAgo }
+        }
+      },
+      {
+        $group: {
+          _id: "$status",
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const notificationSummary = {
+      totalFreshOrders: freshOrders.length,
+      ordersLastHour,
+      ordersLastSixHours,
+      freshOrdersByStatus: freshOrdersByStatus.reduce((acc, curr) => {
+        acc[curr._id] = curr.count;
+        return acc;
+      }, {}),
+      latestOrders: freshOrders.slice(0, 5),
+      timestamp: new Date()
+    };
+
+    res.json(notificationSummary);
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+const getFreshOrdersStats = async (req, res) => {
+  try {
+    const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+    const totalFreshOrders = await Order.countDocuments({
+      createdAt: { $gte: twentyFourHoursAgo }
+    });
+
+    const freshOrdersByStatus = await Order.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: twentyFourHoursAgo }
+        }
+      },
+      {
+        $group: {
+          _id: "$status",
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const freshOrdersRevenue = await Order.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: twentyFourHoursAgo },
+          paymentStatus: "paid"
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalRevenue: { $sum: "$total" },
+          averageOrderValue: { $avg: "$total" },
+          orderCount: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const hourlyDistribution = await Order.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: twentyFourHoursAgo }
+        }
+      },
+      {
+        $group: {
+          _id: { $hour: "$createdAt" },
+          count: { $sum: 1 },
+          revenue: { $sum: "$total" }
+        }
+      },
+      {
+        $sort: { "_id": 1 }
+      }
+    ]);
+
+    res.json({
+      totalFreshOrders,
+      freshOrdersByStatus: freshOrdersByStatus.reduce((acc, curr) => {
+        acc[curr._id] = curr.count;
+        return acc;
+      }, {}),
+      revenue: freshOrdersRevenue[0] || { 
+        totalRevenue: 0, 
+        averageOrderValue: 0, 
+        orderCount: 0 
+      },
+      hourlyDistribution,
+      timeRange: {
+        start: twentyFourHoursAgo,
+        end: new Date()
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
 module.exports = {
   getAllOrders,
   getOrderById,
@@ -295,5 +463,8 @@ module.exports = {
   assignDriver,
   updatePaymentStatus,
   cancelOrder,
-  getOrderStats
+  getOrderStats,
+  getFreshOrders,
+  getFreshOrdersNotifications,
+  getFreshOrdersStats
 };

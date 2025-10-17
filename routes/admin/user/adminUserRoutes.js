@@ -9,7 +9,6 @@ const {
 
 const router = express.Router();
 
-// ✅ CRUD Routes
 router.post("/users", createUser);
 router.get("/users", getAllUsers);
 router.get("/users/:id", getUserById);
