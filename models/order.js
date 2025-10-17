@@ -43,6 +43,18 @@ const orderSchema = new mongoose.Schema(
       type: Number,
       required: true
     },
+    // Coupon fields
+    coupon: {
+      code: String,
+      discount: {
+        type: Number,
+        default: 0
+      }
+    },
+    finalAmount: {
+      type: Number,
+      required: true
+    },
     status: {
       type: String,
       default: "pending"
