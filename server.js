@@ -13,6 +13,7 @@ const userProfileRoutes = require('./routes/user/profileRoutes');
 const orderRoutes= require('./routes/order/orderRoutes');
 const addressesRoutes= require('./routes/addresses/addressesRoutes');
 const referralRoutes=require('./routes/referral/referralRoutes');
+const sellerRoutes= require('./routes/seller/seller');
 
 //Driver Routes
 const driverRoutes=require('./routes/driver/driverAuth');
@@ -29,6 +30,7 @@ const adminOrderRoutes = require('./routes/admin/order/order');
 const adminBannerRoutes= require('./routes/admin/banner/banner');
 const adminCouponRoutes= require('./routes/admin/coupon/coupon');
 const adminDiscountRoutes= require('./routes/admin/discount/discount');
+const adminSellerRoutes= require('./routes/admin/seller/seller');
 
 const app = express();
 
@@ -68,6 +70,7 @@ app.use('/api/category', categoryRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/order', orderRoutes);
 app.use('/api/referrals', referralRoutes);
+app.use('/api/seller', sellerRoutes);
 
 // Driver Routes
 app.use('/api/driver', driverRoutes);
@@ -84,6 +87,7 @@ app.use('/api/admin/orders', adminOrderRoutes);
 app.use('/api/admin/banners', adminBannerRoutes);
 app.use('/api/admin/coupon', adminCouponRoutes);
 app.use('/api/admin/discount', adminDiscountRoutes);
+app.use('/api/admin/seller', adminSellerRoutes)
 
 mongoose.connect(process.env.MONGO_URI, {
   useNewUrlParser: true,

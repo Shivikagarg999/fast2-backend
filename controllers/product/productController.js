@@ -536,6 +536,76 @@ const getOutOfStockProducts = async (req, res) => {
   }
 };
 
+const getProductsByWarehouse = async (req, res) => {
+  try {
+    const { warehouseCode } = req.params;
+    
+    const products = await Product.find({
+      'warehouse.code': warehouseCode,
+      isActive: true
+    })
+    .populate('category')
+    .populate('promotor.id')
+    .populate('warehouse.id');
+
+    res.json(products);
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+const getProductsForPincode = async (req, res) => {
+  try {
+    const { pincode } = req.query;
+    
+    if (!pincode) {
+      return res.status(400).json({
+        success: false,
+        message: 'Pincode is required'
+      });
+    }
+
+    const warehouseResponse = await fetch(`http://localhost:5000/api/warehouse/for-pincode?pincode=${pincode}`);
+    const warehouseData = await warehouseResponse.json();
+
+    if (!warehouseData.success) {
+      return res.status(404).json({
+        success: false,
+        message: 'No warehouse found for this pincode'
+      });
+    }
+
+    const warehouse = warehouseData.data;
+    
+    const products = await Product.find({
+      'warehouse.code': warehouse.code,
+      isActive: true
+    })
+    .populate('category')
+    .populate('promotor.id')
+    .populate('warehouse.id');
+
+    res.json({
+      success: true,
+      data: products,
+      warehouse: {
+        name: warehouse.name,
+        code: warehouse.code,
+        city: warehouse.location.city
+      },
+      count: products.length
+    });
+
+  } catch (error) {
+    console.error('Error fetching products for pincode:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching products',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   createProduct,
   getProducts,
@@ -546,5 +616,7 @@ module.exports = {
   getProductsByPincode,
   getProductStats,
   getLowStockAlerts,
-  getOutOfStockProducts
+  getOutOfStockProducts,
+  getProductsByWarehouse,
+  getProductsForPincode
 };

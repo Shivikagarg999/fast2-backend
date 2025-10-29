@@ -43,7 +43,6 @@ const orderSchema = new mongoose.Schema(
       type: Number,
       required: true
     },
-    // Coupon fields
     coupon: {
       code: String,
       discount: {
@@ -63,7 +62,6 @@ const orderSchema = new mongoose.Schema(
     paymentMethod: { type: String, enum: ["cod", "online"], default: "cod" },
     paymentStatus: { type: String, enum: ["pending", "paid"], default: "pending" },
     
-    // Delivery tracking fields
     estimatedDelivery: Date,
     deliveryNotes: String,
     trackingNumber: String

@@ -1,27 +1,23 @@
 const mongoose = require('mongoose');
 
 const productSchema = new mongoose.Schema({
-  // Basic Info
+  
   name: { type: String, required: true },
   description: { type: String },
   brand: { type: String },
   category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },
   
-  // Pricing
   price: { type: Number, required: true },
   oldPrice: { type: Number, default: 0 },
   discountPercentage: { type: Number, default: 0 },
   
-  // Tax Information (inherited from category)
   hsnCode: { type: String },
   gstPercent: { type: Number, default: 0 },
   taxType: { type: String, enum: ['inclusive', 'exclusive'], default: 'inclusive' },
   
-  // Unit information
   unit: { type: String },
   unitValue: { type: Number },
   
-  // Promotor information
   promotor: {
     id: { type: mongoose.Schema.Types.ObjectId, ref: 'Promotor' },
     commissionRate: { type: Number, default: 0 },
@@ -29,14 +25,12 @@ const productSchema = new mongoose.Schema({
     commissionAmount: { type: Number, default: 0 }
   },
   
-  // Inventory
   quantity: { type: Number, default: 0 },
   minOrderQuantity: { type: Number, default: 1 },
   maxOrderQuantity: { type: Number, default: 10 },
   stockStatus: { type: String, enum: ['in-stock', 'out-of-stock'], default: 'out-of-stock' },
   lowStockThreshold: { type: Number, default: 10 },
   
-  // Physical attributes
   weight: { type: Number },
   weightUnit: { type: String, default: 'g' },
   dimensions: {
@@ -46,7 +40,6 @@ const productSchema = new mongoose.Schema({
     unit: { type: String, default: 'cm' }
   },
   
-  // Media - Images (max 5) and Video (optional)
   images: [{
     url: { type: String, required: true },
     altText: { type: String },
@@ -61,13 +54,12 @@ const productSchema = new mongoose.Schema({
     fileSize: { type: Number }
   },
   
-  // Warehouse
   warehouse: {
     id: { type: mongoose.Schema.Types.ObjectId, ref: 'Warehouse' },
+    code: { type: String },
     storageType: { type: String }
   },
   
-  // Delivery
   delivery: {
     estimatedDeliveryTime: { type: String },
     deliveryCharges: { type: Number, default: 0 },
@@ -75,15 +67,15 @@ const productSchema = new mongoose.Schema({
     availablePincodes: [{ type: String }]
   },
   
-    variants: [
+  variants: [
     {
-      name: { type: String, required: true },       // e.g., "Size", "Color"
-      options: [                                    // e.g., ["Red", "Blue"], ["S", "M", "L"]
+      name: { type: String, required: true },
+      options: [
         {
           value: { type: String, required: true },
-          price: { type: Number },                  //if variant affects price
-          quantity: { type: Number, default: 0 },   //if inventory varies per variant
-          sku: { type: String }                     //if you track SKU per variant
+          price: { type: Number },
+          quantity: { type: Number, default: 0 },
+          sku: { type: String }
         }
       ]
     }
@@ -91,7 +83,6 @@ const productSchema = new mongoose.Schema({
   isActive: { type: Boolean, default: true }
 }, { timestamps: true });
 
-// Validate maximum 5 images
 productSchema.path('images').validate(function(images) {
   return images.length <= 5;
 }, 'A product can have maximum 5 images.');
