@@ -42,7 +42,9 @@ const allowedOrigins = [
   "http://localhost:3000",
   "https://fast2-admin.vercel.app",
   "https://admin.fast2.in",
-  "https://www.admin.fast2.in"
+  "https://www.admin.fast2.in",
+  "https://seller.fast2.in",
+  "https://www.seller.fast2.in"
 ];
 
 // CORS Middleware
