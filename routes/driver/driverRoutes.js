@@ -1,7 +1,16 @@
 const express = require("express");
 const router = express.Router();
-const { getPendingOrders, acceptOrder, toggleAvailability, markOrderDelivered, markOrderPickedUp, getAvailability,
-    getWalletDetails, getOngoingOrders } = require("../../controllers/driver/driverControllers");
+const {
+  getPendingOrders,
+  acceptOrder,
+  toggleAvailability,
+  markOrderDelivered,
+  markOrderPickedUp,
+  getAvailability,
+  getWalletDetails,
+  getOngoingOrders,
+  verifySecretCodeAndPayment,
+} = require("../../controllers/driver/driverControllers");
 const { authenticateToken } = require("../../middlewares/driverAuth");
 
 router.get("/orders/pending", authenticateToken, getPendingOrders);
@@ -19,5 +28,11 @@ router.patch("/orders/:orderId/deliver", authenticateToken, markOrderDelivered);
 router.get("/availability", authenticateToken, getAvailability);
 
 router.get("/wallet", authenticateToken, getWalletDetails);
+
+router.post(
+  "/orders/:orderId/verify-delivery",
+  authenticateToken,
+  verifySecretCodeAndPayment
+);
 
 module.exports = router;

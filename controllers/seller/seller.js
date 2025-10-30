@@ -1,7 +1,7 @@
 const Seller = require('../../models/seller');
-const Warehouse= require('../../models/warehouse');
-const Promotor= require('../../models/promotor');
+const Promotor = require('../../models/promotor');
 const bcrypt = require('bcryptjs');
+const jwt= require('jsonwebtoken');
 
 exports.registerSeller = async (req, res) => {
   try {
@@ -37,35 +37,6 @@ exports.registerSeller = async (req, res) => {
       });
     }
 
-    let warehouse = await Warehouse.findOne({ promotor: promotor });
-    
-    if (!warehouse) {
-      const warehouseCode = `WH${Date.now()}${Math.random().toString(36).substr(2, 5)}`.toUpperCase();
-      
-      warehouse = new Warehouse({
-        name: `${promotorData.name}'s Warehouse`,
-        code: warehouseCode,
-        warehouseManager: promotorData.name,
-        contact: promotorData.phone,
-        promotor: promotor,
-        location: {
-          address: promotorData.address.street || 'Not specified',
-          city: promotorData.address.city,
-          state: promotorData.address.state,
-          pincode: promotorData.address.pincode,
-          coordinates: promotorData.address.coordinates || {}
-        },
-        serviceablePincodes: [promotorData.address.pincode],
-        storageType: 'ambient',
-        capacity: 10000,
-        sellers: [],
-        products: [],
-        isActive: true
-      });
-      
-      await warehouse.save();
-    }
-
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const newSeller = new Seller({
@@ -79,14 +50,10 @@ exports.registerSeller = async (req, res) => {
       address,
       bankDetails,
       promotor,
-      warehouse: warehouse._id, 
       approvalStatus: 'pending'
     });
 
     await newSeller.save();
-
-    warehouse.sellers.push(newSeller._id);
-    await warehouse.save();
 
     res.status(201).json({ 
       success: true,
@@ -97,18 +64,12 @@ exports.registerSeller = async (req, res) => {
           name: newSeller.name,
           email: newSeller.email,
           businessName: newSeller.businessName,
-          approvalStatus: newSeller.approvalStatus,
-          promotor: {
-            id: promotorData._id,
-            name: promotorData.name,
-            city: promotorData.address.city
-          }
+          approvalStatus: newSeller.approvalStatus
         },
-        warehouse: {
-          id: warehouse._id,
-          name: warehouse.name,
-          code: warehouse.code,
-          city: warehouse.location.city
+        promotor: {
+          id: promotorData._id,
+          name: promotorData.name,
+          city: promotorData.address.city
         }
       }
     });

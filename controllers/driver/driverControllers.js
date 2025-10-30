@@ -161,7 +161,23 @@ exports.markOrderDelivered = async (req, res) => {
     }
 
     if (order.status !== "picked-up") {
-      return res.status(400).json({ success: false, message: "Order must be picked up before marking delivered" });
+      return res.status(400).json({ 
+        success: false, 
+        message: "Order must be picked up before marking delivered" 
+      });
+    }
+
+    if (!order.isSecretCodeVerified) {
+      return res.status(400).json({
+        success: false,
+        message: "Secret code must be verified before marking as delivered"
+      });
+    }
+    if (order.paymentMethod === "cod" && !order.driverMarkedPaid) {
+      return res.status(400).json({
+        success: false,
+        message: "Payment status must be confirmed for COD orders"
+      });
     }
 
     order.status = "delivered";
@@ -182,6 +198,7 @@ exports.markOrderDelivered = async (req, res) => {
       message: "Order delivered successfully. Earnings added to wallet.",
       data: {
         orderId: order._id,
+        orderCustomId: order.orderId,
         status: order.status,
         driverEarnings: {
           added: deliveryEarning,
@@ -271,6 +288,68 @@ exports.getWalletDetails = async (req, res) => {
     res.status(500).json({
       success: false,
       message: "Internal Server Error"
+    });
+  }
+};
+
+exports.verifySecretCodeAndPayment = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { secretCode, isPaid } = req.body;
+
+    const driver = await Driver.findById(req.driver.driverId);
+    if (!driver) {
+      return res.status(404).json({ success: false, message: "Driver not found" });
+    }
+
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({ success: false, message: "Order not found" });
+    }
+
+    if (order.driver?.toString() !== driver._id.toString()) {
+      return res.status(403).json({ success: false, message: "You are not assigned to this order" });
+    }
+
+    if (order.status !== "picked-up") {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Order must be picked up before verifying delivery" 
+      });
+    }
+
+    if (order.secretCode !== secretCode) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid secret code"
+      });
+    }
+
+    order.isSecretCodeVerified = true;
+    order.driverMarkedPaid = isPaid;
+    
+    if (order.paymentMethod === "cod" && isPaid) {
+      order.paymentStatus = "paid";
+    }
+
+    await order.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Secret code verified successfully",
+      data: {
+        orderId: order._id,
+        orderCustomId: order.orderId,
+        isSecretCodeVerified: true,
+        driverMarkedPaid: order.driverMarkedPaid,
+        paymentStatus: order.paymentStatus
+      }
+    });
+  } catch (error) {
+    console.error("Error verifying secret code:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Internal Server Error" 
     });
   }
 };

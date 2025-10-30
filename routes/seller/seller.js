@@ -10,7 +10,7 @@ const {
 const { 
   addProduct, 
   getSellerProducts, 
-  updateProduct, 
+  updateProduct,
   toggleProductStatus 
 } = require('../../controllers/seller/product');
 const sellerAuth= require('../../middlewares/sellerAuth');
