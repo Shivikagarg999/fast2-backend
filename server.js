@@ -12,8 +12,8 @@ const cartRoutes = require('./routes/cart/cartRoutes');
 const userProfileRoutes = require('./routes/user/profileRoutes');
 const orderRoutes= require('./routes/order/orderRoutes');
 const addressesRoutes= require('./routes/addresses/addressesRoutes');
-const referralRoutes=require('./routes/referral/referralRoutes');
 const sellerRoutes= require('./routes/seller/seller');
+const referralRoutes= require('./routes/referral/referralRoutes');
 
 //Driver Routes
 const driverRoutes=require('./routes/driver/driverAuth');
@@ -71,8 +71,8 @@ app.use('/api/product', productRoutes);
 app.use('/api/category', categoryRoutes);
 app.use('/api/cart', cartRoutes);
 app.use('/api/order', orderRoutes);
-app.use('/api/referrals', referralRoutes);
 app.use('/api/seller', sellerRoutes);
+app.use('/api/referral', referralRoutes);
 
 // Driver Routes
 app.use('/api/driver', driverRoutes);

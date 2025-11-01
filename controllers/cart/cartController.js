@@ -89,6 +89,23 @@ const addToCart = async (req, res) => {
   }
 };
 
+// Get Cart Count 
+const getCartCount = async (req, res) => {
+  try {
+    const cart = await Cart.findOne({ user: req.user._id });
+    
+    if (!cart) {
+      return res.status(200).json({ count: 0 });
+    }
+    
+    const count = cart.items.reduce((total, item) => total + item.quantity, 0);
+    
+    res.status(200).json({ count });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
 // Update item quantity in cart
 const updateCartItem = async (req, res) => {
   try {
@@ -173,6 +190,7 @@ const clearCart = async (req, res) => {
 module.exports = {
   getCart,
   addToCart,
+  getCartCount,
   updateCartItem,
   removeFromCart,
   clearCart

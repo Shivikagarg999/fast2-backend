@@ -38,8 +38,13 @@ const userSchema = new mongoose.Schema(
       sparse: true,
     },
     referredBy: {
-      type: String,
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
     },
+    referralCount: {
+      type: Number,
+      default: 0
+    }
   },
   { timestamps: true }
 );

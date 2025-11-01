@@ -4,14 +4,15 @@ const authMiddleware = require("../../middlewares/userauth");
 const {
   getCart,
   addToCart,
+  getCartCount,
   updateCartItem,
   removeFromCart,
   clearCart
 } = require("../../controllers/cart/cartController");
 
-// All routes are protected with authMiddleware
 router.get("/", authMiddleware, getCart);
 router.post("/add", authMiddleware, addToCart);
+router.post("/getCount", authMiddleware, getCartCount);
 router.put("/update/:itemId", authMiddleware, updateCartItem);
 router.delete("/remove/:itemId", authMiddleware, removeFromCart);
 router.delete("/clear", authMiddleware, clearCart);
