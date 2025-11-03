@@ -34,7 +34,7 @@ const createProduct = async (req, res) => {
       taxType,
       videoDuration,
       videoFileSize,
-      variants // New field
+      variants 
     } = req.body;
 
     // Check required fields
@@ -379,12 +379,139 @@ const updateProduct = async (req, res) => {
 
 const getProducts = async (req, res) => {
   try {
-    const products = await Product.find()
+    const { 
+      category, 
+      search, 
+      minPrice, 
+      maxPrice, 
+      sortBy = 'createdAt', 
+      sortOrder = 'desc',
+      page = 1,
+      limit = 20,
+      pincode 
+    } = req.query;
+
+    const filter = { isActive: true };
+
+    if (category) {
+      filter.category = category;
+    }
+
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+        { brand: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    if (minPrice || maxPrice) {
+      filter.price = {};
+      if (minPrice) filter.price.$gte = parseFloat(minPrice);
+      if (maxPrice) filter.price.$lte = parseFloat(maxPrice);
+    }
+
+    if (pincode) {
+      filter.$or = [
+        { 'delivery.availablePincodes': pincode },
+        { serviceablePincodes: pincode },
+        { 'delivery.availablePincodes': { $in: [pincode.substring(0, 3)] } },
+        { serviceablePincodes: { $in: [pincode.substring(0, 3)] } }
+      ];
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
+
+    const products = await Product.find(filter)
       .populate('category')
       .populate('promotor.id')
-      .select('+variants');
-    res.json(products);
+      .populate('warehouse.id')
+      .sort(sort)
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const totalProducts = await Product.countDocuments(filter);
+    const totalPages = Math.ceil(totalProducts / limit);
+
+    res.json({
+      products,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages,
+        totalProducts,
+        hasNext: page < totalPages,
+        hasPrev: page > 1
+      }
+    });
   } catch (error) {
+    console.error('Get products error:', error);
+    res.status(500).json({ message: error.message });
+  }
+};
+
+const getProductsByPincode = async (req, res) => {
+  try {
+    const { pincode } = req.params;
+    const { 
+      category, 
+      search, 
+      page = 1, 
+      limit = 20 
+    } = req.query;
+
+    if (!pincode) {
+      return res.status(400).json({ message: 'Pincode is required' });
+    }
+
+    const filter = { 
+      isActive: true,
+      $or: [
+        { 'delivery.availablePincodes': pincode },
+        { serviceablePincodes: pincode },
+        { 'delivery.availablePincodes': { $in: [pincode.substring(0, 3)] } },
+        { serviceablePincodes: { $in: [pincode.substring(0, 3)] } }
+      ]
+    };
+
+    if (category) {
+      filter.category = category;
+    }
+
+    if (search) {
+      filter.$or = [
+        ...filter.$or,
+        { name: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+        { brand: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const products = await Product.find(filter)
+      .populate('category')
+      .populate('promotor.id')
+      .populate('warehouse.id')
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const totalProducts = await Product.countDocuments(filter);
+    const totalPages = Math.ceil(totalProducts / limit);
+
+    res.json({
+      products,
+      pincode,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages,
+        totalProducts,
+        hasNext: page < totalPages,
+        hasPrev: page > 1
+      }
+    });
+  } catch (error) {
+    console.error('Get products by pincode error:', error);
     res.status(500).json({ message: error.message });
   }
 };
@@ -429,36 +556,6 @@ const deleteProduct = async (req, res) => {
     res.json({ message: 'Product deleted successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });
-  }
-};
-
-const getProductsByPincode = async (req, res) => {
-  try {
-    const { pincode } = req.query;
-    
-    if (!pincode) {
-      return res.status(400).json({
-        success: false,
-        message: 'Pincode is required'
-      });
-    }
-
-    const products = await Product.find({
-      'delivery.availablePincodes': pincode,
-      isActive: true
-    }).populate('category');
-
-    res.json({
-      success: true,
-      data: products,
-      count: products.length
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      message: 'Error fetching products by pincode',
-      error: error.message
-    });
   }
 };
 

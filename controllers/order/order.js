@@ -1,68 +1,160 @@
 const Order = require("../../models/order");
 const Cart = require("../../models/cart");
+const mongoose = require("mongoose");
+const User = require("../../models/user");
 
 exports.createOrder = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    const { shippingAddress, paymentMethod, couponCode } = req.body;
+    const {
+      items,
+      shippingAddress,
+      paymentMethod = "cod",
+      useWallet = false,
+      coupon
+    } = req.body;
+
     const userId = req.user._id;
 
-    const cart = await Cart.findOne({ user: userId }).populate("items.product");
-    if (!cart || cart.items.length === 0) {
-      return res.status(400).json({ message: "Cart is empty" });
+    console.log('Order creation request:', { items, useWallet, userId });
+
+    // Validate required fields
+    if (!items || !items.length) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        error: "Order items are required"
+      });
     }
 
-    let discount = 0;
-    let couponData = null;
+    if (!shippingAddress) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        error: "Shipping address is required"
+      });
+    }
 
-    if (couponCode) {
-      try {
-        const coupon = await Coupon.validateCoupon(couponCode, userId, cart.total);
+    // Calculate total amount
+    let total = 0;
+    for (const item of items) {
+      total += item.price * item.quantity;
+    }
+
+    // Apply coupon discount if any
+    let discount = 0;
+    let finalAmount = total;
+    
+    if (coupon && coupon.discount) {
+      discount = Math.min(coupon.discount, total); // Ensure discount doesn't exceed total
+      finalAmount = total - discount;
+    }
+
+    // Check wallet balance and process wallet payment
+    let walletDeduction = 0;
+    let cashOnDelivery = finalAmount;
+    let paymentStatus = "pending";
+
+    if (useWallet) {
+      const user = await User.findById(userId).session(session);
+      
+      if (!user) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(404).json({
+          success: false,
+          error: "User not found"
+        });
+      }
+
+      const walletBalance = user.wallet || 0;
+      console.log('User wallet balance:', walletBalance);
+      
+      if (walletBalance > 0) {
+        // Deduct from wallet (up to the final amount)
+        walletDeduction = Math.min(walletBalance, finalAmount);
+        cashOnDelivery = finalAmount - walletDeduction;
         
-        const userCouponUsage = await Order.countDocuments({
-          user: userId,
-          "coupon.code": couponCode.toUpperCase()
+        console.log('Wallet deduction calculation:', {
+          walletBalance,
+          finalAmount,
+          walletDeduction,
+          cashOnDelivery
         });
 
-        if (userCouponUsage >= coupon.perUserLimit) {
-          return res.status(400).json({ message: "You have already used this coupon" });
+        // Update user wallet
+        user.wallet = parseFloat((walletBalance - walletDeduction).toFixed(2));
+        await user.save({ session });
+
+        console.log('Updated user wallet:', user.wallet);
+
+        // If full amount paid from wallet, update payment status
+        if (cashOnDelivery === 0) {
+          paymentStatus = "paid";
         }
-
-        discount = coupon.calculateDiscount(cart.total);
-        couponData = {
-          code: coupon.code,
-          discount: discount
-        };
-
-        coupon.usedCount += 1;
-        await coupon.save();
-
-      } catch (couponError) {
-        return res.status(400).json({ message: couponError.message });
+      } else {
+        console.log('Wallet balance is 0, skipping wallet deduction');
       }
     }
 
-    const finalAmount = cart.total - discount;
-
+    // Create order
     const order = new Order({
       user: userId,
-      items: cart.items,
-      total: cart.total,
-      coupon: couponData,
+      items,
+      total,
+      coupon: coupon || {},
       finalAmount,
-      shippingAddress, 
-      paymentMethod
+      shippingAddress,
+      paymentMethod,
+      paymentStatus,
+      walletDeduction,
+      cashOnDelivery
     });
 
-    await order.save();
+    await order.save({ session });
+    
+    // Commit transaction
+    await session.commitTransaction();
+    session.endSession();
+    
+    // Populate the order with user details
+    await order.populate('user', 'name phone email');
 
-    cart.items = [];
-    cart.total = 0;
-    await cart.save();
+    const response = {
+      success: true,
+      message: "Order created successfully",
+      order: {
+        orderId: order.orderId,
+        secretCode: order.secretCode,
+        total,
+        finalAmount,
+        walletDeduction,
+        cashOnDelivery,
+        paymentStatus: order.paymentStatus,
+        status: order.status,
+        items: order.items,
+        shippingAddress: order.shippingAddress,
+        createdAt: order.createdAt
+      }
+    };
 
-    res.status(201).json(order);
+    console.log('Order created successfully:', response);
+    return res.status(201).json(response);
+
   } catch (err) {
-    console.error("Create order error:", err);
-    res.status(500).json({ message: "Server error" });
+    // Abort transaction on error
+    await session.abortTransaction();
+    session.endSession();
+    
+    console.error("Error in createOrder:", err);
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error"
+    });
   }
 };
 
