@@ -1,4 +1,4 @@
-const { Warehouse } = require('../../../models/warehouse');
+const Warehouse = require('../../../models/warehouse');
 const Seller = require('../../../models/seller');
 
 const createWarehouse = async (req, res) => {
