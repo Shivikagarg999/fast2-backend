@@ -95,10 +95,7 @@ app.use('/api/admin/discount', adminDiscountRoutes);
 app.use('/api/admin/seller', adminSellerRoutes);
 app.use('/api/admin/terms', adminTermsRoutes);
 app.use('/api/admin/products', adminProductRoutes);
-<<<<<<< HEAD
 app.use('/api/admin/payouts', adminPayoutRoutes);
-=======
->>>>>>> ee96a8c7399d14c14568e4d2765728e2b972922f
 app.use('/api/admin', adminUserRoutes);
 app.use('/api/admin', adminRoutes);
 
