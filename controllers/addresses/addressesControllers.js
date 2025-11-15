@@ -82,12 +82,26 @@ exports.setDefaultAddress = async (req, res) => {
     const userId = req.user._id;
     const addressId = req.params.id;
 
-    await SavedAddress.updateMany({ user: userId, isDefault: true }, { isDefault: false });
+    const address = await SavedAddress.findOne({ _id: addressId, user: userId });
+    if (!address) {
+      return res.status(404).json({ success: false, message: "Address not found" });
+    }
 
-    const updated = await SavedAddress.findOneAndUpdate({ _id: addressId, user: userId }, { isDefault: true }, { new: true });
-    if (!updated) return res.status(404).json({ success: false, message: "Address not found" });
+    if (address.isDefault === true) {
+      address.isDefault = false;
+      await address.save();
+      return res.json({ success: true, address, message: "Default removed" });
+    }
+    await SavedAddress.updateMany(
+      { user: userId, isDefault: true },
+      { isDefault: false }
+    );
 
-    res.json({ success: true, address: updated });
+    address.isDefault = true;
+    await address.save();
+
+    res.json({ success: true, address, message: "Default set" });
+
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
