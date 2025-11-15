@@ -23,6 +23,8 @@ router.patch("/availability", authenticateToken, toggleAvailability);
 
 router.patch("/orders/:orderId/pickup", authenticateToken, markOrderPickedUp);
 
+router.patch("/orders/:orderId/verify-payment", authenticateToken, verifySecretCodeAndPayment);
+
 router.patch("/orders/:orderId/deliver", authenticateToken, markOrderDelivered);
 
 router.get("/availability", authenticateToken, getAvailability);

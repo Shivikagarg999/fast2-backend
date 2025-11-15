@@ -67,7 +67,6 @@ app.use(
 
 app.use(express.json());
 
-// User Routes
 app.use('/api/user', authRoutes);
 app.use('/api/user/profile', userProfileRoutes);
 app.use('/api/user/addresses', addressesRoutes);
