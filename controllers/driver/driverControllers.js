@@ -446,3 +446,44 @@ exports.verifySecretCodeAndPayment = async (req, res) => {
     });
   }
 };
+
+exports.checkOrderPlaced = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+
+    const order = await Order.findOne({
+      $or: [
+        { _id: orderId },
+        { orderId: orderId } 
+      ]
+    }).select("orderId status user finalAmount paymentStatus createdAt");
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+        placed: false,
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      placed: true,
+      message: "Order found",
+      data: {
+        orderId: order.orderId || order._id,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        finalAmount: order.finalAmount,
+        createdAt: order.createdAt,
+      }
+    });
+
+  } catch (error) {
+    console.error("Error checking order:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error"
+    });
+  }
+};
