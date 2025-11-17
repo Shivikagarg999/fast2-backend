@@ -30,7 +30,7 @@ router.patch("/orders/:orderId/deliver", authenticateToken, markOrderDelivered);
 
 router.get("/check/:orderId", checkOrderPlaced);
 
-router.get("/availability", authenticateToken, getAvailability);+
+router.get("/availability", authenticateToken, getAvailability);
 
 router.get("/wallet", authenticateToken, getWalletDetails);
 
