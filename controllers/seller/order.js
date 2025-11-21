@@ -1,4 +1,6 @@
 const Order = require('../../models/order');
+const Product = require('../../models/product');
+const Seller = require('../../models/seller');
 
 exports.getSellerOrders = async (req, res) => {
   try {
@@ -24,8 +26,15 @@ exports.getSellerOrders = async (req, res) => {
 
     const matchFilter = {};
     
-    const sellerProducts = await Product.find({ seller: sellerId }).select('_id');
-    const productIds = sellerProducts.map(p => p._id);
+    // Fetch seller and get their products
+    const seller = await Seller.findById(sellerId).select('products');
+    if (!seller) {
+      return res.status(404).json({
+        success: false,
+        message: 'Seller not found'
+      });
+    }
+    const productIds = seller.products || [];
 
     matchFilter['items.product'] = { $in: productIds };
 
@@ -206,8 +215,15 @@ exports.getSellerDashboard = async (req, res) => {
   try {
     const sellerId = req.seller.id;
 
-    const sellerProducts = await Product.find({ seller: sellerId }).select('_id');
-    const productIds = sellerProducts.map(p => p._id);
+    // Fetch seller and get their products
+    const seller = await Seller.findById(sellerId).select('products');
+    if (!seller) {
+      return res.status(404).json({
+        success: false,
+        message: 'Seller not found'
+      });
+    }
+    const productIds = seller.products || [];
 
     const orderStats = await Order.aggregate([
       { $unwind: '$items' },

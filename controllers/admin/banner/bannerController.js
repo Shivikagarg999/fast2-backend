@@ -1,4 +1,5 @@
 const Banner = require('../../../models/banner');
+const imagekit = require('../../../utils/imagekit');
 
 // @desc    Get all banners
 // @route   GET /api/banners
@@ -74,8 +75,6 @@ const createBanner = async (req, res) => {
       title,
       subtitle,
       description,
-      image,
-      fallbackImage,
       cta,
       ctaColor,
       gradient,
@@ -86,8 +85,8 @@ const createBanner = async (req, res) => {
 
     // Validate required fields
     const requiredFields = [
-      'title', 'subtitle', 'description', 'image', 
-      'fallbackImage', 'cta', 'ctaColor', 'gradient', 'accentColor'
+      'title', 'subtitle', 'description', 
+      'cta', 'ctaColor', 'gradient', 'accentColor'
     ];
     
     const missingFields = requiredFields.filter(field => !req.body[field]);
@@ -99,12 +98,54 @@ const createBanner = async (req, res) => {
       });
     }
 
+    // Check if image file is provided
+    if (!req.files || !req.files.image) {
+      return res.status(400).json({
+        success: false,
+        message: 'Banner image is required'
+      });
+    }
+
+    let imageUrl = '';
+    let fallbackImageUrl = '';
+
+    try {
+      // Upload main image to ImageKit
+      const imageFile = req.files.image[0];
+      const imageUploadResult = await imagekit.upload({
+        file: imageFile.buffer,
+        fileName: `banner_${Date.now()}_${imageFile.originalname}`,
+        folder: '/banners'
+      });
+      imageUrl = imageUploadResult.url;
+
+      // Upload fallback image if provided, otherwise use main image
+      if (req.files.fallbackImage && req.files.fallbackImage[0]) {
+        const fallbackFile = req.files.fallbackImage[0];
+        const fallbackUploadResult = await imagekit.upload({
+          file: fallbackFile.buffer,
+          fileName: `banner_fallback_${Date.now()}_${fallbackFile.originalname}`,
+          folder: '/banners'
+        });
+        fallbackImageUrl = fallbackUploadResult.url;
+      } else {
+        fallbackImageUrl = imageUrl; // Use main image as fallback
+      }
+    } catch (uploadError) {
+      console.error('Image upload error:', uploadError);
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to upload images',
+        error: uploadError.message
+      });
+    }
+
     const banner = new Banner({
       title,
       subtitle,
       description,
-      image,
-      fallbackImage,
+      image: imageUrl,
+      fallbackImage: fallbackImageUrl,
       cta,
       ctaColor,
       gradient,
@@ -151,9 +192,51 @@ const updateBanner = async (req, res) => {
       });
     }
 
+    const updateData = { ...req.body };
+
+    // Handle image upload if new image is provided
+    if (req.files && req.files.image && req.files.image[0]) {
+      try {
+        const imageFile = req.files.image[0];
+        const imageUploadResult = await imagekit.upload({
+          file: imageFile.buffer,
+          fileName: `banner_${Date.now()}_${imageFile.originalname}`,
+          folder: '/banners'
+        });
+        updateData.image = imageUploadResult.url;
+      } catch (uploadError) {
+        console.error('Image upload error:', uploadError);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to upload image',
+          error: uploadError.message
+        });
+      }
+    }
+
+    // Handle fallback image upload if provided
+    if (req.files && req.files.fallbackImage && req.files.fallbackImage[0]) {
+      try {
+        const fallbackFile = req.files.fallbackImage[0];
+        const fallbackUploadResult = await imagekit.upload({
+          file: fallbackFile.buffer,
+          fileName: `banner_fallback_${Date.now()}_${fallbackFile.originalname}`,
+          folder: '/banners'
+        });
+        updateData.fallbackImage = fallbackUploadResult.url;
+      } catch (uploadError) {
+        console.error('Fallback image upload error:', uploadError);
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to upload fallback image',
+          error: uploadError.message
+        });
+      }
+    }
+
     const updatedBanner = await Banner.findByIdAndUpdate(
       req.params.id,
-      { $set: req.body },
+      { $set: updateData },
       { new: true, runValidators: true }
     ).select('-__v');
 

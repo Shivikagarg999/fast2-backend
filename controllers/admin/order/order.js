@@ -192,6 +192,9 @@ const getOrderStats = async (req, res) => {
   try {
     const { period = "month" } = req.query; // day, week, month, year
     
+    console.log("=== ORDER STATS DEBUG ===");
+    console.log("Period received:", period);
+    
     const now = new Date();
     let startDate = new Date();
 
@@ -212,16 +215,21 @@ const getOrderStats = async (req, res) => {
         startDate.setMonth(now.getMonth() - 1);
     }
 
-    // Total orders count
+    console.log("Start Date:", startDate);
+    console.log("Current Date:", now);
+
     const totalOrders = await Order.countDocuments();
     
-    // Recent orders count
     const recentOrders = await Order.countDocuments({
       createdAt: { $gte: startDate }
     });
 
-    // Orders by status
     const ordersByStatus = await Order.aggregate([
+      {
+        $match: {
+          createdAt: { $gte: startDate }
+        }
+      },
       {
         $group: {
           _id: "$status",
@@ -229,6 +237,8 @@ const getOrderStats = async (req, res) => {
         }
       }
     ]);
+
+    console.log("Orders by status result:", ordersByStatus);
 
     // Total revenue
     const revenueStats = await Order.aggregate([
@@ -247,12 +257,12 @@ const getOrderStats = async (req, res) => {
       }
     ]);
 
-    // Monthly revenue (for charts)
+    // Monthly revenue (for charts) - filtered by period
     const monthlyRevenue = await Order.aggregate([
       {
         $match: {
           paymentStatus: "paid",
-          createdAt: { $gte: new Date(now.getFullYear(), 0, 1) }
+          createdAt: { $gte: startDate }
         }
       },
       {
@@ -267,7 +277,7 @@ const getOrderStats = async (req, res) => {
       }
     ]);
 
-    res.json({
+    const response = {
       totalOrders,
       recentOrders,
       ordersByStatus: ordersByStatus.reduce((acc, curr) => {
@@ -275,8 +285,24 @@ const getOrderStats = async (req, res) => {
         return acc;
       }, {}),
       revenue: revenueStats[0] || { totalRevenue: 0, averageOrderValue: 0 },
-      monthlyRevenue
+      monthlyRevenue,
+      debug: {
+        period,
+        startDate,
+        currentDate: now
+      }
+    };
+
+    console.log("Response summary:", {
+      totalOrders,
+      recentOrders,
+      statusCount: ordersByStatus.length,
+      revenueCount: revenueStats.length,
+      monthlyRevenueCount: monthlyRevenue.length
     });
+    console.log("=== END DEBUG ===\n");
+
+    res.json(response);
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
   }
