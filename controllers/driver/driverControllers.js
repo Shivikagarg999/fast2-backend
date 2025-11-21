@@ -51,7 +51,12 @@ exports.acceptOrder = async (req, res) => {
     }
 
     order.driver = driver._id;
-    order.status = "confirmed";
+    order.status = "accepted";
+    
+    if (!order.finalAmount) {
+      order.finalAmount = order.total;
+    }
+    
     await order.save();
 
     driver.workInfo.currentOrder = order._id;
@@ -63,6 +68,7 @@ exports.acceptOrder = async (req, res) => {
       message: "Order accepted successfully",
       data: {
         orderId: order._id,
+        orderCustomId: order.orderId,
         driverId: driver._id
       }
     });
@@ -125,7 +131,7 @@ exports.markOrderPickedUp = async (req, res) => {
       return res.status(403).json({ success: false, message: "You are not assigned to this order" });
     }
 
-    if (order.status !== "confirmed") {
+    if (order.status !== "accepted") {
       return res.status(400).json({ success: false, message: "Order not in confirmed state" });
     }
 
@@ -140,6 +146,99 @@ exports.markOrderPickedUp = async (req, res) => {
   } catch (error) {
     console.error("Error marking pickup:", error);
     res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};
+
+exports.verifySecretCodeAndPayment = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { secretCode, paidAmount } = req.body;
+
+    const driver = await Driver.findById(req.driver.driverId);
+    if (!driver) {
+      return res.status(404).json({ success: false, message: "Driver not found" });
+    }
+
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({ success: false, message: "Order not found" });
+    }
+
+    if (order.driver?.toString() !== driver._id.toString()) {
+      return res.status(403).json({ success: false, message: "You are not assigned to this order" });
+    }
+
+    if (order.status !== "picked-up") {
+      return res.status(400).json({ 
+        success: false, 
+        message: "Order must be picked up before verifying delivery" 
+      });
+    }
+
+    if (order.secretCode !== secretCode) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid secret code"
+      });
+    }
+
+    if (order.paymentMethod === "cod") {
+      if (!paidAmount) {
+        return res.status(400).json({
+          success: false,
+          message: "Payment amount is required for COD orders"
+        });
+      }
+
+      const expectedAmount = order.finalAmount;
+      if (parseFloat(paidAmount) !== parseFloat(expectedAmount)) {
+        return res.status(400).json({
+          success: false,
+          message: `Payment amount mismatch. Expected: ₹${expectedAmount}, Received: ₹${paidAmount}`,
+          data: {
+            expectedAmount,
+            receivedAmount: paidAmount,
+            difference: Math.abs(expectedAmount - paidAmount)
+          }
+        });
+      }
+
+      order.cashOnDelivery = parseFloat(paidAmount);
+      order.driverMarkedPaid = true;
+      order.paymentStatus = "paid";
+    }
+
+    if (order.paymentMethod === "online") {
+      order.driverMarkedPaid = true;s
+    }
+
+    order.isSecretCodeVerified = true;
+    
+    await order.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Secret code verified and payment confirmed successfully",
+      data: {
+        orderId: order._id,
+        orderCustomId: order.orderId,
+        isSecretCodeVerified: true,
+        driverMarkedPaid: true,
+        paymentStatus: order.paymentStatus,
+        paymentMethod: order.paymentMethod,
+        paidAmount: order.paymentMethod === "cod" ? paidAmount : 0,
+        finalAmount: order.finalAmount,
+        paymentNote: order.paymentMethod === "cod" 
+          ? `Customer paid ₹${paidAmount} cash to driver`
+          : "Payment already completed online"
+      }
+    });
+  } catch (error) {
+    console.error("Error verifying secret code and payment:", error);
+    res.status(500).json({ 
+      success: false, 
+      message: "Internal Server Error" 
+    });
   }
 };
 
@@ -173,14 +272,8 @@ exports.markOrderDelivered = async (req, res) => {
         message: "Secret code must be verified before marking as delivered"
       });
     }
-    if (order.paymentMethod === "cod" && !order.driverMarkedPaid) {
-      return res.status(400).json({
-        success: false,
-        message: "Payment status must be confirmed for COD orders"
-      });
-    }
-
     order.status = "delivered";
+    order.paymentStatus= "paid";
     await order.save();
 
     const deliveryEarning = 18;
@@ -350,6 +443,47 @@ exports.verifySecretCodeAndPayment = async (req, res) => {
     res.status(500).json({ 
       success: false, 
       message: "Internal Server Error" 
+    });
+  }
+};
+
+exports.checkOrderPlaced = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+
+    const order = await Order.findOne({
+      $or: [
+        { _id: orderId },
+        { orderId: orderId } 
+      ]
+    }).select("orderId status user finalAmount paymentStatus createdAt");
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found",
+        placed: false,
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      placed: true,
+      message: "Order found",
+      data: {
+        orderId: order.orderId || order._id,
+        status: order.status,
+        paymentStatus: order.paymentStatus,
+        finalAmount: order.finalAmount,
+        createdAt: order.createdAt,
+      }
+    });
+
+  } catch (error) {
+    console.error("Error checking order:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error"
     });
   }
 };

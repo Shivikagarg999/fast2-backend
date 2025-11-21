@@ -10,6 +10,7 @@ const {
   getWalletDetails,
   getOngoingOrders,
   verifySecretCodeAndPayment,
+  checkOrderPlaced
 } = require("../../controllers/driver/driverControllers");
 const { authenticateToken } = require("../../middlewares/driverAuth");
 
@@ -23,7 +24,11 @@ router.patch("/availability", authenticateToken, toggleAvailability);
 
 router.patch("/orders/:orderId/pickup", authenticateToken, markOrderPickedUp);
 
+router.patch("/orders/:orderId/verify-payment", authenticateToken, verifySecretCodeAndPayment);
+
 router.patch("/orders/:orderId/deliver", authenticateToken, markOrderDelivered);
+
+router.get("/check/:orderId", checkOrderPlaced);
 
 router.get("/availability", authenticateToken, getAvailability);
 
