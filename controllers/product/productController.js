@@ -30,6 +30,7 @@ const createProduct = async (req, res) => {
       deliveryCharges,
       freeDeliveryThreshold,
       availablePincodes,
+      serviceablePincodes,
       hsnCode,
       gstPercent,
       taxType,
@@ -107,7 +108,17 @@ const createProduct = async (req, res) => {
       try {
         parsedPincodes = JSON.parse(availablePincodes);
       } catch (error) {
-        console.error('Error parsing pincodes:', error);
+        console.error('Error parsing availablePincodes:', error);
+      }
+    }
+
+    let parsedServiceablePincodes = [];
+    if (serviceablePincodes) {
+      try {
+        parsedServiceablePincodes = JSON.parse(serviceablePincodes);
+        if (!Array.isArray(parsedServiceablePincodes)) parsedServiceablePincodes = [];
+      } catch (error) {
+        console.error('Error parsing serviceablePincodes:', error);
       }
     }
 
@@ -166,6 +177,7 @@ const createProduct = async (req, res) => {
         freeDeliveryThreshold: freeDeliveryThreshold || 0,
         availablePincodes: parsedPincodes
       },
+      serviceablePincodes: parsedServiceablePincodes,
       variants: parsedVariants
     });
 
@@ -207,6 +219,7 @@ const updateProduct = async (req, res) => {
       deliveryCharges,
       freeDeliveryThreshold,
       availablePincodes,
+      serviceablePincodes,
       hsnCode,
       gstPercent,
       taxType,
@@ -335,6 +348,17 @@ const updateProduct = async (req, res) => {
     if (availablePincodes) {
       try {
         updateData['delivery.availablePincodes'] = JSON.parse(availablePincodes);
+      } catch (error) {
+        console.error('Error parsing availablePincodes:', error);
+      }
+    }
+
+    if (serviceablePincodes) {
+      try {
+        const parsedServiceablePincodes = JSON.parse(serviceablePincodes);
+        if (Array.isArray(parsedServiceablePincodes)) {
+          updateData.serviceablePincodes = parsedServiceablePincodes;
+        }
       } catch (error) {
         console.error('Error parsing pincodes:', error);
       }

@@ -1,15 +1,52 @@
 const Seller = require('../../models/seller');
 const Product = require('../../models/product');
 const Warehouse = require('../../models/warehouse');
+const Promotor = require('../../models/promotor');
+const Category = require('../../models/category');
+const Order = require('../../models/order');
+const mongoose = require('mongoose');
 
 exports.addProduct = async (req, res) => {
   try {
     const sellerId = req.seller.id;
     const productData = req.body;
 
-    const seller = await Seller.findById(sellerId)
-      .populate('promotor')
-      .populate('warehouse');
+    // Parse JSON fields if they are strings
+    if (productData.dimensions && typeof productData.dimensions === 'string') {
+      try {
+        productData.dimensions = JSON.parse(productData.dimensions);
+      } catch (error) {
+        console.error('Error parsing dimensions:', error);
+      }
+    }
+
+    if (productData.features && typeof productData.features === 'string') {
+      try {
+        productData.features = JSON.parse(productData.features);
+      } catch (error) {
+        console.error('Error parsing features:', error);
+      }
+    }
+
+    if (productData.tags && typeof productData.tags === 'string') {
+      try {
+        productData.tags = JSON.parse(productData.tags);
+      } catch (error) {
+        console.error('Error parsing tags:', error);
+      }
+    }
+
+    if (productData.serviceablePincodes && typeof productData.serviceablePincodes === 'string') {
+      try {
+        productData.serviceablePincodes = JSON.parse(productData.serviceablePincodes);
+      } catch (error) {
+        console.error('Error parsing serviceablePincodes:', error);
+        productData.serviceablePincodes = [];
+      }
+    }
+
+    // Fetch seller with promotor populated
+    const seller = await Seller.findById(sellerId).populate('promotor');
     
     if (!seller) {
       return res.status(404).json({
@@ -25,10 +62,58 @@ exports.addProduct = async (req, res) => {
       });
     }
 
+    // Fetch warehouse from request body or find warehouse that contains this seller
+    let warehouse;
+    if (productData.warehouseId) {
+      warehouse = await Warehouse.findById(productData.warehouseId);
+      if (!warehouse) {
+        return res.status(404).json({
+          success: false,
+          message: 'Warehouse not found'
+        });
+      }
+      
+      // Verify seller is associated with this warehouse
+      if (!warehouse.sellers.find(ele => ele?.toString() == sellerId?.toString())) {
+        return res.status(403).json({
+          success: false,
+          message: 'You are not authorized to add products to this warehouse'
+        });
+      }
+    } else {
+      // Find warehouse that contains this seller
+      warehouse = await Warehouse.findOne({ sellers: sellerId });
+      if (!warehouse) {
+        return res.status(404).json({
+          success: false,
+          message: 'No warehouse found for this seller'
+        });
+      }
+    }
+
+    // Find category by name and convert to ObjectId
+    let categoryId = productData.category;
+    if (productData.category && typeof productData.category === 'string') {
+      // Check if it's already an ObjectId or a category name
+      const isObjectId = /^[0-9a-fA-F]{24}$/.test(productData.category);
+      
+      if (!isObjectId) {
+        // It's a category name, find the category
+        const category = await Category.findOne({ name: productData.category });
+        if (!category) {
+          return res.status(404).json({
+            success: false,
+            message: `Category '${productData.category}' not found`
+          });
+        }
+        categoryId = category._id;
+      }
+    }
+
     const stockStatus = productData.quantity > 0 ? 'in-stock' : 'out-of-stock';
 
-    const promotorCommission = seller.promotor.commissionRate || 5;
-    const commissionType = seller.promotor.commissionType || 'percentage';
+    const promotorCommission = seller.promotor?.commissionRate || 5;
+    const commissionType = seller.promotor?.commissionType || 'percentage';
     
     let commissionAmount = 0;
     if (commissionType === 'percentage') {
@@ -39,35 +124,40 @@ exports.addProduct = async (req, res) => {
 
     const newProduct = new Product({
       ...productData,
-      seller: sellerId,
+      category: categoryId,
       stockStatus,
       promotor: {
-        id: seller.promotor._id,
+        id: seller.promotor?._id,
         commissionRate: promotorCommission,
         commissionType: commissionType,
         commissionAmount: commissionAmount
       },
       warehouse: {
-        id: seller.warehouse._id,
-        code: seller.warehouse.code,
-        storageType: seller.warehouse.storageType
+        id: warehouse._id,
+        code: warehouse.code,
+        storageType: productData.storageType || warehouse.storageType
       },
       isActive: true
     });
 
     await newProduct.save();
 
+    // Add product to seller's products array
     seller.products.push(newProduct._id);
     await seller.save();
 
-    seller.warehouse.products.push(newProduct._id);
-    seller.warehouse.currentStock += productData.quantity || 0;
-    await seller.warehouse.save();
+    // Add product to warehouse's products array and update stock
+    warehouse.products.push(newProduct._id);
+    warehouse.currentStock += productData.quantity || 0;
+    await warehouse.save();
 
-    await Promotor.findByIdAndUpdate(
-      seller.promotor._id,
-      { $inc: { totalProductsAdded: 1 } }
-    );
+    // Update promotor stats if promotor exists
+    if (seller.promotor?._id) {
+      await Promotor.findByIdAndUpdate(
+        seller.promotor._id,
+        { $inc: { totalProductsAdded: 1 } }
+      );
+    }
 
     res.status(201).json({
       success: true,
@@ -99,7 +189,19 @@ exports.getSellerProducts = async (req, res) => {
       sortOrder = 'desc'
     } = req.query;
 
-    const filter = { seller: sellerId };
+    // Get seller's product IDs
+    const seller = await Seller.findById(sellerId).select('products');
+    if (!seller) {
+      return res.status(404).json({
+        success: false,
+        message: 'Seller not found'
+      });
+    }
+
+    const productIds = seller.products || [];
+
+    // Build filter using product IDs
+    const filter = { _id: { $in: productIds } };
     
     if (search) {
       filter.$or = [
@@ -127,12 +229,50 @@ exports.getSellerProducts = async (req, res) => {
       .populate('category', 'name')
       .sort(sort)
       .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .skip((page - 1) * limit)
+      .lean();
 
     const total = await Product.countDocuments(filter);
 
+    // Get sales and earnings data for each product
+    const salesData = await Order.aggregate([
+      { $unwind: '$items' },
+      { 
+        $match: { 
+          'items.product': { $in: productIds.map(id => new mongoose.Types.ObjectId(id)) },
+          status: { $in: ['confirmed', 'picked-up', 'delivered'] } // Only count confirmed and delivered orders
+        } 
+      },
+      {
+        $group: {
+          _id: '$items.product',
+          totalSales: { $sum: '$items.quantity' },
+          totalEarnings: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+          orderCount: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // Create a map of product sales data
+    const salesMap = {};
+    salesData.forEach(item => {
+      salesMap[item._id.toString()] = {
+        totalSales: item.totalSales,
+        totalEarnings: item.totalEarnings,
+        orderCount: item.orderCount
+      };
+    });
+
+    // Add sales and earnings data to each product
+    const productsWithSales = products.map(product => ({
+      ...product,
+      sales: salesMap[product._id.toString()]?.totalSales || 0,
+      earnings: salesMap[product._id.toString()]?.totalEarnings || 0,
+      orderCount: salesMap[product._id.toString()]?.orderCount || 0
+    }));
+
     const stats = await Product.aggregate([
-      { $match: { seller: mongoose.Types.ObjectId(sellerId) } },
+      { $match: { _id: { $in: productIds.map(id => new mongoose.Types.ObjectId(id)) } } },
       {
         $group: {
           _id: null,
@@ -144,14 +284,25 @@ exports.getSellerProducts = async (req, res) => {
       }
     ]);
 
+    // Calculate total sales and earnings across all products
+    const totalSalesEarnings = salesData.reduce((acc, item) => {
+      acc.totalSales += item.totalSales;
+      acc.totalEarnings += item.totalEarnings;
+      return acc;
+    }, { totalSales: 0, totalEarnings: 0 });
+
     res.status(200).json({
       success: true,
-      data: products,
-      stats: stats[0] || {
-        totalProducts: 0,
-        activeProducts: 0,
-        outOfStock: 0,
-        totalValue: 0
+      data: productsWithSales,
+      stats: {
+        ...(stats[0] || {
+          totalProducts: 0,
+          activeProducts: 0,
+          outOfStock: 0,
+          totalValue: 0
+        }),
+        totalSales: totalSalesEarnings.totalSales,
+        totalEarnings: totalSalesEarnings.totalEarnings
       },
       pagination: {
         currentPage: parseInt(page),
@@ -177,6 +328,39 @@ exports.updateProduct = async (req, res) => {
     const sellerId = req.seller.id;
     const { productId } = req.params;
     const updateData = req.body;
+
+    // Parse JSON fields if they are strings
+    if (updateData.dimensions && typeof updateData.dimensions === 'string') {
+      try {
+        updateData.dimensions = JSON.parse(updateData.dimensions);
+      } catch (error) {
+        console.error('Error parsing dimensions:', error);
+      }
+    }
+
+    if (updateData.features && typeof updateData.features === 'string') {
+      try {
+        updateData.features = JSON.parse(updateData.features);
+      } catch (error) {
+        console.error('Error parsing features:', error);
+      }
+    }
+
+    if (updateData.tags && typeof updateData.tags === 'string') {
+      try {
+        updateData.tags = JSON.parse(updateData.tags);
+      } catch (error) {
+        console.error('Error parsing tags:', error);
+      }
+    }
+
+    if (updateData.serviceablePincodes && typeof updateData.serviceablePincodes === 'string') {
+      try {
+        updateData.serviceablePincodes = JSON.parse(updateData.serviceablePincodes);
+      } catch (error) {
+        console.error('Error parsing serviceablePincodes:', error);
+      }
+    }
 
     const product = await Product.findOne({ _id: productId, seller: sellerId });
     if (!product) {
