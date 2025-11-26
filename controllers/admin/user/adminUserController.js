@@ -1,6 +1,5 @@
 const User = require("../../../models/user");
 
-// ✅ CREATE USER
 exports.createUser = async (req, res) => {
   try {
     const { name, email, phone, password, avatar } = req.body;
@@ -28,7 +27,6 @@ exports.createUser = async (req, res) => {
   }
 };
 
-// ✅ READ ALL USERS
 exports.getAllUsers = async (req, res) => {
   try {
     console.log('📊 Fetching all users...');
@@ -89,7 +87,6 @@ exports.updateUser = async (req, res) => {
   }
 };
 
-// ✅ DELETE USER
 exports.deleteUser = async (req, res) => {
   try {
     const user = await User.findByIdAndDelete(req.params.id);
@@ -107,7 +104,6 @@ exports.deleteUser = async (req, res) => {
   }
 };
 
-// ✅ ADD MONEY TO USER WALLET
 exports.addMoneyToWallet = async (req, res) => {
   try {
     const { amount, note } = req.body;

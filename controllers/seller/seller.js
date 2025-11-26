@@ -98,15 +98,6 @@ exports.loginSeller = async (req, res) => {
       return res.status(404).json({ message: 'Seller not found' });
     }
     
-    // if (seller.approvalStatus !== 'approved') {
-    //   return res.status(403).json({ message: 'Your account is not approved yet.' });
-    // }
-
-    // const isMatch = await bcrypt.compare(password, seller.password);
-    // if (!isMatch) {
-    //   return res.status(400).json({ message: 'Invalid credentials' });
-    // }
-
     const token = jwt.sign(
       { id: seller._id, email: seller.email },
       process.env.JWT_SECRET,
