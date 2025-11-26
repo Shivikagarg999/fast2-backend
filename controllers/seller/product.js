@@ -11,7 +11,6 @@ exports.addProduct = async (req, res) => {
     const sellerId = req.seller.id;
     const productData = req.body;
 
-    // Parse JSON fields if they are strings
     if (productData.dimensions && typeof productData.dimensions === 'string') {
       try {
         productData.dimensions = JSON.parse(productData.dimensions);
@@ -36,16 +35,36 @@ exports.addProduct = async (req, res) => {
       }
     }
 
-    if (productData.serviceablePincodes && typeof productData.serviceablePincodes === 'string') {
+    let parsedAvailablePincodes = [];
+    if (productData.availablePincodes) {
       try {
-        productData.serviceablePincodes = JSON.parse(productData.serviceablePincodes);
+        parsedAvailablePincodes = JSON.parse(productData.availablePincodes);
       } catch (error) {
-        console.error('Error parsing serviceablePincodes:', error);
-        productData.serviceablePincodes = [];
+        console.error('Error parsing availablePincodes:', error);
       }
     }
 
-    // Fetch seller with promotor populated
+    let parsedServiceablePincodes = [];
+    if (productData.serviceablePincodes) {
+      try {
+        parsedServiceablePincodes = JSON.parse(productData.serviceablePincodes);
+        if (!Array.isArray(parsedServiceablePincodes)) parsedServiceablePincodes = [];
+      } catch (error) {
+        console.error('Error parsing serviceablePincodes:', error);
+        parsedServiceablePincodes = [];
+      }
+    }
+
+    let parsedVariants = [];
+    if (productData.variants) {
+      try {
+        parsedVariants = JSON.parse(productData.variants);
+        if (!Array.isArray(parsedVariants)) parsedVariants = [];
+      } catch (error) {
+        console.error('Error parsing variants:', error);
+      }
+    }
+
     const seller = await Seller.findById(sellerId).populate('promotor');
     
     if (!seller) {
@@ -62,7 +81,6 @@ exports.addProduct = async (req, res) => {
       });
     }
 
-    // Fetch warehouse from request body or find warehouse that contains this seller
     let warehouse;
     if (productData.warehouseId) {
       warehouse = await Warehouse.findById(productData.warehouseId);
@@ -72,10 +90,7 @@ exports.addProduct = async (req, res) => {
           message: 'Warehouse not found'
         });
       }
-      
-      
     } else {
-      // Find warehouse that contains this seller
       warehouse = await Warehouse.findOne({ sellers: sellerId });
       if (!warehouse) {
         return res.status(404).json({
@@ -85,14 +100,11 @@ exports.addProduct = async (req, res) => {
       }
     }
 
-    // Find category by name and convert to ObjectId
     let categoryId = productData.category;
     if (productData.category && typeof productData.category === 'string') {
-      // Check if it's already an ObjectId or a category name
       const isObjectId = /^[0-9a-fA-F]{24}$/.test(productData.category);
       
       if (!isObjectId) {
-        // It's a category name, find the category
         const category = await Category.findOne({ name: productData.category });
         if (!category) {
           return res.status(404).json({
@@ -104,8 +116,14 @@ exports.addProduct = async (req, res) => {
       }
     }
 
-    const stockStatus = productData.quantity > 0 ? 'in-stock' : 'out-of-stock';
+    const foundCategory = await Category.findById(categoryId);
+    const productTaxInfo = {
+      hsnCode: productData.hsnCode || foundCategory.hsnCode,
+      gstPercent: productData.gstPercent !== undefined ? productData.gstPercent : foundCategory.gstPercent,
+      taxType: productData.taxType || foundCategory.taxType
+    };
 
+    const stockStatus = productData.quantity > 0 ? 'in-stock' : 'out-of-stock';
     const promotorCommission = seller.promotor?.commissionRate || 5;
     const commissionType = seller.promotor?.commissionType || 'percentage';
     
@@ -116,36 +134,61 @@ exports.addProduct = async (req, res) => {
       commissionAmount = promotorCommission;
     }
 
+    const discountPercentage = productData.oldPrice > 0 ? 
+      Math.round(((productData.oldPrice - productData.price) / productData.oldPrice) * 100) : 0;
+
     const newProduct = new Product({
-      ...productData,
+      name: productData.name,
+      description: productData.description,
+      brand: productData.brand,
       category: categoryId,
-      stockStatus,
+      price: productData.price,
+      oldPrice: productData.oldPrice || 0,
+      discountPercentage: discountPercentage,
+      unit: productData.unit,
+      unitValue: productData.unitValue,
+      ...productTaxInfo,
       promotor: {
         id: seller.promotor?._id,
         commissionRate: promotorCommission,
         commissionType: commissionType,
         commissionAmount: commissionAmount
       },
+      quantity: productData.quantity || 0,
+      minOrderQuantity: productData.minOrderQuantity || 1,
+      maxOrderQuantity: productData.maxOrderQuantity || 10,
+      stockStatus: stockStatus,
+      lowStockThreshold: 10,
+      weight: productData.weight,
+      weightUnit: productData.weightUnit || 'g',
+      dimensions: productData.dimensions,
+      features: productData.features,
+      tags: productData.tags,
       warehouse: {
         id: warehouse._id,
         code: warehouse.code,
         storageType: productData.storageType || warehouse.storageType
       },
+      delivery: {
+        estimatedDeliveryTime: productData.estimatedDeliveryTime,
+        deliveryCharges: productData.deliveryCharges || 0,
+        freeDeliveryThreshold: productData.freeDeliveryThreshold || 0,
+        availablePincodes: parsedAvailablePincodes
+      },
+      serviceablePincodes: parsedServiceablePincodes,
+      variants: parsedVariants,
       isActive: true
     });
 
     await newProduct.save();
 
-    // Add product to seller's products array
     seller.products.push(newProduct._id);
     await seller.save();
 
-    // Add product to warehouse's products array and update stock
     warehouse.products.push(newProduct._id);
     warehouse.currentStock += productData.quantity || 0;
     await warehouse.save();
 
-    // Update promotor stats if promotor exists
     if (seller.promotor?._id) {
       await Promotor.findByIdAndUpdate(
         seller.promotor._id,
@@ -164,6 +207,114 @@ exports.addProduct = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error adding product',
+      error: error.message
+    });
+  }
+};
+
+exports.updateProduct = async (req, res) => {
+  try {
+    const sellerId = req.seller.id;
+    const { productId } = req.params;
+    const updateData = req.body;
+
+    if (updateData.dimensions && typeof updateData.dimensions === 'string') {
+      try {
+        updateData.dimensions = JSON.parse(updateData.dimensions);
+      } catch (error) {
+        console.error('Error parsing dimensions:', error);
+      }
+    }
+
+    if (updateData.features && typeof updateData.features === 'string') {
+      try {
+        updateData.features = JSON.parse(updateData.features);
+      } catch (error) {
+        console.error('Error parsing features:', error);
+      }
+    }
+
+    if (updateData.tags && typeof updateData.tags === 'string') {
+      try {
+        updateData.tags = JSON.parse(updateData.tags);
+      } catch (error) {
+        console.error('Error parsing tags:', error);
+      }
+    }
+
+    if (updateData.availablePincodes) {
+      try {
+        updateData['delivery.availablePincodes'] = JSON.parse(updateData.availablePincodes);
+      } catch (error) {
+        console.error('Error parsing availablePincodes:', error);
+      }
+    }
+
+    if (updateData.serviceablePincodes) {
+      try {
+        const parsedServiceablePincodes = JSON.parse(updateData.serviceablePincodes);
+        if (Array.isArray(parsedServiceablePincodes)) {
+          updateData.serviceablePincodes = parsedServiceablePincodes;
+        }
+      } catch (error) {
+        console.error('Error parsing serviceablePincodes:', error);
+      }
+    }
+
+    if (updateData.variants) {
+      try {
+        const parsedVariants = JSON.parse(updateData.variants);
+        updateData.variants = Array.isArray(parsedVariants) ? parsedVariants : [];
+      } catch (error) {
+        console.error('Error parsing variants:', error);
+      }
+    }
+
+    const product = await Product.findOne({ _id: productId });
+    if (!product) {
+      return res.status(404).json({
+        success: false,
+        message: 'Product not found'
+      });
+    }
+
+    if (updateData.quantity !== undefined) {
+      updateData.stockStatus = updateData.quantity > 0 ? 'in-stock' : 'out-of-stock';
+      
+      const warehouse = await Warehouse.findOne({ sellers: sellerId });
+      if (warehouse) {
+        const stockDifference = updateData.quantity - product.quantity;
+        warehouse.currentStock += stockDifference;
+        await warehouse.save();
+      }
+    }
+
+    if (updateData.oldPrice !== undefined && updateData.price !== undefined) {
+      updateData.discountPercentage = updateData.oldPrice > 0 ? 
+        Math.round(((updateData.oldPrice - updateData.price) / updateData.oldPrice) * 100) : 0;
+    }
+
+    if (updateData.estimatedDeliveryTime) updateData['delivery.estimatedDeliveryTime'] = updateData.estimatedDeliveryTime;
+    if (updateData.deliveryCharges !== undefined) updateData['delivery.deliveryCharges'] = updateData.deliveryCharges;
+    if (updateData.freeDeliveryThreshold !== undefined) updateData['delivery.freeDeliveryThreshold'] = updateData.freeDeliveryThreshold;
+
+    const updatedProduct = await Product.findByIdAndUpdate(
+      productId,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    ).populate('category', 'name');
+
+    res.status(200).json({
+      success: true,
+      message: 'Product updated successfully',
+      data: updatedProduct
+    });
+
+  } catch (error) {
+    console.error('Update product error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error updating product',
       error: error.message
     });
   }
@@ -312,86 +463,6 @@ exports.getSellerProducts = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error fetching products',
-      error: error.message
-    });
-  }
-};
-
-exports.updateProduct = async (req, res) => {
-  try {
-    const sellerId = req.seller.id;
-    const { productId } = req.params;
-    const updateData = req.body;
-
-    // Parse JSON fields if they are strings
-    if (updateData.dimensions && typeof updateData.dimensions === 'string') {
-      try {
-        updateData.dimensions = JSON.parse(updateData.dimensions);
-      } catch (error) {
-        console.error('Error parsing dimensions:', error);
-      }
-    }
-
-    if (updateData.features && typeof updateData.features === 'string') {
-      try {
-        updateData.features = JSON.parse(updateData.features);
-      } catch (error) {
-        console.error('Error parsing features:', error);
-      }
-    }
-
-    if (updateData.tags && typeof updateData.tags === 'string') {
-      try {
-        updateData.tags = JSON.parse(updateData.tags);
-      } catch (error) {
-        console.error('Error parsing tags:', error);
-      }
-    }
-
-    if (updateData.serviceablePincodes && typeof updateData.serviceablePincodes === 'string') {
-      try {
-        updateData.serviceablePincodes = JSON.parse(updateData.serviceablePincodes);
-      } catch (error) {
-        console.error('Error parsing serviceablePincodes:', error);
-      }
-    }
-
-    const product = await Product.findOne({ _id: productId, seller: sellerId });
-    if (!product) {
-      return res.status(404).json({
-        success: false,
-        message: 'Product not found or access denied'
-      });
-    }
-
-    if (updateData.quantity !== undefined) {
-      updateData.stockStatus = updateData.quantity > 0 ? 'in-stock' : 'out-of-stock';
-      
-      const warehouse = await Warehouse.findOne({ seller: sellerId });
-      if (warehouse) {
-        const stockDifference = updateData.quantity - product.quantity;
-        warehouse.currentStock += stockDifference;
-        await warehouse.save();
-      }
-    }
-
-    const updatedProduct = await Product.findByIdAndUpdate(
-      productId,
-      { $set: updateData },
-      { new: true, runValidators: true }
-    ).populate('category', 'name');
-
-    res.status(200).json({
-      success: true,
-      message: 'Product updated successfully',
-      data: updatedProduct
-    });
-
-  } catch (error) {
-    console.error('Update product error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error updating product',
       error: error.message
     });
   }
