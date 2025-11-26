@@ -62,10 +62,37 @@ exports.addProduct = async (req, res) => {
       });
     }
 
+    // Fetch warehouse from request body or find warehouse that contains this seller
+    let warehouse;
+    if (productData.warehouseId) {
+      warehouse = await Warehouse.findById(productData.warehouseId);
+      if (!warehouse) {
+        return res.status(404).json({
+          success: false,
+          message: 'Warehouse not found'
+        });
+      }
+      
+      
+    } else {
+      // Find warehouse that contains this seller
+      warehouse = await Warehouse.findOne({ sellers: sellerId });
+      if (!warehouse) {
+        return res.status(404).json({
+          success: false,
+          message: 'No warehouse found for this seller'
+        });
+      }
+    }
+
+    // Find category by name and convert to ObjectId
     let categoryId = productData.category;
     if (productData.category && typeof productData.category === 'string') {
+      // Check if it's already an ObjectId or a category name
       const isObjectId = /^[0-9a-fA-F]{24}$/.test(productData.category);
+      
       if (!isObjectId) {
+        // It's a category name, find the category
         const category = await Category.findOne({ name: productData.category });
         if (!category) {
           return res.status(404).json({

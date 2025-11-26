@@ -68,10 +68,10 @@ const productSchema = new mongoose.Schema({
   
   variants: [
     {
-      name: { type: String, required: true },
+      name: { type: String },
       options: [
         {
-          value: { type: String, required: true },
+          value: { type: String },
           price: { type: Number },
           quantity: { type: Number, default: 0 },
           sku: { type: String }

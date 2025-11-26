@@ -5,8 +5,8 @@ const warehouseSchema = new mongoose.Schema(
     name: { type: String, required: true },
     code: { type: String, unique: true },
 
-    warehouseManager: { type: String, required: true },
-    contact: { type: String, required: true },
+    warehouseManager: { type: String },
+    contact: { type: String },
 
     promotor: {
       type: mongoose.Schema.Types.ObjectId,
