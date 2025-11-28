@@ -8,7 +8,6 @@ const {
   deleteWarehouse
 } = require('../../../controllers/admin/warehouse/warehouse');
 
-// Routes
 router.post('/', createWarehouse);       
 router.get('/', getWarehouses);  
 router.get('/:id', getWarehouseById);
