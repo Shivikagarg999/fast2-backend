@@ -102,15 +102,17 @@ const orderSchema = new mongoose.Schema(
     deliveryNotes: String,
     trackingNumber: String,
 
-    // Order cancellation fields
     cancelledAt: {
       type: Date
     },
     cancellationReason: {
       type: String
     },
-
-    // Refund fields for wallet returns
+    seller: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Seller',
+      required: true
+    },
     refundAmount: {
       type: Number,
       default: 0
@@ -127,11 +129,9 @@ const orderSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Pre-save middleware to generate orderId and secretCode
 orderSchema.pre('save', async function(next) {
   if (this.isNew) {
     try {
-      // Generate order ID
       const lastOrder = await this.constructor.findOne(
         { orderId: { $regex: /^FST\d+$/ } },
         { orderId: 1 },

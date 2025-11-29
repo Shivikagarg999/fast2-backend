@@ -1,8 +1,8 @@
-const Order = require("../../models/order");
-const Cart = require("../../models/cart");
-const mongoose = require("mongoose");
-const User = require("../../models/user");
-const Product = require("../../models/product");
+const Order = require('../../models/order');
+const Product = require('../../models/product');
+const User = require('../../models/user');
+const Seller = require('../../models/seller');
+const mongoose = require('mongoose');
 
 exports.createOrder = async (req, res) => {
   const session = await mongoose.startSession();
@@ -56,7 +56,7 @@ exports.createOrder = async (req, res) => {
 
     const products = await Product.find({ 
       _id: { $in: productIds } 
-    }).session(session);
+    }).populate('seller').session(session);
 
     products.forEach((product, index) => {
       console.log(`  Product ${index + 1}:`, {
@@ -199,6 +199,9 @@ exports.createOrder = async (req, res) => {
       pincode: shippingPincode
     };
 
+    // Get the primary seller (first product's seller)
+    const primarySeller = products[0]?.seller?._id;
+
     const order = new Order({
       user: userId,
       items,
@@ -209,7 +212,8 @@ exports.createOrder = async (req, res) => {
       paymentMethod,
       paymentStatus,
       walletDeduction,
-      cashOnDelivery
+      cashOnDelivery,
+      seller: primarySeller
     });
 
     await order.save({ session });
@@ -253,12 +257,465 @@ exports.createOrder = async (req, res) => {
 exports.getMyOrders = async (req, res) => {
   try {
     const userId = req.user._id;
-    const orders = await Order.find({ user: userId }).populate("items.product");
-    res.json(orders);
-  } catch (err) {
-    console.error("Get my orders error:", err);
-    res.status(500).json({ message: "Server error" });
+
+    const orders = await Order.find({ user: userId })
+      .populate('items.product')
+      .populate('seller', 'name businessName')
+      .sort({ createdAt: -1 });
+
+    res.status(200).json({
+      success: true,
+      orders: orders
+    });
+  } catch (error) {
+    console.error('Get orders error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch orders'
+    });
   }
+};
+
+exports.downloadInvoice = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const userId = req.user._id;
+
+    const order = await Order.findById(orderId)
+      .populate('user', 'name email phone')
+      .populate('seller', 'name businessName gstNumber panNumber address bankDetails')
+      .populate({
+        path: 'items.product',
+        populate: [
+          {
+            path: 'seller',
+            model: 'Seller',
+            select: 'name businessName gstNumber panNumber address'
+          },
+          {
+            path: 'category',
+            model: 'Category',
+            select: 'name'
+          }
+        ]
+      });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        error: "Order not found"
+      });
+    }
+
+    if (order.user._id.toString() !== userId.toString()) {
+      return res.status(403).json({
+        success: false,
+        error: "Access denied"
+      });
+    }
+
+    // If seller is not populated, try to get it from the first product
+    if (!order.seller) {
+      console.log('Seller not found in order, trying to get from first product...');
+      const firstProduct = order.items[0]?.product;
+      if (firstProduct?.seller) {
+        order.seller = firstProduct.seller;
+        console.log('Found seller from product:', order.seller.businessName);
+      } else {
+        // Create a default seller object if no seller is found
+        order.seller = {
+          businessName: 'Default Store',
+          gstNumber: 'Not Available',
+          address: {
+            street: 'Not Available',
+            city: 'Not Available',
+            state: 'Not Available',
+            pincode: 'Not Available'
+          }
+        };
+        console.log('Using default seller');
+      }
+    }
+
+    // Calculate GST and item totals
+    let orderSubtotal = 0;
+    let totalGST = 0;
+    let totalCGST = 0;
+    let totalSGST = 0;
+    let totalIGST = 0;
+    let deliveryFee = 25; // Fixed delivery fee
+
+    const itemsWithGST = order.items.map(item => {
+      const itemTotal = item.price * item.quantity;
+      const gstRate = item.product?.gstPercent || 0;
+      
+      // Determine if within state or inter-state
+      const sellerState = item.product?.seller?.address?.state;
+      const shippingState = order.shippingAddress.state;
+      const isWithinState = sellerState && shippingState && sellerState === shippingState;
+      
+      let gstAmount = 0;
+      let cgstAmount = 0;
+      let sgstAmount = 0;
+      let igstAmount = 0;
+      let taxableValue = itemTotal;
+
+      // Handle tax-inclusive pricing
+      if (item.product?.taxType === 'inclusive' && gstRate > 0) {
+        // Calculate taxable value from inclusive price
+        taxableValue = itemTotal / (1 + gstRate / 100);
+        gstAmount = itemTotal - taxableValue;
+      } else if (gstRate > 0) {
+        // Exclusive tax - GST is additional
+        gstAmount = (taxableValue * gstRate) / 100;
+      }
+
+      // Split GST into CGST/SGST or IGST
+      if (gstAmount > 0) {
+        if (isWithinState) {
+          // Within state: CGST + SGST (50% each)
+          cgstAmount = gstAmount / 2;
+          sgstAmount = gstAmount / 2;
+        } else {
+          // Inter-state: IGST
+          igstAmount = gstAmount;
+        }
+      }
+
+      const itemWithTax = {
+        ...item.toObject(),
+        itemTotal,
+        taxableValue,
+        gstRate,
+        gstAmount,
+        cgstAmount,
+        sgstAmount,
+        igstAmount,
+        totalWithTax: taxableValue + gstAmount,
+        isWithinState
+      };
+
+      orderSubtotal += itemTotal;
+      totalGST += gstAmount;
+      totalCGST += cgstAmount;
+      totalSGST += sgstAmount;
+      totalIGST += igstAmount;
+
+      return itemWithTax;
+    });
+
+    // Calculate final amounts
+    const grandTotalBeforeWallet = orderSubtotal + deliveryFee;
+    const finalPayableAmount = order.cashOnDelivery > 0 ? order.cashOnDelivery : order.finalAmount;
+
+    const invoiceData = {
+      orderId: order.orderId,
+      orderDate: order.createdAt,
+      secretCode: order.secretCode,
+      customer: {
+        name: order.user.name,
+        email: order.user.email,
+        phone: order.user.phone
+      },
+      seller: order.seller,
+      shippingAddress: order.shippingAddress,
+      items: itemsWithGST,
+      payment: {
+        method: order.paymentMethod,
+        status: order.paymentStatus,
+        walletDeduction: order.walletDeduction,
+        cashOnDelivery: order.cashOnDelivery,
+        finalAmount: order.finalAmount
+      },
+      summary: {
+        subtotal: orderSubtotal,
+        deliveryFee: deliveryFee,
+        totalBeforeWallet: grandTotalBeforeWallet,
+        totalGST: totalGST,
+        totalCGST: totalCGST,
+        totalSGST: totalSGST,
+        totalIGST: totalIGST,
+        grandTotal: finalPayableAmount,
+        walletDeduction: order.walletDeduction,
+        payableAmount: finalPayableAmount
+      },
+      gstSummary: {
+        withinState: totalCGST > 0 || totalSGST > 0,
+        interState: totalIGST > 0
+      }
+    };
+
+    console.log('Invoice data prepared:', {
+      orderId: invoiceData.orderId,
+      seller: invoiceData.seller ? {
+        businessName: invoiceData.seller.businessName,
+        hasAddress: !!invoiceData.seller.address
+      } : 'No seller',
+      itemsCount: invoiceData.items.length
+    });
+
+    const pdfBuffer = await this.generatePDFInvoice(invoiceData);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename=invoice-${order.orderId}.pdf`);
+    res.setHeader('Content-Length', pdfBuffer.length);
+
+    res.send(pdfBuffer);
+
+  } catch (err) {
+    console.error('Invoice generation error:', err);
+    return res.status(500).json({
+      success: false,
+      error: "Failed to generate invoice"
+    });
+  }
+};
+
+exports.generatePDFInvoice = async (invoiceData) => {
+  const PDFDocument = require('pdfkit');
+  
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ margin: 50, size: 'A4' });
+      const buffers = [];
+
+      doc.on('data', buffers.push.bind(buffers));
+      doc.on('end', () => {
+        const pdfData = Buffer.concat(buffers);
+        resolve(pdfData);
+      });
+
+      doc.fillColor('#1e40af')
+         .rect(0, 0, 600, 80)
+         .fill();
+      
+      doc.fillColor('#ffffff')
+         .fontSize(20)
+         .font('Helvetica-Bold')
+         .text('Fast 2', 50, 30);
+      
+      doc.fontSize(10)
+         .text('TAX INVOICE', 50, 55);
+
+      // Company Info (Right aligned)
+      doc.font('Helvetica')
+         .fontSize(8)
+         .text('GSTIN: 07AABCU9603R1ZM', 400, 35, { align: 'right' })
+         .text('PAN: AABCU9603R', 400, 47, { align: 'right' })
+         .text('123 Business Street, Delhi - 110001', 400, 59, { align: 'right' });
+
+      let yPosition = 100;
+
+      // Invoice & Order Details
+      doc.fillColor('#000000')
+         .fontSize(10)
+         .font('Helvetica-Bold')
+         .text('Invoice Details:', 50, yPosition);
+      
+      doc.font('Helvetica')
+         .text(`Invoice Number: ${invoiceData.orderId}`, 150, yPosition)
+         .text(`Invoice Date: ${new Date(invoiceData.orderDate).toLocaleDateString('en-IN')}`, 350, yPosition);
+      
+      yPosition += 15;
+      doc.text(`Order Number: ${invoiceData.orderId}`, 150, yPosition)
+         .text(`Place of Supply: ${invoiceData.shippingAddress.state}`, 350, yPosition);
+
+      yPosition += 25;
+
+      // Seller Details with null checks
+      doc.font('Helvetica-Bold')
+         .text('Sold By:', 50, yPosition);
+      
+      // FIX: Add null checks for seller properties
+      const sellerName = invoiceData.seller?.businessName || 'Store';
+      const sellerGST = invoiceData.seller?.gstNumber || 'Not Available';
+      
+      doc.font('Helvetica')
+         .text(sellerName, 150, yPosition)
+         .text(`GSTIN: ${sellerGST}`, 350, yPosition);
+      
+      yPosition += 12;
+      
+      // FIX: Add null checks for seller address
+      const sellerAddress = invoiceData.seller?.address ? 
+        `${invoiceData.seller.address.street || ''}, ${invoiceData.seller.address.city || ''}, ${invoiceData.seller.address.state || ''} - ${invoiceData.seller.address.pincode || ''}` : 
+        'Address not available';
+      
+      doc.text(sellerAddress, 150, yPosition, { width: 200 });
+
+      yPosition += 25;
+
+      // Customer Details
+      doc.font('Helvetica-Bold')
+         .text('Bill To:', 50, yPosition);
+      
+      doc.font('Helvetica')
+         .text(invoiceData.customer.name, 150, yPosition)
+         .text(`Phone: ${invoiceData.customer.phone}`, 350, yPosition);
+      
+      yPosition += 12;
+      doc.text(invoiceData.shippingAddress.addressLine, 150, yPosition, { width: 200 })
+         .text(`Email: ${invoiceData.customer.email}`, 350, yPosition);
+      
+      yPosition += 12;
+      doc.text(`${invoiceData.shippingAddress.city}, ${invoiceData.shippingAddress.state} - ${invoiceData.shippingAddress.pinCode}`, 150, yPosition);
+
+      yPosition += 30;
+
+      // Items Table Header
+      doc.font('Helvetica-Bold')
+         .fontSize(9);
+      
+      doc.text('Description', 50, yPosition);
+      doc.text('HSN', 200, yPosition);
+      doc.text('Qty', 250, yPosition);
+      doc.text('Rate', 280, yPosition);
+      doc.text('Amount', 320, yPosition);
+      doc.text('GST%', 370, yPosition);
+      doc.text('Taxable', 400, yPosition);
+      doc.text('GST', 450, yPosition);
+      doc.text('Total', 500, yPosition);
+
+      yPosition += 12;
+      doc.moveTo(50, yPosition).lineTo(550, yPosition).stroke();
+      yPosition += 5;
+
+      // Items List
+      doc.font('Helvetica')
+         .fontSize(8);
+      
+      invoiceData.items.forEach((item, index) => {
+        if (yPosition > 650) {
+          doc.addPage();
+          yPosition = 50;
+          // Add table header on new page
+          doc.font('Helvetica-Bold').fontSize(9);
+          doc.text('Description', 50, yPosition);
+          doc.text('HSN', 200, yPosition);
+          doc.text('Qty', 250, yPosition);
+          doc.text('Rate', 280, yPosition);
+          doc.text('Amount', 320, yPosition);
+          doc.text('GST%', 370, yPosition);
+          doc.text('Taxable', 400, yPosition);
+          doc.text('GST', 450, yPosition);
+          doc.text('Total', 500, yPosition);
+          yPosition += 12;
+          doc.moveTo(50, yPosition).lineTo(550, yPosition).stroke();
+          yPosition += 5;
+          doc.font('Helvetica').fontSize(8);
+        }
+
+        const product = item.product;
+        // FIX: Add null checks for product properties
+        doc.text(product?.name || 'Product', 50, yPosition, { width: 140 });
+        doc.text(product?.hsnCode || 'N/A', 200, yPosition);
+        doc.text(item.quantity.toString(), 250, yPosition);
+        doc.text(`₹${item.price.toFixed(2)}`, 280, yPosition);
+        doc.text(`₹${item.itemTotal.toFixed(2)}`, 320, yPosition);
+        doc.text(`${item.gstRate}%`, 370, yPosition);
+        doc.text(`₹${item.taxableValue.toFixed(2)}`, 400, yPosition);
+        doc.text(`₹${item.gstAmount.toFixed(2)}`, 450, yPosition);
+        doc.text(`₹${item.totalWithTax.toFixed(2)}`, 500, yPosition);
+        
+        yPosition += 20;
+      });
+
+      // Summary Section
+      yPosition += 10;
+      doc.moveTo(350, yPosition).lineTo(550, yPosition).stroke();
+      yPosition += 5;
+
+      doc.fontSize(9);
+      doc.text('Subtotal:', 400, yPosition);
+      doc.text(`₹${invoiceData.summary.subtotal.toFixed(2)}`, 500, yPosition, { align: 'right' });
+      
+      yPosition += 12;
+      doc.text('Delivery Charges:', 400, yPosition);
+      doc.text(`₹${invoiceData.summary.deliveryFee.toFixed(2)}`, 500, yPosition, { align: 'right' });
+
+      yPosition += 12;
+      doc.text('Total Before Tax:', 400, yPosition);
+      doc.text(`₹${invoiceData.summary.totalBeforeWallet.toFixed(2)}`, 500, yPosition, { align: 'right' });
+
+      // GST Breakdown
+      if (invoiceData.summary.totalCGST > 0) {
+        yPosition += 12;
+        doc.text('CGST:', 400, yPosition);
+        doc.text(`₹${invoiceData.summary.totalCGST.toFixed(2)}`, 500, yPosition, { align: 'right' });
+      }
+
+      if (invoiceData.summary.totalSGST > 0) {
+        yPosition += 12;
+        doc.text('SGST:', 400, yPosition);
+        doc.text(`₹${invoiceData.summary.totalSGST.toFixed(2)}`, 500, yPosition, { align: 'right' });
+      }
+
+      if (invoiceData.summary.totalIGST > 0) {
+        yPosition += 12;
+        doc.text('IGST:', 400, yPosition);
+        doc.text(`₹${invoiceData.summary.totalIGST.toFixed(2)}`, 500, yPosition, { align: 'right' });
+      }
+
+      yPosition += 12;
+      doc.text('Total GST:', 400, yPosition);
+      doc.text(`₹${invoiceData.summary.totalGST.toFixed(2)}`, 500, yPosition, { align: 'right' });
+
+      if (invoiceData.payment.walletDeduction > 0) {
+        yPosition += 12;
+        doc.text('Wallet Deduction:', 400, yPosition);
+        doc.text(`-₹${invoiceData.payment.walletDeduction.toFixed(2)}`, 500, yPosition, { align: 'right' });
+      }
+
+      yPosition += 15;
+      doc.moveTo(400, yPosition).lineTo(550, yPosition).stroke();
+      yPosition += 5;
+
+      doc.font('Helvetica-Bold')
+         .fontSize(11);
+      doc.text('Grand Total:', 400, yPosition);
+      doc.text(`₹${invoiceData.summary.payableAmount.toFixed(2)}`, 500, yPosition, { align: 'right' });
+
+      // Payment Details
+      yPosition += 30;
+      doc.font('Helvetica')
+         .fontSize(9);
+      doc.text('Payment Details:', 50, yPosition);
+      yPosition += 12;
+      doc.text(`Method: ${invoiceData.payment.method.toUpperCase()}`, 50, yPosition);
+      doc.text(`Status: ${invoiceData.payment.status}`, 200, yPosition);
+      
+      if (invoiceData.secretCode) {
+        yPosition += 12;
+        doc.text(`Secret Code: ${invoiceData.secretCode}`, 50, yPosition);
+      }
+
+      yPosition += 25;
+      doc.font('Helvetica-Bold')
+         .text('GST Summary:', 50, yPosition);
+      
+      yPosition += 15;
+      doc.font('Helvetica')
+         .fontSize(8);
+      
+      if (invoiceData.gstSummary.withinState) {
+        doc.text(`Within State Supply (CGST + SGST): ₹${invoiceData.summary.totalCGST.toFixed(2)} + ₹${invoiceData.summary.totalSGST.toFixed(2)}`, 50, yPosition);
+        yPosition += 10;
+      }
+      
+      if (invoiceData.gstSummary.interState) {
+        doc.text(`Inter-State Supply (IGST): ₹${invoiceData.summary.totalIGST.toFixed(2)}`, 50, yPosition);
+        yPosition += 10;
+      }
+
+      doc.fontSize(7)
+         .text('This is a computer-generated invoice and does not require a physical signature.', 50, 750, { align: 'center' })
+         .text('Thank you for your business!', 50, 760, { align: 'center' });
+
+      doc.end();
+    } catch (error) {
+      reject(error);
+    }
+  });
 };
 
 exports.updateOrderStatus = async (req, res) => {

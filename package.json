@@ -8,7 +8,8 @@
     "imagekit": "^6.0.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.17.2",
-    "multer": "^2.0.2"
+    "multer": "^2.0.2",
+    "pdfkit": "^0.17.2"
   },
   "name": "fast2backend",
   "version": "1.0.0",

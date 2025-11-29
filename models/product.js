@@ -23,7 +23,11 @@ const productSchema = new mongoose.Schema({
     commissionType: { type: String, enum: ['percentage', 'fixed'], default: 'percentage' },
     commissionAmount: { type: Number, default: 0 }
   },
-  
+    seller: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Seller',
+        required: true
+      },
   quantity: { type: Number, default: 0 },
   minOrderQuantity: { type: Number, default: 1 },
   maxOrderQuantity: { type: Number, default: 10 },
