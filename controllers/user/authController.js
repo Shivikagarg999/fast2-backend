@@ -324,7 +324,7 @@ exports.serveResetPasswordPage = (req, res) => {
                 }
                 
                 try {
-                    const response = await fetch('${process.env.BACKEND_URL}/api/auth/reset-password', {
+                    const response = await fetch('${process.env.BACKEND_URL}/api/user/reset-password', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'

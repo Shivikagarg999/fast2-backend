@@ -35,7 +35,7 @@ class EmailService {
     }
 
     async sendPasswordResetEmail(email, resetToken) {
-        const resetUrl = `https://api.fast2.in/api/auth/reset-password-page?token=${resetToken}`;
+        const resetUrl = `https://api.fast2.in/api/user/reset-password-page?token=${resetToken}`;
         
         const mailOptions = {
             from: this.emailUser,
