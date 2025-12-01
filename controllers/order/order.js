@@ -1,7 +1,6 @@
 const Order = require('../../models/order');
 const Product = require('../../models/product');
 const User = require('../../models/user');
-const Seller = require('../../models/seller');
 const mongoose = require('mongoose');
 
 exports.createOrder = async (req, res) => {
@@ -497,7 +496,6 @@ exports.generatePDFInvoice = async (invoiceData) => {
       doc.fontSize(10)
          .text('TAX INVOICE', 50, 55);
 
-      // Company Info (Right aligned)
       doc.font('Helvetica')
          .fontSize(8)
          .text('GSTIN: 07AABCU9603R1ZM', 400, 35, { align: 'right' })
@@ -506,7 +504,6 @@ exports.generatePDFInvoice = async (invoiceData) => {
 
       let yPosition = 100;
 
-      // Invoice & Order Details
       doc.fillColor('#000000')
          .fontSize(10)
          .font('Helvetica-Bold')
@@ -522,11 +519,9 @@ exports.generatePDFInvoice = async (invoiceData) => {
 
       yPosition += 25;
 
-      // Seller Details with null checks
       doc.font('Helvetica-Bold')
          .text('Sold By:', 50, yPosition);
       
-      // FIX: Add null checks for seller properties
       const sellerName = invoiceData.seller?.businessName || 'Store';
       const sellerGST = invoiceData.seller?.gstNumber || 'Not Available';
       
@@ -536,7 +531,6 @@ exports.generatePDFInvoice = async (invoiceData) => {
       
       yPosition += 12;
       
-      // FIX: Add null checks for seller address
       const sellerAddress = invoiceData.seller?.address ? 
         `${invoiceData.seller.address.street || ''}, ${invoiceData.seller.address.city || ''}, ${invoiceData.seller.address.state || ''} - ${invoiceData.seller.address.pincode || ''}` : 
         'Address not available';
@@ -545,7 +539,6 @@ exports.generatePDFInvoice = async (invoiceData) => {
 
       yPosition += 25;
 
-      // Customer Details
       doc.font('Helvetica-Bold')
          .text('Bill To:', 50, yPosition);
       
@@ -562,7 +555,6 @@ exports.generatePDFInvoice = async (invoiceData) => {
 
       yPosition += 30;
 
-      // Items Table Header
       doc.font('Helvetica-Bold')
          .fontSize(9);
       
@@ -580,7 +572,6 @@ exports.generatePDFInvoice = async (invoiceData) => {
       doc.moveTo(50, yPosition).lineTo(550, yPosition).stroke();
       yPosition += 5;
 
-      // Items List
       doc.font('Helvetica')
          .fontSize(8);
       
@@ -588,7 +579,6 @@ exports.generatePDFInvoice = async (invoiceData) => {
         if (yPosition > 650) {
           doc.addPage();
           yPosition = 50;
-          // Add table header on new page
           doc.font('Helvetica-Bold').fontSize(9);
           doc.text('Description', 50, yPosition);
           doc.text('HSN', 200, yPosition);
@@ -606,7 +596,6 @@ exports.generatePDFInvoice = async (invoiceData) => {
         }
 
         const product = item.product;
-        // FIX: Add null checks for product properties
         doc.text(product?.name || 'Product', 50, yPosition, { width: 140 });
         doc.text(product?.hsnCode || 'N/A', 200, yPosition);
         doc.text(item.quantity.toString(), 250, yPosition);
@@ -620,7 +609,6 @@ exports.generatePDFInvoice = async (invoiceData) => {
         yPosition += 20;
       });
 
-      // Summary Section
       yPosition += 10;
       doc.moveTo(350, yPosition).lineTo(550, yPosition).stroke();
       yPosition += 5;
@@ -675,7 +663,6 @@ exports.generatePDFInvoice = async (invoiceData) => {
       doc.text('Grand Total:', 400, yPosition);
       doc.text(`₹${invoiceData.summary.payableAmount.toFixed(2)}`, 500, yPosition, { align: 'right' });
 
-      // Payment Details
       yPosition += 30;
       doc.font('Helvetica')
          .fontSize(9);
