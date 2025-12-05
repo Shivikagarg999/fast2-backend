@@ -29,6 +29,11 @@ exports.register = async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, 10);
         const newReferralCode = generateReferralCode();
 
+        let referrer = null;
+        if (referralCode) {
+            referrer = await User.findOne({ referralCode });
+        }
+
         const user = await User.create({
             email,
             password: hashedPassword,
@@ -38,19 +43,21 @@ exports.register = async (req, res) => {
             isVerified: true
         });
 
-        if (referralCode) {
-            const referrer = await User.findOne({ referralCode });
-            if (referrer) {
-                referrer.wallet += 200;
-                await referrer.save();
-            }
+        if (referrer) {
+            referrer.wallet += 200;
+            referrer.referralCount += 1;
+            await referrer.save();
         }
 
         const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
             expiresIn: "7d"
         });
 
-        await emailService.sendWelcomeEmail(email);
+        try {
+            await emailService.sendWelcomeEmail(email);
+        } catch (emailError) {
+            console.error("Welcome email failed:", emailError.message);
+        }
 
         return res.status(201).json({
             message: "Registration successful",
@@ -63,6 +70,7 @@ exports.register = async (req, res) => {
             }
         });
     } catch (err) {
+        console.error("Register error:", err);
         return res.status(500).json({ error: err.message });
     }
 };
@@ -77,12 +85,12 @@ exports.login = async (req, res) => {
 
         const user = await User.findOne({ email });
         if (!user) {
-            return res.status(401).json({ error: "Invalid credentials" });
+            return res.status(401).json({ error: "Invalid email or password" });
         }
 
         const isPasswordValid = await bcrypt.compare(password, user.password);
         if (!isPasswordValid) {
-            return res.status(401).json({ error: "Invalid credentials" });
+            return res.status(401).json({ error: "Invalid email or password" });
         }
 
         const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
@@ -96,10 +104,13 @@ exports.login = async (req, res) => {
             referralCode: user.referralCode,
             user: {
                 id: user._id,
-                email: user.email
+                email: user.email,
+                name: user.name,
+                avatar: user.avatar
             }
         });
     } catch (err) {
+        console.error("Login error:", err);
         return res.status(500).json({ error: err.message });
     }
 };
@@ -113,25 +124,36 @@ exports.forgotPassword = async (req, res) => {
         }
 
         const user = await User.findOne({ email });
+        
+        // Always return success message for security
         if (!user) {
             return res.status(200).json({ 
-                message: "If email exists, reset instructions sent" 
+                message: "If an account exists with this email, reset instructions have been sent" 
             });
         }
 
+        // Generate reset token
         const resetToken = crypto.randomBytes(32).toString('hex');
         const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
 
+        // Save token to user
         user.resetPasswordToken = hashedToken;
-        user.resetPasswordExpires = Date.now() + 3600000;
+        user.resetPasswordExpires = Date.now() + 3600000; // 1 hour
         await user.save();
 
-        await emailService.sendPasswordResetEmail(email, resetToken);
+        // Send reset email
+        try {
+            await emailService.sendPasswordResetEmail(email, resetToken);
+        } catch (emailError) {
+            console.error("Reset email failed:", emailError.message);
+            return res.status(500).json({ error: "Failed to send reset email" });
+        }
 
         return res.status(200).json({ 
             message: "Password reset email sent" 
         });
     } catch (err) {
+        console.error("Forgot password error:", err);
         return res.status(500).json({ error: err.message });
     }
 };
@@ -139,6 +161,8 @@ exports.forgotPassword = async (req, res) => {
 exports.resetPassword = async (req, res) => {
     try {
         const { token, password } = req.body;
+
+        console.log("Reset password request received");
 
         if (!token || !password) {
             return res.status(400).json({ error: "Token and password required" });
@@ -148,28 +172,40 @@ exports.resetPassword = async (req, res) => {
             return res.status(400).json({ error: "Password must be at least 6 characters" });
         }
 
+        // Hash the token to compare with stored token
         const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
 
+        console.log("Looking for user with token:", hashedToken);
+        console.log("Current time:", new Date(Date.now()));
+
+        // Find user with valid token
         const user = await User.findOne({
             resetPasswordToken: hashedToken,
             resetPasswordExpires: { $gt: Date.now() }
         });
 
         if (!user) {
-            return res.status(400).json({ error: "Invalid or expired token" });
+            console.log("No valid user found or token expired");
+            return res.status(400).json({ error: "Invalid or expired reset token" });
         }
 
+        console.log("User found:", user.email);
+
+        // Update password
         const hashedPassword = await bcrypt.hash(password, 10);
         user.password = hashedPassword;
         user.resetPasswordToken = undefined;
         user.resetPasswordExpires = undefined;
         await user.save();
 
+        console.log("Password reset successful for:", user.email);
+
         return res.status(200).json({ 
-            message: "Password reset successful" 
+            message: "Password reset successful. You can now login with your new password." 
         });
     } catch (err) {
         console.error("Reset password error:", err);
+        console.error("Error stack:", err.stack);
         return res.status(500).json({ error: err.message });
     }
 };
@@ -325,7 +361,7 @@ exports.serveResetPasswordPage = (req, res) => {
                 }
                 
                 try {
-                    const response = await fetch('https://api.fast2.in/api/user/reset-password', {
+                    const response = await fetch('http://localhost:5000/api/user/reset-password', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -339,15 +375,16 @@ exports.serveResetPasswordPage = (req, res) => {
                     const data = await response.json();
                     
                     if (response.ok) {
-                        showMessage(data.message + '. You can now login with your new password.', 'success');
+                        showMessage(data.message, 'success');
                         document.getElementById('resetPasswordForm').reset();
                         setTimeout(() => {
-                            window.location.href = 'https://fast2.in/login';
+                            window.location.href = 'http://localhost:3000/login';
                         }, 3000);
                     } else {
                         showMessage(data.error || 'Failed to reset password', 'error');
                     }
                 } catch (error) {
+                    console.error('Reset error:', error);
                     showMessage('Network error. Please try again.', 'error');
                 }
             });
