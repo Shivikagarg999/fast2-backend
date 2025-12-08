@@ -188,7 +188,7 @@ exports.createOrder = async (req, res) => {
       if (product.seller) {
         const sellerId = product.seller._id.toString();
         const itemTotal = item.price * item.quantity;
-        const sellerAmount = (itemTotal * 30)
+        const sellerAmount = (itemTotal * 30) / 100;
         
         if (sellerMap.has(sellerId)) {
           const existing = sellerMap.get(sellerId);
@@ -268,8 +268,6 @@ exports.createOrder = async (req, res) => {
           { session }
         )
       );
-
-      console.log(`Created payout for seller ${sellerId}: ₹${sellerAmount} (30% of ₹${data.amount / 0.30})`);
     }
 
     await Promise.all(payoutPromises);
@@ -306,11 +304,6 @@ exports.createOrder = async (req, res) => {
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
-    console.error('Order creation error:', {
-      message: err.message,
-      stack: err.stack,
-      name: err.name
-    });
     return res.status(500).json({
       success: false,
       error: "Internal server error",
