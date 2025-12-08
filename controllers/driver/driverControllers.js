@@ -1,5 +1,6 @@
 const Order = require("../../models/order");
 const Driver = require("../../models/driver");
+const DriverEarning = require('../../models/driverEarnings');
 
 exports.getPendingOrders = async (req, res) => {
   try {
@@ -272,11 +273,25 @@ exports.markOrderDelivered = async (req, res) => {
         message: "Secret code must be verified before marking as delivered"
       });
     }
+
     order.status = "delivered";
-    order.paymentStatus= "paid";
+    order.paymentStatus = "paid";
     await order.save();
 
     const deliveryEarning = 18;
+    const driverEarning = new DriverEarning({
+      driver: driver._id,
+      order: order._id,
+      orderId: order.orderId,
+      amount: deliveryEarning,
+      type: 'delivery',
+      description: 'Delivery completed',
+      customerAddress: order.shippingAddress,
+      status: 'earned',
+      transactionDate: new Date()
+    });
+
+    await driverEarning.save();
 
     driver.earnings.totalEarnings += deliveryEarning;
     driver.earnings.currentBalance += deliveryEarning;
@@ -296,7 +311,8 @@ exports.markOrderDelivered = async (req, res) => {
         driverEarnings: {
           added: deliveryEarning,
           currentBalance: driver.earnings.currentBalance,
-          totalEarnings: driver.earnings.totalEarnings
+          totalEarnings: driver.earnings.totalEarnings,
+          earningId: driverEarning._id
         }
       }
     });

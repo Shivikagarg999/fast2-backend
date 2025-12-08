@@ -16,17 +16,13 @@ exports.getAllDrivers = async (req, res) => {
 
     const filter = {};
     
-    // Filter by status
     if (status) {
       filter['workInfo.status'] = status;
     }
-    
-    // Filter by availability
     if (availability) {
       filter['workInfo.availability'] = availability;
     }
     
-    // Search filter
     if (search) {
       filter.$or = [
         { 'personalInfo.name': { $regex: search, $options: 'i' } },
@@ -41,7 +37,7 @@ exports.getAllDrivers = async (req, res) => {
     sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
 
     const drivers = await Driver.find(filter)
-      .select('-auth.password') // Exclude password
+      .select('-auth.password')
       .sort(sort)
       .limit(limit * 1)
       .skip((page - 1) * limit);
@@ -103,7 +99,6 @@ exports.createDriver = async (req, res) => {
       bankDetails
     } = req.body;
 
-    // Check if email or phone already exists
     const existingDriver = await Driver.findOne({
       $or: [
         { 'personalInfo.email': personalInfo.email },
@@ -118,7 +113,6 @@ exports.createDriver = async (req, res) => {
       });
     }
 
-    // Check vehicle registration if provided
     if (vehicle && vehicle.registrationNumber) {
       const existingVehicle = await Driver.findOne({
         'vehicle.registrationNumber': vehicle.registrationNumber
@@ -132,11 +126,10 @@ exports.createDriver = async (req, res) => {
       }
     }
 
-    // Create driver with default password
     const driverData = {
       personalInfo,
       auth: {
-        password: 'default123', // Will be hashed by pre-save middleware
+        password: 'default123', 
         isVerified: true
       },
       workInfo: {
@@ -145,7 +138,6 @@ exports.createDriver = async (req, res) => {
       }
     };
 
-    // Add optional fields if provided
     if (address) driverData.address = address;
     if (vehicle) driverData.vehicle = vehicle;
     if (documents) driverData.documents = documents;
@@ -154,7 +146,6 @@ exports.createDriver = async (req, res) => {
     const driver = new Driver(driverData);
     await driver.save();
 
-    // Remove password from response
     const driverResponse = driver.toObject();
     delete driverResponse.auth.password;
 
@@ -192,7 +183,6 @@ exports.updateDriver = async (req, res) => {
       });
     }
 
-    // Update fields if provided
     if (personalInfo) {
       driver.personalInfo = { ...driver.personalInfo, ...personalInfo };
     }
@@ -247,7 +237,7 @@ exports.updateDriverStatus = async (req, res) => {
       req.params.id,
       { 
         'workInfo.status': status,
-        'workInfo.availability': 'offline' // Always set to offline when status changes
+        'workInfo.availability': 'offline'
       },
       { new: true }
     ).select('-auth.password');
@@ -313,7 +303,6 @@ exports.deleteDriver = async (req, res) => {
       });
     }
 
-    // Check if driver has active orders
     const activeOrder = await Order.findOne({
       driver: req.params.id,
       status: { $in: ['confirmed', 'shipped', 'out_for_delivery'] }
@@ -390,7 +379,6 @@ exports.getDriverEarnings = async (req, res) => {
       });
     }
 
-    // Get detailed earnings from orders for different periods
     const todayEarnings = await getDriverEarningsForPeriod(req.params.id, 'today');
     const weeklyEarnings = await getDriverEarningsForPeriod(req.params.id, 'week');
     const monthlyEarnings = await getDriverEarningsForPeriod(req.params.id, 'month');
