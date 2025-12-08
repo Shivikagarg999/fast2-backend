@@ -4,7 +4,6 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 
-// Routes
 const authRoutes = require('./routes/user/authRoutes');
 const productRoutes = require('./routes/product/productRoutes');
 const categoryRoutes = require('./routes/category/categoryRoutes');
@@ -14,13 +13,9 @@ const orderRoutes= require('./routes/order/orderRoutes');
 const addressesRoutes= require('./routes/addresses/addressesRoutes');
 const sellerRoutes= require('./routes/seller/seller');
 const referralRoutes= require('./routes/referral/referralRoutes');
-
-//Driver Routes
 const driverRoutes=require('./routes/driver/driverAuth');
 const driverOrderRoutes= require('./routes/driver/driverRoutes');
 const driverWithdrawRoutes=require('./routes/withdraw/withdraw');
-
-// Admin routes
 const adminRoutes = require('./routes/admin/adminRoutes');
 const adminUserRoutes = require('./routes/admin/user/adminUserRoutes');
 const adminRoleRoutes = require('./routes/admin/role/roleRoutes');
@@ -34,11 +29,8 @@ const adminDiscountRoutes= require('./routes/admin/discount/discount');
 const adminSellerRoutes= require('./routes/admin/seller/seller');
 const adminTermsRoutes= require('./routes/admin/termsAndConditions/terms');
 const adminProductRoutes= require('./routes/admin/product/product');
-const adminPayoutRoutes= require('./routes/admin/payout/payout');
-
 const app = express();
 
-// Allowed origins
 const allowedOrigins = [
   "https://fast2.in",
   "https://www.fast2.in",
@@ -52,7 +44,6 @@ const allowedOrigins = [
   "http://localhost:5174"
 ];
 
-// CORS Middleware
 app.use(
   cors({
     origin: function (origin, callback) {
@@ -77,13 +68,9 @@ app.use('/api/cart', cartRoutes);
 app.use('/api/order', orderRoutes);
 app.use('/api/seller', sellerRoutes);
 app.use('/api/referral', referralRoutes);
-
-// Driver Routes
 app.use('/api/driver', driverRoutes);
 app.use('/api/driverOrder', driverOrderRoutes);
 app.use('/api/driver/withdraw', driverWithdrawRoutes);
-
-// Admin Routes
 app.use('/api/admin/roles', adminRoleRoutes);
 app.use('/api/admin/promotor', adminPromotorRoutes);
 app.use('/api/admin/warehouse', adminWarehouseRoutes);
@@ -95,7 +82,6 @@ app.use('/api/admin/discount', adminDiscountRoutes);
 app.use('/api/admin/seller', adminSellerRoutes);
 app.use('/api/admin/terms', adminTermsRoutes);
 app.use('/api/admin/products', adminProductRoutes);
-app.use('/api/admin/payouts', adminPayoutRoutes);
 app.use('/api/admin', adminUserRoutes);
 app.use('/api/admin', adminRoutes);
 

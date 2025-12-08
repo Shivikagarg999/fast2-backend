@@ -1,78 +1,46 @@
 const mongoose = require('mongoose');
 
 const payoutSchema = new mongoose.Schema({
-  recipientType: {
-    type: String,
-    enum: ['promotor', 'seller'],
+  seller: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Seller',
     required: true
   },
-  recipientId: {
+  order: {
     type: mongoose.Schema.Types.ObjectId,
-    required: true,
-    refPath: 'recipientModel'
+    ref: 'Order',
+    required: true
   },
-  recipientModel: {
-    type: String,
-    required: true,
-    enum: ['Promotor', 'Seller']
-  },
-  recipientName: {
+  orderId: {
     type: String,
     required: true
   },
   amount: {
     type: Number,
-    required: true,
-    min: 0
+    required: true
   },
-  orderIds: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Order'
-  }],
-  orderCount: {
+  percentage: {
     type: Number,
-    default: 0
+    default: 30
   },
   status: {
     type: String,
-    enum: ['pending', 'processing', 'paid', 'failed'],
+    enum: ['pending', 'paid', 'failed'],
     default: 'pending'
   },
-  paymentMethod: {
-    type: String,
-    enum: ['bank_transfer', 'upi', 'cheque', 'cash', 'other'],
-    default: null
-  },
-  paymentDate: {
-    type: Date,
-    default: null
-  },
-  transactionId: {
-    type: String,
-    default: null
+  paidAt: {
+    type: Date
   },
   notes: {
-    type: String,
-    default: null
-  },
-  processedBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Admin',
-    default: null
-  },
-  bankDetails: {
-    accountNumber: String,
-    ifscCode: String,
-    bankName: String,
-    accountHolder: String
+    type: String
   }
-}, {
-  timestamps: true
-});
+}, { timestamps: true });
 
-// Indexes for efficient queries
-payoutSchema.index({ recipientId: 1, status: 1 });
-payoutSchema.index({ status: 1, createdAt: -1 });
-payoutSchema.index({ recipientType: 1, status: 1 });
+// Indexes
+payoutSchema.index({ seller: 1, createdAt: -1 });
+payoutSchema.index({ order: 1 });
+payoutSchema.index({ status: 1 });
 
-module.exports = mongoose.model('Payout', payoutSchema);
+const Payout = mongoose.model('Payout', payoutSchema);
+
+module.exports = Payout;

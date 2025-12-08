@@ -1,6 +1,9 @@
 const Order = require('../../models/order');
 const Product = require('../../models/product');
 const User = require('../../models/user');
+const Seller = require('../../models/seller');
+const Promotor = require('../../models/promotor');
+const Payout = require('../../models/payout');
 const mongoose = require('mongoose');
 
 exports.createOrder = async (req, res) => {
@@ -42,12 +45,7 @@ exports.createOrder = async (req, res) => {
       session.endSession();
       return res.status(400).json({
         success: false,
-        error: "Shipping address pincode is required",
-        debug: {
-          availableFields: Object.keys(shippingAddress),
-          receivedPinCode: shippingAddress.pinCode,
-          receivedPincode: shippingAddress.pincode
-        }
+        error: "Shipping address pincode is required"
       });
     }
 
@@ -55,17 +53,42 @@ exports.createOrder = async (req, res) => {
 
     const products = await Product.find({ 
       _id: { $in: productIds } 
-    }).populate('seller').session(session);
+    })
+    .populate('seller')
+    .populate('promotor.id')
+    .session(session);
 
-    products.forEach((product, index) => {
-      console.log(`  Product ${index + 1}:`, {
-        id: product._id.toString(),
-        name: product.name,
-        serviceablePincodes: product.serviceablePincodes,
-        serviceablePincodesCount: product.serviceablePincodes?.length || 0
+    if (products.length !== items.length) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        success: false,
+        error: "Some products not found",
+        requested: items.length,
+        found: products.length
       });
-    });
-    
+    }
+
+    const productsWithoutSellers = [];
+    for (const product of products) {
+      if (!product.seller) {
+        productsWithoutSellers.push({
+          productId: product._id,
+          productName: product.name
+        });
+      }
+    }
+
+    if (productsWithoutSellers.length > 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        error: "Some products don't have sellers assigned",
+        productsWithoutSellers
+      });
+    }
+
     const nonServiceableProducts = [];
     
     for (const item of items) {
@@ -81,26 +104,6 @@ exports.createOrder = async (req, res) => {
       }
       
       if (product.serviceablePincodes && product.serviceablePincodes.length > 0) {
-
-        product.serviceablePincodes.forEach((pincode, idx) => {
-          console.log(`  Pincode ${idx + 1}:`, {
-            raw: pincode,
-            type: typeof pincode,
-            length: pincode.length,
-            charCodes: Array.from(pincode.toString()).map(c => c.charCodeAt(0)),
-            trimmed: pincode.toString().trim(),
-            matches: pincode.toString().trim() === shippingPincode.toString().trim()
-          });
-        });
-
-        const comparisonMethods = {
-          direct: product.serviceablePincodes.includes(shippingPincode),
-          stringDirect: product.serviceablePincodes.map(p => p.toString()).includes(shippingPincode.toString()),
-          trimmed: product.serviceablePincodes.some(p => p.toString().trim() === shippingPincode.toString().trim()),
-          loose: product.serviceablePincodes.some(p => p.toString().replace(/\s/g, '') === shippingPincode.toString().replace(/\s/g, '')),
-          numberCompare: product.serviceablePincodes.some(p => parseInt(p) === parseInt(shippingPincode))
-        };
-
         const isServiceable = product.serviceablePincodes.some(pincode => 
           pincode.toString().trim() === shippingPincode.toString().trim()
         );
@@ -110,18 +113,9 @@ exports.createOrder = async (req, res) => {
             productId: product._id,
             productName: product.name,
             serviceablePincodes: product.serviceablePincodes,
-            requestedPincode: shippingPincode,
-            comparisonDetails: comparisonMethods
+            requestedPincode: shippingPincode
           });
         }
-      } else {
-        console.log('❌ No serviceable pincodes defined for product');
-        nonServiceableProducts.push({
-          productId: product._id,
-          productName: product.name,
-          serviceablePincodes: [],
-          requestedPincode: shippingPincode
-        });
       }
     }
 
@@ -132,16 +126,7 @@ exports.createOrder = async (req, res) => {
         success: false,
         error: "Some products are not serviceable to your pincode",
         nonServiceableProducts,
-        shippingPincode,
-        debug: {
-          pincodeAnalysis: {
-            value: shippingPincode,
-            type: typeof shippingPincode,
-            length: shippingPincode.length,
-            charCodes: Array.from(shippingPincode).map(c => c.charCodeAt(0)),
-            sourceField: shippingAddress.pincode ? 'pincode' : 'pinCode'
-          }
-        }
+        shippingPincode
       });
     }
 
@@ -183,13 +168,9 @@ exports.createOrder = async (req, res) => {
         user.wallet = parseFloat((walletBalance - walletDeduction).toFixed(2));
         await user.save({ session });
 
-        console.log('📊 Updated wallet balance:', user.wallet);
-
         if (cashOnDelivery === 0) {
           paymentStatus = "paid";
         }
-      } else {
-        console.log('💸 Wallet balance is 0, skipping wallet deduction');
       }
     }
 
@@ -198,12 +179,54 @@ exports.createOrder = async (req, res) => {
       pincode: shippingPincode
     };
 
-    // Get the primary seller (first product's seller)
-    const primarySeller = products[0]?.seller?._id;
+    const sellerMap = new Map(); 
+    
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const product = products[i];
+      
+      if (product.seller) {
+        const sellerId = product.seller._id.toString();
+        const itemTotal = item.price * item.quantity;
+        const sellerAmount = (itemTotal * 30)
+        
+        if (sellerMap.has(sellerId)) {
+          const existing = sellerMap.get(sellerId);
+          sellerMap.set(sellerId, {
+            amount: existing.amount + sellerAmount,
+            count: existing.count + 1,
+            seller: product.seller
+          });
+        } else {
+          sellerMap.set(sellerId, {
+            amount: sellerAmount,
+            count: 1,
+            seller: product.seller
+          });
+        }
+      }
+    }
+
+    const orderItems = items.map(item => ({
+      product: item.product,
+      quantity: item.quantity,
+      price: item.price
+    }));
+    const firstSellerEntry = Array.from(sellerMap.values())[0];
+    const primarySeller = firstSellerEntry ? firstSellerEntry.seller._id : null;
+
+    if (!primarySeller) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        error: "No valid sellers found for products"
+      });
+    }
 
     const order = new Order({
       user: userId,
-      items,
+      items: orderItems,
       total,
       coupon: coupon || {},
       finalAmount,
@@ -216,12 +239,44 @@ exports.createOrder = async (req, res) => {
     });
 
     await order.save({ session });
+
+    const payoutPromises = [];
+    
+    for (const [sellerId, data] of sellerMap.entries()) {
+      const sellerAmount = parseFloat(data.amount.toFixed(2));
+      
+      const payout = new Payout({
+        seller: sellerId,
+        order: order._id,
+        orderId: order.orderId,
+        amount: sellerAmount,
+        percentage: 30,
+        status: 'pending'
+      });
+      
+      payoutPromises.push(payout.save({ session }));
+
+      payoutPromises.push(
+        Seller.findByIdAndUpdate(
+          sellerId,
+          {
+            $inc: {
+              totalEarnings: sellerAmount,
+              totalOrders: 1
+            }
+          },
+          { session }
+        )
+      );
+
+      console.log(`Created payout for seller ${sellerId}: ₹${sellerAmount} (30% of ₹${data.amount / 0.30})`);
+    }
+
+    await Promise.all(payoutPromises);
     
     await session.commitTransaction();
     session.endSession();
     
-    await order.populate('user', 'name phone email');
-
     const response = {
       success: true,
       message: "Order created successfully",
@@ -236,6 +291,12 @@ exports.createOrder = async (req, res) => {
         status: order.status,
         items: order.items,
         shippingAddress: order.shippingAddress,
+        sellerPayouts: Array.from(sellerMap.entries()).map(([sellerId, data]) => ({
+          sellerId,
+          amount: parseFloat(data.amount.toFixed(2)),
+          percentage: 30,
+          status: 'pending'
+        })),
         createdAt: order.createdAt
       }
     };
@@ -245,10 +306,515 @@ exports.createOrder = async (req, res) => {
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
+    console.error('Order creation error:', {
+      message: err.message,
+      stack: err.stack,
+      name: err.name
+    });
     return res.status(500).json({
       success: false,
       error: "Internal server error",
       debug: err.message
+    });
+  }
+};
+
+exports.getOrderPayoutDetails = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+
+    const order = await Order.findById(orderId)
+      .populate('seller', 'name businessName gstNumber panNumber bankDetails')
+      .populate('user', 'name email phone')
+      .populate({
+        path: 'items.product',
+        populate: [
+          {
+            path: 'promotor.id',
+            model: 'Promotor',
+            select: 'name email phone commissionRate commissionType'
+          },
+          {
+            path: 'seller',
+            model: 'Seller',
+            select: 'name businessName gstNumber'
+          }
+        ]
+      });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        error: "Order not found"
+      });
+    }
+
+    let itemPayouts = [];
+    let totalTaxableValue = 0;
+    let totalGST = 0;
+    let totalPlatformFee = 0;
+    let totalPromotorCommission = 0;
+    let totalSellerPayout = 0;
+
+    for (const item of order.items) {
+      const product = item.product;
+      const itemTotal = item.price * item.quantity;
+      const gstRate = product.gstPercent || 0;
+      
+      let gstAmount = 0;
+      let taxableValue = itemTotal;
+      
+      if (product.taxType === 'inclusive' && gstRate > 0) {
+        taxableValue = itemTotal / (1 + gstRate / 100);
+        gstAmount = itemTotal - taxableValue;
+      } else if (gstRate > 0) {
+        gstAmount = (taxableValue * gstRate) / 100;
+      }
+
+      const platformFeeRate = 10;
+      const platformFee = (taxableValue * platformFeeRate) / 100;
+
+      let promotorCommission = 0;
+      if (product.promotor && product.promotor.id) {
+        if (product.promotor.commissionType === 'percentage') {
+          promotorCommission = (taxableValue * product.promotor.commissionRate) / 100;
+        } else {
+          promotorCommission = product.promotor.commissionAmount;
+        }
+      }
+
+      const sellerPayable = taxableValue - platformFee - promotorCommission;
+
+      totalTaxableValue += taxableValue;
+      totalGST += gstAmount;
+      totalPlatformFee += platformFee;
+      totalPromotorCommission += promotorCommission;
+      totalSellerPayout += sellerPayable;
+
+      itemPayouts.push({
+        productName: product.name,
+        quantity: item.quantity,
+        price: item.price,
+        itemTotal,
+        gstRate: `${gstRate}%`,
+        gstAmount,
+        taxableValue,
+        platformFee: {
+          amount: platformFee,
+          rate: `${platformFeeRate}%`
+        },
+        promotorCommission: {
+          amount: promotorCommission,
+          rate: product.promotor?.commissionRate ? `${product.promotor.commissionRate}%` : 'Fixed',
+          promotorName: product.promotor?.id?.name || 'N/A'
+        },
+        sellerPayable
+      });
+    }
+
+    const payoutDetails = {
+      orderId: order.orderId,
+      orderDate: order.createdAt,
+      seller: {
+        name: order.seller?.businessName || 'N/A',
+        gstNumber: order.seller?.gstNumber || 'N/A',
+        payout: {
+          totalPayable: totalSellerPayout,
+          gstDeduction: totalGST,
+          tdsDeduction: totalSellerPayout * 0.01,
+          netPayout: totalSellerPayout - (totalSellerPayout * 0.01),
+          status: order.payout?.seller?.payoutStatus || 'pending',
+          paidAt: order.payout?.seller?.paidAt
+        }
+      },
+      promotor: {
+        commissionAmount: totalPromotorCommission,
+        status: order.payout?.promotor?.payoutStatus || 'pending',
+        paidAt: order.payout?.promotor?.paidAt
+      },
+      platform: {
+        serviceFee: totalPlatformFee,
+        gstCollection: totalGST
+      },
+      itemBreakdown: itemPayouts,
+      summary: {
+        totalOrderValue: order.total,
+        totalTaxableValue,
+        totalGST,
+        totalPlatformFee,
+        totalPromotorCommission,
+        totalSellerPayout,
+        finalCustomerPayment: order.finalAmount
+      }
+    };
+
+    res.status(200).json({
+      success: true,
+      data: payoutDetails
+    });
+
+  } catch (error) {
+    console.error('Get payout details error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch payout details'
+    });
+  }
+};
+
+exports.processSellerPayout = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { paymentMethod, transactionId, notes } = req.body;
+
+    const order = await Order.findById(orderId)
+      .populate('seller', 'name businessName bankDetails totalEarnings');
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        error: "Order not found"
+      });
+    }
+
+    if (order.payout.seller.payoutStatus === 'paid') {
+      return res.status(400).json({
+        success: false,
+        error: "Payout already processed"
+      });
+    }
+
+    order.payout.seller.payoutStatus = 'paid';
+    order.payout.seller.paidAt = new Date();
+
+    if (order.seller) {
+      await Seller.findByIdAndUpdate(order.seller._id, {
+        $inc: { 
+          totalEarnings: order.payout.seller.netAmount,
+          totalOrders: 1
+        }
+      });
+    }
+
+    await order.save();
+
+    const payoutRecord = new Payout({
+      order: orderId,
+      seller: order.seller._id,
+      amount: order.payout.seller.netAmount,
+      type: 'seller',
+      paymentMethod,
+      transactionId,
+      status: 'completed',
+      notes
+    });
+
+    await payoutRecord.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Seller payout processed successfully",
+      data: {
+        orderId: order.orderId,
+        seller: order.seller?.businessName,
+        amount: order.payout.seller.netAmount,
+        paymentMethod,
+        transactionId,
+        paidAt: order.payout.seller.paidAt
+      }
+    });
+
+  } catch (error) {
+    console.error('Process seller payout error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to process seller payout'
+    });
+  }
+};
+
+exports.processPromotorPayout = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { paymentMethod, transactionId, notes } = req.body;
+
+    const order = await Order.findById(orderId)
+      .populate({
+        path: 'items.product',
+        populate: {
+          path: 'promotor.id',
+          model: 'Promotor'
+        }
+      });
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        error: "Order not found"
+      });
+    }
+
+    if (order.payout.promotor.payoutStatus === 'paid') {
+      return res.status(400).json({
+        success: false,
+        error: "Promotor payout already processed"
+      });
+    }
+
+    const promotorIds = [];
+    order.items.forEach(item => {
+      if (item.product.promotor && item.product.promotor.id) {
+        promotorIds.push(item.product.promotor.id._id);
+      }
+    });
+
+    const uniquePromotorIds = [...new Set(promotorIds)];
+
+    for (const promotorId of uniquePromotorIds) {
+      await Promotor.findByIdAndUpdate(promotorId, {
+        $inc: { totalCommissionEarned: order.payout.promotor.commissionAmount }
+      });
+    }
+
+    order.payout.promotor.payoutStatus = 'paid';
+    order.payout.promotor.paidAt = new Date();
+    await order.save();
+
+    const payoutRecord = new Payout({
+      order: orderId,
+      promotor: uniquePromotorIds[0],
+      amount: order.payout.promotor.commissionAmount,
+      type: 'promotor',
+      paymentMethod,
+      transactionId,
+      status: 'completed',
+      notes
+    });
+
+    await payoutRecord.save();
+
+    res.status(200).json({
+      success: true,
+      message: "Promotor payout processed successfully",
+      data: {
+        orderId: order.orderId,
+        promotors: uniquePromotorIds,
+        commissionAmount: order.payout.promotor.commissionAmount,
+        paymentMethod,
+        transactionId,
+        paidAt: order.payout.promotor.paidAt
+      }
+    });
+
+  } catch (error) {
+    console.error('Process promotor payout error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to process promotor payout'
+    });
+  }
+};
+
+exports.getSellerPayouts = async (req, res) => {
+  try {
+    const { sellerId } = req.params;
+    const { startDate, endDate, status, page = 1, limit = 10 } = req.query;
+
+    const filter = { seller: sellerId };
+
+    if (status) {
+      filter['payout.seller.payoutStatus'] = status;
+    }
+
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) filter.createdAt.$lte = new Date(endDate);
+    }
+
+    const orders = await Order.find(filter)
+      .populate('user', 'name email')
+      .sort({ createdAt: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
+
+    const total = await Order.countDocuments(filter);
+
+    const payoutSummary = await Order.aggregate([
+      {
+        $match: filter
+      },
+      {
+        $group: {
+          _id: '$payout.seller.payoutStatus',
+          totalAmount: { $sum: '$payout.seller.netAmount' },
+          totalOrders: { $sum: 1 }
+        }
+      }
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: orders,
+      summary: payoutSummary,
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / limit),
+        totalOrders: total
+      }
+    });
+
+  } catch (error) {
+    console.error('Get seller payouts error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch seller payouts'
+    });
+  }
+};
+
+exports.getPromotorPayouts = async (req, res) => {
+  try {
+    const { promotorId } = req.params;
+    const { startDate, endDate, status, page = 1, limit = 10 } = req.query;
+
+    const orders = await Order.find({
+      'items.product': {
+        $in: await Product.find({ 'promotor.id': promotorId }).distinct('_id')
+      }
+    })
+    .populate('user', 'name email')
+    .populate('seller', 'businessName')
+    .sort({ createdAt: -1 })
+    .limit(limit * 1)
+    .skip((page - 1) * limit);
+
+    const filteredOrders = orders.filter(order => {
+      return order.items.some(item => 
+        item.product && 
+        item.product.promotor && 
+        item.product.promotor.id && 
+        item.product.promotor.id.toString() === promotorId
+      );
+    });
+
+    const total = filteredOrders.length;
+
+    let totalCommission = 0;
+    filteredOrders.forEach(order => {
+      totalCommission += order.payout.promotor.commissionAmount;
+    });
+
+    res.status(200).json({
+      success: true,
+      data: filteredOrders,
+      summary: {
+        totalCommission,
+        totalOrders: total
+      },
+      pagination: {
+        currentPage: parseInt(page),
+        totalPages: Math.ceil(total / limit),
+        totalOrders: total
+      }
+    });
+
+  } catch (error) {
+    console.error('Get promotor payouts error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch promotor payouts'
+    });
+  }
+};
+
+exports.getPayoutSummary = async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+
+    const dateFilter = {};
+    if (startDate) dateFilter.$gte = new Date(startDate);
+    if (endDate) dateFilter.$lte = new Date(endDate);
+
+    const matchStage = {};
+    if (startDate || endDate) {
+      matchStage.createdAt = dateFilter;
+    }
+
+    const summary = await Order.aggregate([
+      {
+        $match: matchStage
+      },
+      {
+        $group: {
+          _id: null,
+          totalSellerPayout: { $sum: '$payout.seller.netAmount' },
+          totalPromotorPayout: { $sum: '$payout.promotor.commissionAmount' },
+          totalPlatformFee: { $sum: '$payout.platform.serviceFee' },
+          totalGSTCollection: { $sum: '$payout.platform.gstCollection' },
+          totalOrders: { $sum: 1 },
+          pendingSellerPayouts: {
+            $sum: {
+              $cond: [{ $eq: ['$payout.seller.payoutStatus', 'pending'] }, '$payout.seller.netAmount', 0]
+            }
+          },
+          pendingPromotorPayouts: {
+            $sum: {
+              $cond: [{ $eq: ['$payout.promotor.payoutStatus', 'pending'] }, '$payout.promotor.commissionAmount', 0]
+            }
+          }
+        }
+      }
+    ]);
+
+    const sellerPayoutStats = await Order.aggregate([
+      {
+        $match: matchStage
+      },
+      {
+        $group: {
+          _id: '$payout.seller.payoutStatus',
+          totalAmount: { $sum: '$payout.seller.netAmount' },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    const promotorPayoutStats = await Order.aggregate([
+      {
+        $match: matchStage
+      },
+      {
+        $group: {
+          _id: '$payout.promotor.payoutStatus',
+          totalAmount: { $sum: '$payout.promotor.commissionAmount' },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        summary: summary[0] || {
+          totalSellerPayout: 0,
+          totalPromotorPayout: 0,
+          totalPlatformFee: 0,
+          totalGSTCollection: 0,
+          totalOrders: 0,
+          pendingSellerPayouts: 0,
+          pendingPromotorPayouts: 0
+        },
+        sellerPayoutStats,
+        promotorPayoutStats
+      }
+    });
+
+  } catch (error) {
+    console.error('Get payout summary error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch payout summary'
     });
   }
 };
@@ -313,15 +879,11 @@ exports.downloadInvoice = async (req, res) => {
       });
     }
 
-    // If seller is not populated, try to get it from the first product
     if (!order.seller) {
-      console.log('Seller not found in order, trying to get from first product...');
       const firstProduct = order.items[0]?.product;
       if (firstProduct?.seller) {
         order.seller = firstProduct.seller;
-        console.log('Found seller from product:', order.seller.businessName);
       } else {
-        // Create a default seller object if no seller is found
         order.seller = {
           businessName: 'Default Store',
           gstNumber: 'Not Available',
@@ -332,23 +894,20 @@ exports.downloadInvoice = async (req, res) => {
             pincode: 'Not Available'
           }
         };
-        console.log('Using default seller');
       }
     }
 
-    // Calculate GST and item totals
     let orderSubtotal = 0;
     let totalGST = 0;
     let totalCGST = 0;
     let totalSGST = 0;
     let totalIGST = 0;
-    let deliveryFee = 25; // Fixed delivery fee
+    let deliveryFee = 25;
 
     const itemsWithGST = order.items.map(item => {
       const itemTotal = item.price * item.quantity;
       const gstRate = item.product?.gstPercent || 0;
       
-      // Determine if within state or inter-state
       const sellerState = item.product?.seller?.address?.state;
       const shippingState = order.shippingAddress.state;
       const isWithinState = sellerState && shippingState && sellerState === shippingState;
@@ -359,24 +918,18 @@ exports.downloadInvoice = async (req, res) => {
       let igstAmount = 0;
       let taxableValue = itemTotal;
 
-      // Handle tax-inclusive pricing
       if (item.product?.taxType === 'inclusive' && gstRate > 0) {
-        // Calculate taxable value from inclusive price
         taxableValue = itemTotal / (1 + gstRate / 100);
         gstAmount = itemTotal - taxableValue;
       } else if (gstRate > 0) {
-        // Exclusive tax - GST is additional
         gstAmount = (taxableValue * gstRate) / 100;
       }
 
-      // Split GST into CGST/SGST or IGST
       if (gstAmount > 0) {
         if (isWithinState) {
-          // Within state: CGST + SGST (50% each)
           cgstAmount = gstAmount / 2;
           sgstAmount = gstAmount / 2;
         } else {
-          // Inter-state: IGST
           igstAmount = gstAmount;
         }
       }
@@ -403,7 +956,6 @@ exports.downloadInvoice = async (req, res) => {
       return itemWithTax;
     });
 
-    // Calculate final amounts
     const grandTotalBeforeWallet = orderSubtotal + deliveryFee;
     const finalPayableAmount = order.cashOnDelivery > 0 ? order.cashOnDelivery : order.finalAmount;
 
@@ -443,15 +995,6 @@ exports.downloadInvoice = async (req, res) => {
         interState: totalIGST > 0
       }
     };
-
-    console.log('Invoice data prepared:', {
-      orderId: invoiceData.orderId,
-      seller: invoiceData.seller ? {
-        businessName: invoiceData.seller.businessName,
-        hasAddress: !!invoiceData.seller.address
-      } : 'No seller',
-      itemsCount: invoiceData.items.length
-    });
 
     const pdfBuffer = await this.generatePDFInvoice(invoiceData);
 
@@ -625,7 +1168,6 @@ exports.generatePDFInvoice = async (invoiceData) => {
       doc.text('Total Before Tax:', 400, yPosition);
       doc.text(`₹${invoiceData.summary.totalBeforeWallet.toFixed(2)}`, 500, yPosition, { align: 'right' });
 
-      // GST Breakdown
       if (invoiceData.summary.totalCGST > 0) {
         yPosition += 12;
         doc.text('CGST:', 400, yPosition);

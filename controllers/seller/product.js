@@ -19,26 +19,11 @@ exports.addProduct = async (req, res) => {
       }
     }
 
-    if (productData.features && typeof productData.features === 'string') {
-      try {
-        productData.features = JSON.parse(productData.features);
-      } catch (error) {
-        console.error('Error parsing features:', error);
-      }
-    }
-
-    if (productData.tags && typeof productData.tags === 'string') {
-      try {
-        productData.tags = JSON.parse(productData.tags);
-      } catch (error) {
-        console.error('Error parsing tags:', error);
-      }
-    }
-
     let parsedAvailablePincodes = [];
     if (productData.availablePincodes) {
       try {
-        parsedAvailablePincodes = JSON.parse(productData.availablePincodes);
+        parsedAvailablePincodes = typeof productData.availablePincodes === 'string' ? 
+          JSON.parse(productData.availablePincodes) : productData.availablePincodes;
       } catch (error) {
         console.error('Error parsing availablePincodes:', error);
       }
@@ -47,7 +32,8 @@ exports.addProduct = async (req, res) => {
     let parsedServiceablePincodes = [];
     if (productData.serviceablePincodes) {
       try {
-        parsedServiceablePincodes = JSON.parse(productData.serviceablePincodes);
+        parsedServiceablePincodes = typeof productData.serviceablePincodes === 'string' ?
+          JSON.parse(productData.serviceablePincodes) : productData.serviceablePincodes;
         if (!Array.isArray(parsedServiceablePincodes)) parsedServiceablePincodes = [];
       } catch (error) {
         console.error('Error parsing serviceablePincodes:', error);
@@ -58,7 +44,8 @@ exports.addProduct = async (req, res) => {
     let parsedVariants = [];
     if (productData.variants) {
       try {
-        parsedVariants = JSON.parse(productData.variants);
+        parsedVariants = typeof productData.variants === 'string' ?
+          JSON.parse(productData.variants) : productData.variants;
         if (!Array.isArray(parsedVariants)) parsedVariants = [];
       } catch (error) {
         console.error('Error parsing variants:', error);
@@ -81,25 +68,6 @@ exports.addProduct = async (req, res) => {
       });
     }
 
-    let warehouse;
-    if (productData.warehouseId) {
-      warehouse = await Warehouse.findById(productData.warehouseId);
-      if (!warehouse) {
-        return res.status(404).json({
-          success: false,
-          message: 'Warehouse not found'
-        });
-      }
-    } else {
-      warehouse = await Warehouse.findOne({ sellers: sellerId });
-      if (!warehouse) {
-        return res.status(404).json({
-          success: false,
-          message: 'No warehouse found for this seller'
-        });
-      }
-    }
-
     let categoryId = productData.category;
     if (productData.category && typeof productData.category === 'string') {
       const isObjectId = /^[0-9a-fA-F]{24}$/.test(productData.category);
@@ -118,9 +86,9 @@ exports.addProduct = async (req, res) => {
 
     const foundCategory = await Category.findById(categoryId);
     const productTaxInfo = {
-      hsnCode: productData.hsnCode || foundCategory.hsnCode,
-      gstPercent: productData.gstPercent !== undefined ? productData.gstPercent : foundCategory.gstPercent,
-      taxType: productData.taxType || foundCategory.taxType
+      hsnCode: productData.hsnCode || foundCategory?.hsnCode,
+      gstPercent: productData.gstPercent !== undefined ? productData.gstPercent : foundCategory?.gstPercent,
+      taxType: productData.taxType || foundCategory?.taxType
     };
 
     const stockStatus = productData.quantity > 0 ? 'in-stock' : 'out-of-stock';
@@ -137,6 +105,39 @@ exports.addProduct = async (req, res) => {
     const discountPercentage = productData.oldPrice > 0 ? 
       Math.round(((productData.oldPrice - productData.price) / productData.oldPrice) * 100) : 0;
 
+    const imagekit = require('../../utils/imagekit');
+    let uploadedImages = [];
+    
+    if (req.files && req.files.length > 0) {
+      console.log('Uploading images to ImageKit...');
+      
+      for (let i = 0; i < req.files.length; i++) {
+        const imageFile = req.files[i];
+        
+        try {
+          const uploadedImage = await imagekit.upload({
+            file: imageFile.buffer.toString('base64'),
+            fileName: `product_${sellerId}_${Date.now()}_${i}.jpg`,
+            folder: '/seller-products/images'
+          });
+          
+          console.log(`Image ${i} uploaded:`, uploadedImage.url);
+          
+          uploadedImages.push({
+            url: uploadedImage.url,
+            altText: productData.imageAltText || `${productData.name} - Image ${i + 1}`,
+            isPrimary: i === 0,
+            order: i
+          });
+          
+        } catch (imageError) {
+          console.error(`Error uploading image ${i}:`, imageError);
+        }
+      }
+    }
+    
+    console.log('Final images array:', uploadedImages);
+
     const newProduct = new Product({
       name: productData.name,
       description: productData.description,
@@ -145,30 +146,27 @@ exports.addProduct = async (req, res) => {
       price: productData.price,
       oldPrice: productData.oldPrice || 0,
       discountPercentage: discountPercentage,
+      hsnCode: productTaxInfo.hsnCode,
+      gstPercent: productTaxInfo.gstPercent,
+      taxType: productTaxInfo.taxType,
       unit: productData.unit,
       unitValue: productData.unitValue,
-      ...productTaxInfo,
       promotor: {
         id: seller.promotor?._id,
         commissionRate: promotorCommission,
         commissionType: commissionType,
         commissionAmount: commissionAmount
       },
+      seller: sellerId,
       quantity: productData.quantity || 0,
       minOrderQuantity: productData.minOrderQuantity || 1,
       maxOrderQuantity: productData.maxOrderQuantity || 10,
       stockStatus: stockStatus,
-      lowStockThreshold: 10,
+      lowStockThreshold: productData.lowStockThreshold || 10,
       weight: productData.weight,
       weightUnit: productData.weightUnit || 'g',
       dimensions: productData.dimensions,
-      features: productData.features,
-      tags: productData.tags,
-      warehouse: {
-        id: warehouse._id,
-        code: warehouse.code,
-        storageType: productData.storageType || warehouse.storageType
-      },
+      images: uploadedImages,
       delivery: {
         estimatedDeliveryTime: productData.estimatedDeliveryTime,
         deliveryCharges: productData.deliveryCharges || 0,
@@ -184,10 +182,6 @@ exports.addProduct = async (req, res) => {
 
     seller.products.push(newProduct._id);
     await seller.save();
-
-    warehouse.products.push(newProduct._id);
-    warehouse.currentStock += productData.quantity || 0;
-    await warehouse.save();
 
     if (seller.promotor?._id) {
       await Promotor.findByIdAndUpdate(

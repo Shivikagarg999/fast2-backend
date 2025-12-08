@@ -60,7 +60,6 @@ const orderSchema = new mongoose.Schema(
       required: true
     },
     
-    // Wallet Payment Fields
     walletDeduction: {
       type: Number,
       default: 0
@@ -124,6 +123,36 @@ const orderSchema = new mongoose.Schema(
     },
     refundedAt: {
       type: Date
+    },
+
+    payout: {
+      seller: {
+        payableAmount: { type: Number, default: 0 },
+        gstDeduction: { type: Number, default: 0 },
+        tdsDeduction: { type: Number, default: 0 },
+        netAmount: { type: Number, default: 0 },
+        payoutStatus: { 
+          type: String, 
+          enum: ["pending", "processing", "paid", "failed"], 
+          default: "pending" 
+        },
+        paidAt: { type: Date }
+      },
+      promotor: {
+        commissionAmount: { type: Number, default: 0 },
+        commissionType: { type: String, enum: ["percentage", "fixed"], default: "percentage" },
+        commissionRate: { type: Number, default: 0 },
+        payoutStatus: { 
+          type: String, 
+          enum: ["pending", "processing", "paid", "failed"], 
+          default: "pending" 
+        },
+        paidAt: { type: Date }
+      },
+      platform: {
+        serviceFee: { type: Number, default: 0 },
+        gstCollection: { type: Number, default: 0 }
+      }
     }
   },
   { timestamps: true }
@@ -146,7 +175,6 @@ orderSchema.pre('save', async function(next) {
       
       this.orderId = `FST${String(nextNumber).padStart(3, '0')}`;
       
-      // Generate unique secret code
       let secretCode;
       let isUnique = false;
       
@@ -160,12 +188,10 @@ orderSchema.pre('save', async function(next) {
       
       this.secretCode = secretCode;
 
-      // Auto-calculate cashOnDelivery if not set
       if (this.walletDeduction > 0 && this.cashOnDelivery === 0) {
         this.cashOnDelivery = this.finalAmount - this.walletDeduction;
       }
 
-      // Update payment status if fully paid by wallet
       if (this.walletDeduction >= this.finalAmount) {
         this.paymentStatus = "paid";
         this.cashOnDelivery = 0;
@@ -176,7 +202,6 @@ orderSchema.pre('save', async function(next) {
     }
   }
 
-  // Ensure cashOnDelivery is never negative
   if (this.cashOnDelivery < 0) {
     this.cashOnDelivery = 0;
   }
@@ -184,12 +209,10 @@ orderSchema.pre('save', async function(next) {
   next();
 });
 
-// Virtual for display amount (final amount after all deductions)
 orderSchema.virtual('displayAmount').get(function() {
   return this.cashOnDelivery > 0 ? this.cashOnDelivery : this.finalAmount;
 });
 
-// Virtual for payment method display
 orderSchema.virtual('paymentMethodDisplay').get(function() {
   if (this.walletDeduction > 0 && this.cashOnDelivery > 0) {
     return 'Wallet + COD';
@@ -200,13 +223,11 @@ orderSchema.virtual('paymentMethodDisplay').get(function() {
   }
 });
 
-// Method to check if order can be cancelled
 orderSchema.methods.canCancel = function() {
   const nonCancellableStatuses = ['picked-up', 'delivered'];
   return !nonCancellableStatuses.includes(this.status);
 };
 
-// Method to process cancellation with wallet refund
 orderSchema.methods.processCancellation = async function(reason = '') {
   if (!this.canCancel()) {
     throw new Error('Order cannot be cancelled at this stage');
@@ -216,12 +237,10 @@ orderSchema.methods.processCancellation = async function(reason = '') {
   this.cancelledAt = new Date();
   this.cancellationReason = reason;
 
-  // Refund wallet amount if any was deducted
   if (this.walletDeduction > 0) {
     this.refundAmount = this.walletDeduction;
     this.refundStatus = 'pending';
     
-    // Refund to user's wallet
     const User = mongoose.model('User');
     await User.findByIdAndUpdate(this.user, {
       $inc: { wallet: this.walletDeduction }
@@ -234,14 +253,12 @@ orderSchema.methods.processCancellation = async function(reason = '') {
   return this.save();
 };
 
-// Static method to get orders by user with wallet payments
 orderSchema.statics.findByUserWithWallet = function(userId) {
   return this.find({ user: userId })
     .populate('items.product')
     .sort({ createdAt: -1 });
 };
 
-// Static method to get wallet payment summary
 orderSchema.statics.getWalletPaymentSummary = async function(userId) {
   const result = await this.aggregate([
     {
@@ -262,7 +279,6 @@ orderSchema.statics.getWalletPaymentSummary = async function(userId) {
   return result.length > 0 ? result[0] : { totalWalletSpent: 0, totalOrders: 0 };
 };
 
-// Indexes for better performance
 orderSchema.index({ orderId: 1 });
 orderSchema.index({ secretCode: 1 });
 orderSchema.index({ user: 1, createdAt: -1 });

@@ -6,190 +6,210 @@ const Order = require('../../models/order');
 
 const createProduct = async (req, res) => {
   try {
-    const {
-      name,
-      description,
-      brand,
-      category,
-      price,
-      oldPrice,
-      unit,
-      unitValue,
-      promotor,
-      commissionRate,
-      commissionType,
-      quantity,
-      minOrderQuantity,
-      maxOrderQuantity,
-      weight,
-      weightUnit,
-      dimensions,
-      warehouseId,
-      storageType,
-      estimatedDeliveryTime,
-      deliveryCharges,
-      freeDeliveryThreshold,
-      availablePincodes,
-      serviceablePincodes,
-      hsnCode,
-      gstPercent,
-      taxType,
-      videoDuration,
-      videoFileSize,
-      variants 
-    } = req.body;
 
-    // Check required fields
-    if (!req.files || !req.files.images) {
-      return res.status(400).json({ message: 'At least one image is required' });
-    }
+        console.log('=== FILE DEBUG ===');
+    console.log('Request headers:', req.headers['content-type']);
+    console.log('req.files exists?', !!req.files);
+    console.log('req.files:', req.files);
+    console.log('req.body:', req.body);
+    console.log('=== END DEBUG ===');
+    
+    const sellerId = req.seller.id;
+    const productData = req.body;
 
-    // Validate category
-    const foundCategory = await Category.findById(category);
-    if (!foundCategory) return res.status(404).json({ message: 'Category not found' });
+    console.log('Received files:', req.files);
+    console.log('Received body:', req.body);
 
-    // Validate promotor
-    const foundPromotor = await Promotor.findById(promotor);
-    if (!foundPromotor) return res.status(404).json({ message: 'Promotor not found' });
-
-    // Handle images upload (max 5)
-    const imageFiles = Array.isArray(req.files.images) ? req.files.images : [req.files.images];
-    if (imageFiles.length > 5) {
-      return res.status(400).json({ message: 'Maximum 5 images allowed per product' });
-    }
-
-    const uploadedImages = [];
-    for (let i = 0; i < imageFiles.length; i++) {
-      const imageFile = imageFiles[i];
-      const uploadedImage = await imagekit.upload({
-        file: imageFile.buffer.toString('base64'),
-        fileName: `product_${Date.now()}_${i}.jpg`,
-        folder: '/products/images'
-      });
-
-      uploadedImages.push({
-        url: uploadedImage.url,
-        altText: `${name} - Image ${i + 1}`,
-        isPrimary: i === 0,
-        order: i
-      });
-    }
-
-    // Handle video upload if provided
-    let videoData = {};
-    if (req.files.video) {
-      const videoFile = Array.isArray(req.files.video) ? req.files.video[0] : req.files.video;
-      const uploadedVideo = await imagekit.upload({
-        file: videoFile.buffer.toString('base64'),
-        fileName: `product_${Date.now()}_video.mp4`,
-        folder: '/products/videos'
-      });
-
-      videoData = {
-        url: uploadedVideo.url,
-        thumbnail: uploadedImages[0]?.url || '',
-        duration: videoDuration || 0,
-        fileSize: videoFileSize || videoFile.size
-      };
-    }
-
-    // Parse JSON fields
-    let parsedDimensions = {};
-    if (dimensions) {
+    if (productData.dimensions && typeof productData.dimensions === 'string') {
       try {
-        parsedDimensions = JSON.parse(dimensions);
+        productData.dimensions = JSON.parse(productData.dimensions);
       } catch (error) {
         console.error('Error parsing dimensions:', error);
       }
     }
 
-    let parsedPincodes = [];
-    if (availablePincodes) {
+    let parsedAvailablePincodes = [];
+    if (productData.availablePincodes) {
       try {
-        parsedPincodes = JSON.parse(availablePincodes);
+        parsedAvailablePincodes = typeof productData.availablePincodes === 'string' ? 
+          JSON.parse(productData.availablePincodes) : productData.availablePincodes;
       } catch (error) {
         console.error('Error parsing availablePincodes:', error);
       }
     }
 
     let parsedServiceablePincodes = [];
-    if (serviceablePincodes) {
+    if (productData.serviceablePincodes) {
       try {
-        parsedServiceablePincodes = JSON.parse(serviceablePincodes);
+        parsedServiceablePincodes = typeof productData.serviceablePincodes === 'string' ?
+          JSON.parse(productData.serviceablePincodes) : productData.serviceablePincodes;
         if (!Array.isArray(parsedServiceablePincodes)) parsedServiceablePincodes = [];
       } catch (error) {
         console.error('Error parsing serviceablePincodes:', error);
+        parsedServiceablePincodes = [];
       }
     }
 
     let parsedVariants = [];
-    if (variants) {
+    if (productData.variants) {
       try {
-        parsedVariants = JSON.parse(variants);
+        parsedVariants = typeof productData.variants === 'string' ?
+          JSON.parse(productData.variants) : productData.variants;
         if (!Array.isArray(parsedVariants)) parsedVariants = [];
       } catch (error) {
         console.error('Error parsing variants:', error);
       }
     }
 
-    // Inherit tax info from category if not provided
+    const seller = await Seller.findById(sellerId).populate('promotor');
+    
+    if (!seller) {
+      return res.status(404).json({
+        success: false,
+        message: 'Seller not found'
+      });
+    }
+
+    if (seller.approvalStatus !== 'approved') {
+      return res.status(403).json({
+        success: false,
+        message: 'Your account is not approved yet'
+      });
+    }
+
+    let categoryId = productData.category;
+    if (productData.category && typeof productData.category === 'string') {
+      const isObjectId = /^[0-9a-fA-F]{24}$/.test(productData.category);
+      
+      if (!isObjectId) {
+        const category = await Category.findOne({ name: productData.category });
+        if (!category) {
+          return res.status(404).json({
+            success: false,
+            message: `Category '${productData.category}' not found`
+          });
+        }
+        categoryId = category._id;
+      }
+    }
+
+    const foundCategory = await Category.findById(categoryId);
     const productTaxInfo = {
-      hsnCode: hsnCode || foundCategory.hsnCode,
-      gstPercent: gstPercent !== undefined ? gstPercent : foundCategory.gstPercent,
-      taxType: taxType || foundCategory.taxType
+      hsnCode: productData.hsnCode || foundCategory?.hsnCode,
+      gstPercent: productData.gstPercent !== undefined ? productData.gstPercent : foundCategory?.gstPercent,
+      taxType: productData.taxType || foundCategory?.taxType
     };
 
-    // Create product
-    const product = new Product({
-      name,
-      description,
-      brand,
-      category: foundCategory._id,
-      price,
-      oldPrice: oldPrice || 0,
-      discountPercentage: oldPrice > 0 ? Math.round(((oldPrice - price) / oldPrice) * 100) : 0,
-      unit,
-      unitValue,
-      ...productTaxInfo,
+    const stockStatus = productData.quantity > 0 ? 'in-stock' : 'out-of-stock';
+    const promotorCommission = seller.promotor?.commissionRate || 5;
+    const commissionType = seller.promotor?.commissionType || 'percentage';
+    
+    let commissionAmount = 0;
+    if (commissionType === 'percentage') {
+      commissionAmount = (productData.price * promotorCommission) / 100;
+    } else {
+      commissionAmount = promotorCommission;
+    }
+
+    const discountPercentage = productData.oldPrice > 0 ? 
+      Math.round(((productData.oldPrice - productData.price) / productData.oldPrice) * 100) : 0;
+
+    let uploadedImages = [];
+    if (req.files && req.files.images) {
+      const imageFiles = Array.isArray(req.files.images) ? req.files.images : [req.files.images];
+      
+      if (imageFiles.length > 5) {
+        return res.status(400).json({
+          success: false,
+          message: 'Maximum 5 images allowed per product'
+        });
+      }
+
+      for (let i = 0; i < imageFiles.length; i++) {
+        const imageFile = imageFiles[i];
+        
+        uploadedImages.push({
+          url: imageFile.path || `/uploads/${imageFile.filename}`,
+          altText: productData.imageAltText || `${productData.name} - Image ${i + 1}`,
+          isPrimary: i === 0,
+          order: i
+        });
+      }
+    } else if (productData.images) {
+      try {
+        uploadedImages = typeof productData.images === 'string' ? 
+          JSON.parse(productData.images) : productData.images;
+      } catch (error) {
+        console.error('Error parsing images:', error);
+        uploadedImages = [];
+      }
+    }
+
+    const newProduct = new Product({
+      name: productData.name,
+      description: productData.description,
+      brand: productData.brand,
+      category: categoryId,
+      price: productData.price,
+      oldPrice: productData.oldPrice || 0,
+      discountPercentage: discountPercentage,
+      hsnCode: productTaxInfo.hsnCode,
+      gstPercent: productTaxInfo.gstPercent,
+      taxType: productTaxInfo.taxType,
+      unit: productData.unit,
+      unitValue: productData.unitValue,
       promotor: {
-        id: foundPromotor._id,
-        commissionRate,
-        commissionType,
-        commissionAmount: commissionType === 'percentage' ? (price * commissionRate) / 100 : commissionRate
+        id: seller.promotor?._id,
+        commissionRate: promotorCommission,
+        commissionType: commissionType,
+        commissionAmount: commissionAmount
       },
-      quantity: quantity || 0,
-      minOrderQuantity: minOrderQuantity || 1,
-      maxOrderQuantity: maxOrderQuantity || 10,
-      stockStatus: quantity > 0 ? 'in-stock' : 'out-of-stock',
-      lowStockThreshold: 10,
-      weight,
-      weightUnit: weightUnit || 'g',
-      dimensions: parsedDimensions,
+      seller: sellerId,
+      quantity: productData.quantity || 0,
+      minOrderQuantity: productData.minOrderQuantity || 1,
+      maxOrderQuantity: productData.maxOrderQuantity || 10,
+      stockStatus: stockStatus,
+      lowStockThreshold: productData.lowStockThreshold || 10,
+      weight: productData.weight,
+      weightUnit: productData.weightUnit || 'g',
+      dimensions: productData.dimensions,
       images: uploadedImages,
-      video: videoData,
-      warehouse: {
-        id: warehouseId || null,
-        storageType: storageType || null
-      },
       delivery: {
-        estimatedDeliveryTime,
-        deliveryCharges: deliveryCharges || 0,
-        freeDeliveryThreshold: freeDeliveryThreshold || 0,
-        availablePincodes: parsedPincodes
+        estimatedDeliveryTime: productData.estimatedDeliveryTime,
+        deliveryCharges: productData.deliveryCharges || 0,
+        freeDeliveryThreshold: productData.freeDeliveryThreshold || 0,
+        availablePincodes: parsedAvailablePincodes
       },
       serviceablePincodes: parsedServiceablePincodes,
-      variants: parsedVariants
+      variants: parsedVariants,
+      isActive: true
     });
 
-    await product.save();
+    await newProduct.save();
+
+    seller.products.push(newProduct._id);
+    await seller.save();
+
+    if (seller.promotor?._id) {
+      await Promotor.findByIdAndUpdate(
+        seller.promotor._id,
+        { $inc: { totalProductsAdded: 1 } }
+      );
+    }
 
     res.status(201).json({
-      message: 'Product created successfully',
-      product: await product.populate(['category', 'promotor.id'])
+      success: true,
+      message: 'Product added successfully',
+      data: newProduct
     });
+
   } catch (error) {
-    console.error('Create product error:', error);
-    res.status(500).json({ message: error.message });
+    console.error('Add product error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error adding product',
+      error: error.message
+    });
   }
 };
 
