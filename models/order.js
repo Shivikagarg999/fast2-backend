@@ -59,7 +59,6 @@ const orderSchema = new mongoose.Schema(
       type: Number,
       required: true
     },
-    
     walletDeduction: {
       type: Number,
       default: 0
@@ -68,7 +67,6 @@ const orderSchema = new mongoose.Schema(
       type: Number,
       default: 0
     },
-    
     status: {
       type: String,
       default: "pending"
@@ -84,7 +82,6 @@ const orderSchema = new mongoose.Schema(
       enum: ["pending", "paid", "failed", "refunded"], 
       default: "pending" 
     },
-    
     secretCode: {
       type: String,
     },
@@ -96,11 +93,9 @@ const orderSchema = new mongoose.Schema(
       type: Boolean,
       default: false
     },
-    
     estimatedDelivery: Date,
     deliveryNotes: String,
     trackingNumber: String,
-
     cancelledAt: {
       type: Date
     },
@@ -124,7 +119,6 @@ const orderSchema = new mongoose.Schema(
     refundedAt: {
       type: Date
     },
-
     payout: {
       seller: {
         payableAmount: { type: Number, default: 0 },
@@ -196,6 +190,9 @@ orderSchema.pre('save', async function(next) {
         this.paymentStatus = "paid";
         this.cashOnDelivery = 0;
       }
+
+      await this.calculatePayouts();
+      await this.createPayoutRecords();
       
     } catch (error) {
       return next(error);
@@ -208,6 +205,126 @@ orderSchema.pre('save', async function(next) {
 
   next();
 });
+
+orderSchema.methods.calculatePayouts = async function() {
+  const Product = mongoose.model('Product');
+  const Seller = mongoose.model('Seller');
+  
+  const sellerData = await Seller.findById(this.seller);
+  if (!sellerData) return;
+
+  const productIds = this.items.map(item => item.product);
+  const products = await Product.find({ _id: { $in: productIds } });
+
+  const platformFeePercentage = 10;
+  const gstRate = 18;
+  const tdsRate = 1;
+
+  const platformFee = (this.finalAmount * platformFeePercentage) / 100;
+  const gstOnPlatformFee = (platformFee * gstRate) / 100;
+  const tdsDeduction = (this.finalAmount * tdsRate) / 100;
+
+  const payableAmount = this.finalAmount - platformFee - gstOnPlatformFee;
+  const netAmount = payableAmount - tdsDeduction;
+
+  this.payout.seller.payableAmount = payableAmount;
+  this.payout.seller.gstDeduction = gstOnPlatformFee;
+  this.payout.seller.tdsDeduction = tdsDeduction;
+  this.payout.seller.netAmount = netAmount;
+
+  this.payout.platform.serviceFee = platformFee;
+  this.payout.platform.gstCollection = gstOnPlatformFee;
+
+  let promotorCommission = 0;
+  for (const item of this.items) {
+    const product = products.find(p => p._id.toString() === item.product.toString());
+    if (product && product.promotor && product.promotor.id) {
+      const commissionRate = product.promotor.commissionRate || 5;
+      const commissionType = product.promotor.commissionType || 'percentage';
+      
+      let commissionAmount = 0;
+      if (commissionType === 'percentage') {
+        commissionAmount = (item.price * item.quantity * commissionRate) / 100;
+      } else if (commissionType === 'fixed') {
+        commissionAmount = product.promotor.commissionAmount * item.quantity;
+      }
+      
+      promotorCommission += commissionAmount;
+    }
+  }
+
+  this.payout.promotor.commissionAmount = promotorCommission;
+  this.payout.promotor.commissionRate = 5;
+};
+
+orderSchema.methods.createPayoutRecords = async function() {
+  const SellerPayout = mongoose.model('SellerPayout');
+  const PromotorPayout = mongoose.model('PromotorPayout');
+  const Product = mongoose.model('Product');
+  const Seller = mongoose.model('Seller');
+  
+  const seller = await Seller.findById(this.seller);
+  if (!seller) return;
+  
+  const productIds = this.items.map(item => item.product);
+  const products = await Product.find({ _id: { $in: productIds } });
+  
+  const platformFeePercentage = 10;
+  const gstRate = 18;
+  const tdsRate = 1;
+  
+  const platformFee = (this.finalAmount * platformFeePercentage) / 100;
+  const gstOnPlatformFee = (platformFee * gstRate) / 100;
+  const tdsDeduction = (this.finalAmount * tdsRate) / 100;
+  
+  const payableAmount = this.finalAmount - platformFee - gstOnPlatformFee;
+  const netAmount = payableAmount - tdsDeduction;
+  
+  const sellerPayout = new SellerPayout({
+    order: this._id,
+    seller: this.seller,
+    orderAmount: this.finalAmount,
+    platformFee: platformFee,
+    platformFeePercentage: platformFeePercentage,
+    gstOnPlatformFee: gstOnPlatformFee,
+    gstRate: gstRate,
+    tdsDeduction: tdsDeduction,
+    tdsRate: tdsRate,
+    payableAmount: payableAmount,
+    netAmount: netAmount,
+    status: "pending"
+  });
+  
+  await sellerPayout.save();
+  
+  for (const item of this.items) {
+    const product = products.find(p => p._id.toString() === item.product.toString());
+    if (product && product.promotor && product.promotor.id) {
+      const commissionRate = product.promotor.commissionRate || 5;
+      const commissionType = product.promotor.commissionType || 'percentage';
+      
+      let commissionAmount = 0;
+      if (commissionType === 'percentage') {
+        commissionAmount = (item.price * item.quantity * commissionRate) / 100;
+      } else if (commissionType === 'fixed') {
+        commissionAmount = product.promotor.commissionAmount * item.quantity;
+      }
+      
+      const promotorPayout = new PromotorPayout({
+        order: this._id,
+        promotor: product.promotor.id,
+        seller: this.seller,
+        commissionType: commissionType,
+        commissionRate: commissionRate,
+        orderAmount: item.price * item.quantity,
+        commissionAmount: commissionAmount,
+        status: "pending"
+      });
+      
+      await promotorPayout.save();
+    }
+  }
+};
 
 orderSchema.virtual('displayAmount').get(function() {
   return this.cashOnDelivery > 0 ? this.cashOnDelivery : this.finalAmount;

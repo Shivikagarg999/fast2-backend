@@ -7,18 +7,8 @@ const Order = require('../../models/order');
 const createProduct = async (req, res) => {
   try {
 
-        console.log('=== FILE DEBUG ===');
-    console.log('Request headers:', req.headers['content-type']);
-    console.log('req.files exists?', !!req.files);
-    console.log('req.files:', req.files);
-    console.log('req.body:', req.body);
-    console.log('=== END DEBUG ===');
-    
     const sellerId = req.seller.id;
     const productData = req.body;
-
-    console.log('Received files:', req.files);
-    console.log('Received body:', req.body);
 
     if (productData.dimensions && typeof productData.dimensions === 'string') {
       try {
@@ -647,7 +637,6 @@ const getProductOrders = async (req, res) => {
       sortOrder = 'desc'
     } = req.query;
 
-    // Validate product exists
     const product = await Product.findById(productId);
     if (!product) {
       return res.status(404).json({
@@ -656,7 +645,6 @@ const getProductOrders = async (req, res) => {
       });
     }
 
-    // Build filter
     const filter = {
       'items.product': productId
     };
@@ -674,7 +662,6 @@ const getProductOrders = async (req, res) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
     const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
 
-    // Get orders with pagination
     const orders = await Order.find(filter)
       .populate('user', 'name email phone')
       .populate('driver', 'name phone')
@@ -685,7 +672,6 @@ const getProductOrders = async (req, res) => {
 
     const totalOrders = await Order.countDocuments(filter);
 
-    // Calculate product-specific stats
     const productStats = await Order.aggregate([
       { $match: { 'items.product': mongoose.Types.ObjectId(productId) } },
       { $unwind: '$items' },
@@ -738,9 +724,8 @@ const getProductOrders = async (req, res) => {
 const getProductSalesAnalytics = async (req, res) => {
   try {
     const { productId } = req.params;
-    const { period = '30d' } = req.query; // 7d, 30d, 90d, 1y
+    const { period = '30d' } = req.query;
 
-    // Validate product exists
     const product = await Product.findById(productId);
     if (!product) {
       return res.status(404).json({
@@ -749,7 +734,6 @@ const getProductSalesAnalytics = async (req, res) => {
       });
     }
 
-    // Calculate date range
     const now = new Date();
     let startDate = new Date();
 
@@ -770,7 +754,6 @@ const getProductSalesAnalytics = async (req, res) => {
         startDate.setDate(now.getDate() - 30);
     }
 
-    // Get daily sales data
     const dailySales = await Order.aggregate([
       {
         $match: {

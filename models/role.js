@@ -21,7 +21,7 @@ const roleSchema = new mongoose.Schema({
   },
   isSystem: {
     type: Boolean,
-    default: false, // System roles (super_admin) cannot be deleted
+    default: false,
   },
   isActive: {
     type: Boolean,

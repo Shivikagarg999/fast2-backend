@@ -8,6 +8,7 @@ exports.requestWithdraw = async (req, res) => {
     const driverId = req.driver.driverId;
     
     const driver = await Driver.findById(driverId);
+    
     if (!driver) {
       return res.status(404).json({ 
         success: false, 
