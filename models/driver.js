@@ -47,7 +47,6 @@ const driverSchema = new mongoose.Schema({
       default: null
     }
   },
-
   address: {
     currentAddress: {
       addressLine: { type: String },
@@ -61,7 +60,6 @@ const driverSchema = new mongoose.Schema({
       }
     }
   },
-
   vehicle: {
     type: {
       type: String,
@@ -83,7 +81,6 @@ const driverSchema = new mongoose.Schema({
       type: String,
     }
   },
-
   documents: {
     drivingLicense: {
       number: { type: String },
@@ -97,7 +94,6 @@ const driverSchema = new mongoose.Schema({
       backImage: { type: String }
     }
   },
-
   bankDetails: {
     accountHolderName: {
       type: String,
@@ -115,7 +111,6 @@ const driverSchema = new mongoose.Schema({
       type: String
     }
   },
-
   workInfo: {
     driverId: {
       type: String,
@@ -149,7 +144,121 @@ const driverSchema = new mongoose.Schema({
       default: null
     }
   },
-
+  earnings: {
+    totalEarnings: {
+      type: Number,
+      default: 0
+    },
+    currentBalance: {
+      type: Number,
+      default: 0
+    },
+    pendingPayout: {
+      type: Number,
+      default: 0
+    },
+    todayEarnings: {
+      type: Number,
+      default: 0
+    },
+    totalPayouts: {
+      type: Number,
+      default: 0
+    },
+    lastPayoutDate: {
+      type: Date
+    },
+    lastPayoutAmount: {
+      type: Number,
+      default: 0
+    }
+  },
+  payoutDetails: {
+    preferredMethod: {
+      type: String,
+      enum: ['upi', 'bank_transfer', 'cash', 'wallet'],
+      default: 'upi'
+    },
+    upiId: {
+      type: String
+    },
+    bankAccount: {
+      accountHolder: String,
+      accountNumber: String,
+      ifscCode: String,
+      bankName: String
+    },
+    walletAddress: {
+      type: String
+    },
+    payoutThreshold: {
+      type: Number,
+      default: 500
+    },
+    autoPayout: {
+      type: Boolean,
+      default: false
+    }
+  },
+  deliveryStats: {
+    totalOrders: {
+      type: Number,
+      default: 0
+    },
+    completedOrders: {
+      type: Number,
+      default: 0
+    },
+    cancelledOrders: {
+      type: Number,
+      default: 0
+    },
+    averageDeliveryTime: {
+      type: Number,
+      default: 0
+    },
+    averageRating: {
+      type: Number,
+      default: 0
+    },
+    totalRatings: {
+      type: Number,
+      default: 0
+    },
+    onTimeDeliveryRate: {
+      type: Number,
+      default: 0
+    },
+    acceptanceRate: {
+      type: Number,
+      default: 0
+    },
+    totalDistance: {
+      type: Number,
+      default: 0
+    }
+  },
+  activity: {
+    totalOnlineHours: {
+      type: Number,
+      default: 0
+    },
+    currentSessionStart: {
+      type: Date
+    },
+    lastActive: {
+      type: Date,
+      default: Date.now
+    },
+    totalSessions: {
+      type: Number,
+      default: 0
+    },
+    averageSessionHours: {
+      type: Number,
+      default: 0
+    }
+  }
 }, {
   timestamps: true
 });
@@ -158,6 +267,8 @@ driverSchema.index({ 'workInfo.availability': 1 });
 driverSchema.index({ 'workInfo.currentLocation.coordinates': '2dsphere' });
 driverSchema.index({ 'workInfo.status': 1 });
 driverSchema.index({ 'personalInfo.phone': 1 });
+driverSchema.index({ 'earnings.pendingPayout': 1 });
+driverSchema.index({ 'payoutDetails.preferredMethod': 1 });
 
 driverSchema.pre('save', async function(next) {
   if (!this.isModified('auth.password')) return next();
@@ -200,9 +311,14 @@ driverSchema.methods.setAvailability = function(status) {
     
     if (status === 'online') {
       this.activity.currentSessionStart = new Date();
+      this.activity.totalSessions += 1;
     } else if (status === 'offline' && this.activity.currentSessionStart) {
       const sessionHours = (new Date() - this.activity.currentSessionStart) / (1000 * 60 * 60);
       this.activity.totalOnlineHours += sessionHours;
+      
+      const totalSessions = Math.max(1, this.activity.totalSessions);
+      this.activity.averageSessionHours = this.activity.totalOnlineHours / totalSessions;
+      
       this.activity.currentSessionStart = null;
     }
     
@@ -222,20 +338,23 @@ driverSchema.methods.assignOrder = function(orderId) {
   return this.save();
 };
 
-driverSchema.methods.completeDelivery = function(earnings, deliveryTime, rating = null) {
+driverSchema.methods.completeDelivery = function(earnings, deliveryTime, distance = 0, rating = null) {
   this.workInfo.currentOrder = null;
   this.workInfo.availability = 'online';
   
   this.deliveryStats.totalOrders += 1;
   this.deliveryStats.completedOrders += 1;
   
-  this.earnings.totalEarnings += earnings;
-  this.earnings.currentBalance += earnings;
-  this.earnings.pendingPayout += earnings;
-  this.earnings.todayEarnings += earnings;
+  if (distance > 0) {
+    this.deliveryStats.totalDistance += distance;
+  }
   
   const totalTime = this.deliveryStats.averageDeliveryTime * (this.deliveryStats.completedOrders - 1) + deliveryTime;
   this.deliveryStats.averageDeliveryTime = totalTime / this.deliveryStats.completedOrders;
+  
+  if (this.deliveryStats.totalOrders > 0) {
+    this.deliveryStats.onTimeDeliveryRate = (this.deliveryStats.completedOrders / this.deliveryStats.totalOrders) * 100;
+  }
   
   if (rating) {
     const totalRating = this.deliveryStats.averageRating * this.deliveryStats.totalRatings + rating;
@@ -256,6 +375,56 @@ driverSchema.methods.cancelDelivery = function() {
   return this.save();
 };
 
+driverSchema.methods.addEarning = function(amount, description = 'Delivery completed') {
+  this.earnings.totalEarnings += amount;
+  this.earnings.currentBalance += amount;
+  this.earnings.pendingPayout += amount;
+  this.earnings.todayEarnings += amount;
+  return this.save();
+};
+
+driverSchema.methods.processPayout = function(amount, payoutMethod = 'upi', transactionId = null) {
+  if (amount > this.earnings.pendingPayout) {
+    throw new Error('Insufficient pending payout balance');
+  }
+  
+  this.earnings.pendingPayout -= amount;
+  this.earnings.totalPayouts += amount;
+  this.earnings.lastPayoutDate = new Date();
+  this.earnings.lastPayoutAmount = amount;
+  
+  this.payoutDetails.preferredMethod = payoutMethod;
+  
+  return this.save();
+};
+
+driverSchema.methods.resetTodayEarnings = function() {
+  this.earnings.todayEarnings = 0;
+  return this.save();
+};
+
+driverSchema.methods.updatePayoutDetails = function(details) {
+  if (details.preferredMethod) {
+    this.payoutDetails.preferredMethod = details.preferredMethod;
+  }
+  if (details.upiId) {
+    this.payoutDetails.upiId = details.upiId;
+  }
+  if (details.bankAccount) {
+    this.payoutDetails.bankAccount = details.bankAccount;
+  }
+  if (details.walletAddress) {
+    this.payoutDetails.walletAddress = details.walletAddress;
+  }
+  if (details.payoutThreshold !== undefined) {
+    this.payoutDetails.payoutThreshold = details.payoutThreshold;
+  }
+  if (details.autoPayout !== undefined) {
+    this.payoutDetails.autoPayout = details.autoPayout;
+  }
+  return this.save();
+};
+
 driverSchema.statics.findAvailableDrivers = function(lat, lng, maxDistance = 5000) {
   return this.find({
     'workInfo.availability': 'online',
@@ -271,8 +440,17 @@ driverSchema.statics.findAvailableDrivers = function(lat, lng, maxDistance = 500
     }
   }).sort({ 
     'deliveryStats.averageRating': -1,
-    'deliveryStats.onTimeDeliveryRate': -1 
+    'deliveryStats.onTimeDeliveryRate': -1,
+    'earnings.pendingPayout': -1
   });
+};
+
+driverSchema.statics.findDriversForPayout = function(minAmount = 100) {
+  return this.find({
+    'workInfo.status': 'approved',
+    'earnings.pendingPayout': { $gte: minAmount },
+    'payoutDetails.preferredMethod': { $exists: true, $ne: null }
+  }).sort({ 'earnings.pendingPayout': -1 });
 };
 
 driverSchema.methods.calculateAcceptanceRate = function(totalOrdersOffered) {
@@ -280,14 +458,55 @@ driverSchema.methods.calculateAcceptanceRate = function(totalOrdersOffered) {
   return (this.deliveryStats.completedOrders / totalOrdersOffered) * 100;
 };
 
+driverSchema.methods.getEarningsSummary = function() {
+  return {
+    totalEarnings: this.earnings.totalEarnings,
+    currentBalance: this.earnings.currentBalance,
+    pendingPayout: this.earnings.pendingPayout,
+    todayEarnings: this.earnings.todayEarnings,
+    totalPayouts: this.earnings.totalPayouts,
+    lastPayout: {
+      date: this.earnings.lastPayoutDate,
+      amount: this.earnings.lastPayoutAmount
+    },
+    payoutThreshold: this.payoutDetails.payoutThreshold,
+    preferredMethod: this.payoutDetails.preferredMethod
+  };
+};
+
 driverSchema.virtual('fullAddress').get(function() {
   const addr = this.address.currentAddress;
   return `${addr.addressLine}, ${addr.city}, ${addr.state} - ${addr.pinCode}`;
 });
+
 driverSchema.virtual('performanceScore').get(function() {
   const ratingScore = this.deliveryStats.averageRating * 20;
-  const completionRate = (this.deliveryStats.completedOrders / this.deliveryStats.totalOrders) * 100 || 0;
-  return (ratingScore + completionRate) / 2;
+  const completionRate = (this.deliveryStats.completedOrders / Math.max(1, this.deliveryStats.totalOrders)) * 100;
+  const acceptanceRate = this.deliveryStats.acceptanceRate || 0;
+  const onTimeRate = this.deliveryStats.onTimeDeliveryRate || 0;
+  
+  return (ratingScore + completionRate + acceptanceRate + onTimeRate) / 4;
+});
+
+driverSchema.virtual('isEligibleForPayout').get(function() {
+  return this.earnings.pendingPayout >= this.payoutDetails.payoutThreshold && 
+         this.workInfo.status === 'approved' &&
+         (this.payoutDetails.upiId || this.payoutDetails.bankAccount.accountNumber);
+});
+
+driverSchema.virtual('payoutEta').get(function() {
+  if (!this.isEligibleForPayout) return null;
+  
+  const pendingAmount = this.earnings.pendingPayout;
+  const threshold = this.payoutDetails.payoutThreshold;
+  
+  if (pendingAmount >= threshold * 2) {
+    return 'immediate';
+  } else if (pendingAmount >= threshold * 1.5) {
+    return 'within_24_hours';
+  } else {
+    return 'weekly_batch';
+  }
 });
 
 module.exports = mongoose.model('Driver', driverSchema);

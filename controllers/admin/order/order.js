@@ -57,6 +57,7 @@ const getOrderById = async (req, res) => {
   try {
     const order = await Order.findById(req.params.id)
       .populate("user", "name email phone")
+      .populate("seller", "name email")
       .populate("driver", "name phone vehicle")
       .populate("items.product", "name images category");
 

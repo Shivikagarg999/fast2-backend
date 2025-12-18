@@ -18,27 +18,32 @@ const driverEarningSchema = new mongoose.Schema({
   amount: {
     type: Number,
     required: true,
-    default: 18
+    min: 0
   },
   type: {
     type: String,
-    enum: ['delivery', 'bonus', 'penalty', 'payout'],
+    enum: ['delivery', 'bonus', 'penalty', 'other'],
     default: 'delivery'
   },
   description: {
     type: String,
-    default: 'Delivery completed'
+    required: true
   },
   customerAddress: {
     addressLine: String,
     city: String,
     state: String,
-    pinCode: String
+    pinCode: String,
+    phone: String
   },
   status: {
     type: String,
-    enum: ['earned', 'paid', 'pending'],
+    enum: ['earned', 'payout_processing', 'payout_paid', 'cancelled'],
     default: 'earned'
+  },
+  payoutBatch: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'DriverPayout'
   },
   transactionDate: {
     type: Date,
@@ -46,11 +51,22 @@ const driverEarningSchema = new mongoose.Schema({
   },
   payoutDate: {
     type: Date
+  },
+  payoutMethod: {
+    type: String,
+    enum: ['cash', 'bank_transfer', 'upi', 'wallet'],
+    default: 'upi'
+  },
+  transactionId: {
+    type: String
   }
-}, { timestamps: true });
+}, {
+  timestamps: true
+});
 
-driverEarningSchema.index({ driver: 1, transactionDate: -1 });
+driverEarningSchema.index({ driver: 1, status: 1 });
 driverEarningSchema.index({ order: 1 });
-driverEarningSchema.index({ status: 1 });
+driverEarningSchema.index({ transactionDate: -1 });
+driverEarningSchema.index({ payoutBatch: 1 });
 
 module.exports = mongoose.model('DriverEarning', driverEarningSchema);

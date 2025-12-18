@@ -3,6 +3,7 @@ const PromotorPayout = require("../../models/promotorPayout");
 const Order = require("../../models/order");
 const Seller = require("../../models/seller");
 const Promotor = require("../../models/promotor");
+const mongoose= require("mongoose");
 
 const getSellerPayouts = async (req, res) => {
   try {
@@ -274,13 +275,13 @@ const getSellerPayoutDetails = async (req, res) => {
       seller: sellerId,
       createdAt: { $gte: startDate, $lte: endDate }
     })
-    .populate('order', 'orderId finalAmount status createdAt')
+    .populate('order', 'orderId product finalAmount status createdAt')
     .sort({ createdAt: -1 });
 
     const summary = await SellerPayout.aggregate([
       {
         $match: {
-          seller: mongoose.Types.ObjectId(sellerId),
+          seller: new mongoose.Types.ObjectId(sellerId),
           createdAt: { $gte: startDate, $lte: endDate }
         }
       },
@@ -296,22 +297,31 @@ const getSellerPayoutDetails = async (req, res) => {
     const seller = await Seller.findById(sellerId);
 
     res.json({
-      seller: {
-        name: seller?.name,
-        businessName: seller?.businessName,
-        email: seller?.email,
-        phone: seller?.phone
-      },
-      payouts,
-      summary,
-      period: {
-        startDate,
-        endDate,
-        filter
+      success: true,
+      data: {
+        seller: {
+          _id: seller?._id,
+          name: seller?.name,
+          businessName: seller?.businessName,
+          email: seller?.email,
+          phone: seller?.phone,
+          gstNumber: seller?.gstNumber,
+          bankDetails: seller?.bankDetails
+        },
+        payouts,
+        summary,
+        period: {
+          startDate,
+          endDate,
+          filter: filter || 'year'
+        }
       }
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
   }
 };
 
@@ -352,7 +362,7 @@ const getPromotorPayoutDetails = async (req, res) => {
     const summary = await PromotorPayout.aggregate([
       {
         $match: {
-          promotor: mongoose.Types.ObjectId(promotorId),
+          promotor: new mongoose.Types.ObjectId(promotorId), // Fixed: added 'new' keyword
           createdAt: { $gte: startDate, $lte: endDate }
         }
       },
