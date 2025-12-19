@@ -26,7 +26,6 @@ const productSchema = new mongoose.Schema({
     seller: {
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Seller',
-        required: true
       },
   quantity: { type: Number, default: 0 },
   minOrderQuantity: { type: Number, default: 1 },
