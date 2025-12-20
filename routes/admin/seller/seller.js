@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { 
+  createSeller,
   updateSellerApproval, 
   getAllSellers, 
   getSellerById, 
@@ -8,6 +9,8 @@ const {
   toggleSellerStatus, 
   getSellerStats 
 } = require('../../../controllers/admin/seller/seller');
+
+router.post('/sellers/create', createSeller);
 
 router.get('/sellers', getAllSellers);
 

@@ -10,7 +10,6 @@ const createProduct = async (req, res) => {
     const productData = req.body;
     console.log('Received product data:', productData);
 
-    // Parse dimensions if string
     if (productData.dimensions && typeof productData.dimensions === 'string') {
       try {
         productData.dimensions = JSON.parse(productData.dimensions);
@@ -19,7 +18,6 @@ const createProduct = async (req, res) => {
       }
     }
 
-    // Parse serviceablePincodes
     let parsedServiceablePincodes = [];
     if (productData.serviceablePincodes) {
       try {
@@ -32,7 +30,6 @@ const createProduct = async (req, res) => {
       }
     }
 
-    // Parse variants
     let parsedVariants = [];
     if (productData.variants) {
       try {
@@ -40,7 +37,6 @@ const createProduct = async (req, res) => {
           JSON.parse(productData.variants) : productData.variants;
         if (!Array.isArray(parsedVariants)) parsedVariants = [];
         
-        // Clean variants data
         parsedVariants = parsedVariants
           .filter(variant => variant.name && variant.name.trim())
           .map(variant => ({
@@ -62,7 +58,6 @@ const createProduct = async (req, res) => {
       }
     }
 
-    // Handle weight
     let parsedWeight = parseFloat(productData.weight);
     if (isNaN(parsedWeight)) {
       parsedWeight = 0;
@@ -79,7 +74,6 @@ const createProduct = async (req, res) => {
       weightInGrams = parsedWeight;
     }
 
-    // Handle category
     let categoryId = productData.category;
     if (productData.category && typeof productData.category === 'string') {
       const isObjectId = /^[0-9a-fA-F]{24}$/.test(productData.category);
@@ -111,7 +105,21 @@ const createProduct = async (req, res) => {
       });
     }
 
-    // Handle promotor
+    if (!productData.seller) {
+      return res.status(400).json({
+        success: false,
+        message: 'Seller is required'
+      });
+    }
+
+    const seller = await Seller.findById(productData.seller);
+    if (!seller) {
+      return res.status(404).json({
+        success: false,
+        message: 'Seller not found'
+      });
+    }
+
     let promotorInfo = null;
     if (productData.promotor) {
       const promotor = await Promotor.findById(productData.promotor);
@@ -134,7 +142,6 @@ const createProduct = async (req, res) => {
       };
     }
 
-    // Calculate commission amount
     const price = parseFloat(productData.price) || 0;
     let commissionAmount = 0;
     if (promotorInfo.commissionType === 'percentage') {
@@ -143,7 +150,6 @@ const createProduct = async (req, res) => {
       commissionAmount = promotorInfo.commissionRate;
     }
 
-    // Handle warehouse
     let warehouseInfo = null;
     if (productData.warehouseId) {
       const warehouse = await Warehouse.findById(productData.warehouseId);
@@ -156,21 +162,16 @@ const createProduct = async (req, res) => {
       }
     }
 
-    // Calculate discount
     const oldPrice = parseFloat(productData.oldPrice) || 0;
     const discountPercentage = oldPrice > 0 ? 
       Math.round(((oldPrice - price) / oldPrice) * 100) : 0;
 
-    // Stock status
     const quantity = parseInt(productData.quantity) || 0;
     const stockStatus = quantity > 0 ? 'in-stock' : 'out-of-stock';
 
-    // Upload images to ImageKit - FIXED THIS PART
     let uploadedImages = [];
     if (req.files && req.files.images) {
       const imageFiles = Array.isArray(req.files.images) ? req.files.images : [req.files.images];
-      
-      // Limit to 5 images
       const filesToUpload = imageFiles.slice(0, 5);
       
       console.log(`Processing ${filesToUpload.length} images for ImageKit upload...`);
@@ -179,9 +180,8 @@ const createProduct = async (req, res) => {
         const imageFile = filesToUpload[i];
         
         try {
-          // CORRECTED: Use buffer.toString('base64') like in your working code
           const uploadResponse = await imagekit.upload({
-            file: imageFile.buffer.toString('base64'), // THIS IS THE FIX
+            file: imageFile.buffer.toString('base64'),
             fileName: `product_${Date.now()}_${i}_${Math.random().toString(36).substring(7)}.jpg`,
             folder: '/products/images',
             useUniqueFileName: true,
@@ -205,7 +205,6 @@ const createProduct = async (req, res) => {
           });
         } catch (uploadError) {
           console.error(`Error uploading image ${i + 1} to ImageKit:`, uploadError);
-          // Fall back to local path if available
           uploadedImages.push({
             url: imageFile.path || imageFile.filename ? `/uploads/${imageFile.filename}` : '',
             altText: productData.imageAltText || `${productData.name || 'Product'} - Image ${i + 1}`,
@@ -218,14 +217,13 @@ const createProduct = async (req, res) => {
       console.log('No images found in request');
     }
 
-    // Upload video to ImageKit if present
     let videoInfo = null;
     if (req.files && req.files.video) {
       const videoFile = req.files.video;
       
       try {
         const videoUploadResponse = await imagekit.upload({
-          file: videoFile.buffer.toString('base64'), // Use buffer.toString('base64')
+          file: videoFile.buffer.toString('base64'),
           fileName: `product_video_${Date.now()}.mp4`,
           folder: '/products/videos',
           useUniqueFileName: true,
@@ -254,12 +252,17 @@ const createProduct = async (req, res) => {
       }
     }
 
-    // Create product object
     const newProductData = {
       name: productData.name,
       description: productData.description,
       brand: productData.brand,
       category: categoryId,
+      seller: {
+        id: seller._id,
+        name: seller.name,
+        businessName: seller.businessName,
+        email: seller.email
+      },
       price: price,
       oldPrice: oldPrice,
       discountPercentage: discountPercentage,
@@ -298,7 +301,6 @@ const createProduct = async (req, res) => {
       updatedAt: new Date()
     };
 
-    // Remove undefined fields
     Object.keys(newProductData).forEach(key => {
       if (newProductData[key] === undefined) {
         delete newProductData[key];
@@ -310,7 +312,6 @@ const createProduct = async (req, res) => {
     const newProduct = new Product(newProductData);
     await newProduct.save();
 
-    // Update promotor stats
     if (promotorInfo.id) {
       await Promotor.findByIdAndUpdate(
         promotorInfo.id,
@@ -319,7 +320,6 @@ const createProduct = async (req, res) => {
       );
     }
 
-    // Update warehouse stats
     if (warehouseInfo) {
       await Warehouse.findByIdAndUpdate(
         warehouseInfo.id,
@@ -327,6 +327,12 @@ const createProduct = async (req, res) => {
         { new: true }
       );
     }
+
+    await Seller.findByIdAndUpdate(
+      seller._id,
+      { $addToSet: { products: newProduct._id } },
+      { new: true }
+    );
 
     res.status(201).json({
       success: true,

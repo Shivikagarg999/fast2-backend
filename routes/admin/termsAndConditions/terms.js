@@ -10,12 +10,10 @@ const {
   setActiveTerm
 } = require('../../../controllers/admin/termsAndConditions/termsController');
 
-// Public routes
 router.get('/getall', getTerms);
 router.get('/get/:id', getTerm);
 router.get('/active', getActiveTerms);
 
-// Admin routes (auth middleware to be added)
 router.post('/create', createTerm);
 router.put('/update/:id', updateTerm);
 router.delete('/delete/:id', deleteTerm);
