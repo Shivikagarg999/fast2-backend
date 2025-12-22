@@ -1,6 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const payoutController = require('../../controllers/payout/payout');
+const sellerAuth= require('../../middlewares/sellerAuth');
+
+router.get('/seller/my-payouts', sellerAuth, payoutController.getSellerOwnPayouts);
+router.get('/seller/my-payout-details', sellerAuth, payoutController.getSellerOwnPayoutDetails);
+router.post('/seller/request-payout', sellerAuth, payoutController.requestPayout);
 
 router.get('/seller-payouts', payoutController.getSellerPayouts);
 router.get('/promotor-payouts', payoutController.getPromotorPayouts);

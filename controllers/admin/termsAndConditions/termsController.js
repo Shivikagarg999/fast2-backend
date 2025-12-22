@@ -10,6 +10,7 @@ const getTerms = async (req, res) => {
     let query = {};
     if (active === 'true') {
       query.isActive = true;
+      
     }
     
     const terms = await TermsAndConditions.find(query)

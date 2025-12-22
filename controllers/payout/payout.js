@@ -5,6 +5,328 @@ const Seller = require("../../models/seller");
 const Promotor = require("../../models/promotor");
 const mongoose= require("mongoose");
 
+const getSellerOwnPayouts = async (req, res) => {
+  try {
+    if (!req.seller) {
+      return res.status(401).json({
+        success: false,
+        message: "Seller authentication required"
+      });
+    }
+
+    const { status, startDate, endDate, page = 1, limit = 10 } = req.query;
+    const filter = { seller: req.seller._id }; // Only get payouts for authenticated seller
+    
+    if (status) filter.status = status;
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) filter.createdAt.$lte = new Date(endDate);
+    }
+    
+    const skip = (page - 1) * limit;
+    
+    const payouts = await SellerPayout.find(filter)
+      .populate('order', 'orderId finalAmount status createdAt')
+      .populate('seller', 'name businessName email phone')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+    
+    const total = await SellerPayout.countDocuments(filter);
+
+    // Calculate summary statistics
+    const summary = await SellerPayout.aggregate([
+      {
+        $match: { seller: new mongoose.Types.ObjectId(req.seller._id) }
+      },
+      {
+        $group: {
+          _id: "$status",
+          totalAmount: { $sum: "$netAmount" },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // Calculate available balance (delivered orders - paid payouts)
+    const deliveredOrders = await Order.aggregate([
+      {
+        $match: {
+          seller: new mongoose.Types.ObjectId(req.seller._id),
+          status: 'delivered'
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalAmount: { $sum: "$finalAmount" }
+        }
+      }
+    ]);
+
+    const paidPayouts = await SellerPayout.aggregate([
+      {
+        $match: {
+          seller: new mongoose.Types.ObjectId(req.seller._id),
+          status: 'paid'
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalAmount: { $sum: "$netAmount" }
+        }
+      }
+    ]);
+
+    const availableBalance = (deliveredOrders[0]?.totalAmount || 0) - (paidPayouts[0]?.totalAmount || 0);
+
+    res.json({
+      success: true,
+      data: {
+        payouts,
+        summary: {
+          availableBalance: Math.max(0, availableBalance),
+          pendingAmount: summary.find(s => s._id === 'pending')?.totalAmount || 0,
+          paidAmount: summary.find(s => s._id === 'paid')?.totalAmount || 0,
+          pendingCount: summary.find(s => s._id === 'pending')?.count || 0,
+          paidCount: summary.find(s => s._id === 'paid')?.count || 0,
+          totalPayouts: total
+        }
+      },
+      pagination: {
+        total,
+        page: parseInt(page),
+        limit: parseInt(limit),
+        pages: Math.ceil(total / limit)
+      }
+    });
+  } catch (error) {
+    console.error('Error in getSellerOwnPayouts:', error);
+    res.status(500).json({ 
+      success: false,
+      error: error.message 
+    });
+  }
+};
+
+const getSellerOwnPayoutDetails = async (req, res) => {
+  try {
+    if (!req.seller) {
+      return res.status(401).json({
+        success: false,
+        message: "Seller authentication required"
+      });
+    }
+
+    const { filter = 'month', page = 1, limit = 10 } = req.query;
+    
+    let startDate, endDate;
+    const now = new Date();
+    
+    switch (filter) {
+      case 'today':
+        startDate = new Date(now.setHours(0, 0, 0, 0));
+        endDate = new Date(now.setHours(23, 59, 59, 999));
+        break;
+      case 'week':
+        startDate = new Date(now.setDate(now.getDate() - 7));
+        endDate = new Date();
+        break;
+      case 'month':
+        startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+        endDate = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+        break;
+      case 'year':
+        startDate = new Date(now.getFullYear(), 0, 1);
+        endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+        break;
+      default:
+        startDate = new Date(now.setFullYear(now.getFullYear() - 1));
+        endDate = new Date();
+    }
+
+    const skip = (page - 1) * limit;
+
+    const payouts = await SellerPayout.find({
+      seller: req.seller._id,
+      createdAt: { $gte: startDate, $lte: endDate }
+    })
+    .populate('order', 'orderId finalAmount status createdAt')
+    .sort({ createdAt: -1 })
+    .skip(skip)
+    .limit(parseInt(limit));
+
+    const summary = await SellerPayout.aggregate([
+      {
+        $match: {
+          seller: new mongoose.Types.ObjectId(req.seller._id),
+          createdAt: { $gte: startDate, $lte: endDate }
+        }
+      },
+      {
+        $group: {
+          _id: "$status",
+          totalAmount: { $sum: "$netAmount" },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // Calculate totals
+    const totalPayouts = await SellerPayout.countDocuments({
+      seller: req.seller._id,
+      createdAt: { $gte: startDate, $lte: endDate }
+    });
+
+    // Calculate available balance
+    const deliveredOrders = await Order.aggregate([
+      {
+        $match: {
+          seller: new mongoose.Types.ObjectId(req.seller._id),
+          status: 'delivered',
+          createdAt: { $gte: startDate, $lte: endDate }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalAmount: { $sum: "$finalAmount" }
+        }
+      }
+    ]);
+
+    const paidPayouts = await SellerPayout.aggregate([
+      {
+        $match: {
+          seller: new mongoose.Types.ObjectId(req.seller._id),
+          status: 'paid',
+          createdAt: { $gte: startDate, $lte: endDate }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalAmount: { $sum: "$netAmount" }
+        }
+      }
+    ]);
+
+    const availableBalance = (deliveredOrders[0]?.totalAmount || 0) - (paidPayouts[0]?.totalAmount || 0);
+
+    res.json({
+      success: true,
+      data: {
+        seller: {
+          _id: req.seller._id,
+          name: req.seller.name,
+          businessName: req.seller.businessName,
+          email: req.seller.email,
+          phone: req.seller.phone,
+          gstNumber: req.seller.gstNumber,
+          bankDetails: req.seller.bankDetails
+        },
+        payouts,
+        summary: {
+          availableBalance: Math.max(0, availableBalance),
+          pendingAmount: summary.find(s => s._id === 'pending')?.totalAmount || 0,
+          paidAmount: summary.find(s => s._id === 'paid')?.totalAmount || 0,
+          pendingCount: summary.find(s => s._id === 'pending')?.count || 0,
+          paidCount: summary.find(s => s._id === 'paid')?.count || 0,
+          byStatus: summary
+        },
+        period: {
+          startDate,
+          endDate,
+          filter
+        },
+        pagination: {
+          total: totalPayouts,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          pages: Math.ceil(totalPayouts / limit)
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error in getSellerOwnPayoutDetails:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+};
+
+const requestPayout = async (req, res) => {
+  try {
+    if (!req.seller) {
+      return res.status(401).json({
+        success: false,
+        message: "Seller authentication required"
+      });
+    }
+
+    const { orderIds, payoutMethod, accountDetails, notes } = req.body;
+    
+    if (!orderIds || !Array.isArray(orderIds) || orderIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'At least one order is required for payout'
+      });
+    }
+
+    // Get seller's pending payouts for the specified orders
+    const pendingPayouts = await SellerPayout.find({
+      _id: { $in: orderIds },
+      seller: req.seller._id,
+      status: 'pending'
+    });
+
+    if (pendingPayouts.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: 'No eligible payouts found for the specified orders'
+      });
+    }
+
+    // Calculate total amount
+    const totalAmount = pendingPayouts.reduce((sum, payout) => sum + payout.netAmount, 0);
+
+    // Update payout status to processing and add payment details
+    await SellerPayout.updateMany(
+      { _id: { $in: pendingPayouts.map(p => p._id) } },
+      {
+        status: 'processing',
+        paymentMethod: payoutMethod || 'bank_transfer',
+        remarks: notes || 'Payout requested by seller'
+      }
+    );
+
+    // Here you would typically:
+    // 1. Create a payout request record
+    // 2. Initiate payment through payment gateway
+    // 3. Send notification to admin
+
+    res.json({
+      success: true,
+      message: 'Payout request submitted successfully',
+      data: {
+        totalAmount,
+        payoutCount: pendingPayouts.length,
+        estimatedProcessingTime: '3-5 business days'
+      }
+    });
+
+  } catch (error) {
+    console.error('Error in requestPayout:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+};
+
 const getSellerPayouts = async (req, res) => {
   try {
     const { sellerId, status, startDate, endDate, page = 1, limit = 10 } = req.query;
@@ -398,6 +720,9 @@ const getPromotorPayoutDetails = async (req, res) => {
 };
 
 module.exports = {
+  getSellerOwnPayoutDetails,
+  getSellerOwnPayouts,
+  requestPayout,
   getSellerPayouts,
   getPromotorPayouts,
   updateSellerPayoutStatus,
