@@ -112,14 +112,13 @@ exports.getOrderDetails = async (req, res) => {
     const sellerId = req.seller._id || req.seller.id;
     const { orderId } = req.params;
 
-    // Find order by either _id or orderId
     let order;
-    if (orderId.length === 24) { // If it looks like a MongoDB ObjectId
+    if (orderId.length === 24) {
       order = await Order.findOne({ 
         _id: orderId,
         seller: sellerId 
       });
-    } else { // If it's an orderId like "FST042"
+    } else {
       order = await Order.findOne({ 
         orderId: orderId,
         seller: sellerId 
