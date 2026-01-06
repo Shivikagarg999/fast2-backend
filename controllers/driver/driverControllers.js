@@ -503,3 +503,217 @@ exports.checkOrderPlaced = async (req, res) => {
     });
   }
 };
+
+exports.getDriverPayouts = async (req, res) => {
+  try {
+    const { 
+      driverId, 
+      status, 
+      startDate, 
+      endDate, 
+      page = 1, 
+      limit = 10,
+      view = 'detailed'
+    } = req.query;
+    
+    const filter = {};
+    
+    if (driverId) filter.driver = driverId;
+    if (status) filter.status = status;
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) filter.createdAt.$lte = new Date(endDate);
+    }
+    
+    const skip = (page - 1) * limit;
+    
+    if (view === 'aggregated') {
+      const aggregatedData = await DriverPayout.aggregate([
+        { $match: filter },
+        
+        {
+          $lookup: {
+            from: "drivers",
+            localField: "driver",
+            foreignField: "_id",
+            as: "driverInfo"
+          }
+        },
+        { $unwind: { path: "$driverInfo", preserveNullAndEmptyArrays: true } },
+        
+        {
+          $group: {
+            _id: "$driver",
+            driverId: { $first: "$driver" },
+            driverName: { $first: "$driverInfo.name" },
+            driverEmail: { $first: "$driverInfo.email" },
+            driverPhone: { $first: "$driverInfo.phone" },
+            vehicleNumber: { $first: "$driverInfo.vehicleNumber" },
+            totalAmount: { $sum: "$totalAmount" },
+            totalOrders: { $sum: "$numberOfOrders" },
+            pendingOrders: {
+              $sum: { $cond: [{ $eq: ["$status", "pending"] }, "$numberOfOrders", 0] }
+            },
+            paidOrders: {
+              $sum: { $cond: [{ $eq: ["$status", "paid"] }, "$numberOfOrders", 0] }
+            },
+            pendingAmount: {
+              $sum: { $cond: [{ $eq: ["$status", "pending"] }, "$totalAmount", 0] }
+            },
+            paidAmount: {
+              $sum: { $cond: [{ $eq: ["$status", "paid"] }, "$totalAmount", 0] }
+            }
+          }
+        },
+        {
+          $addFields: {
+            driverName: { 
+              $ifNull: ["$driverName", "Driver"] 
+            },
+            driverEmail: { 
+              $ifNull: ["$driverEmail", ""] 
+            },
+            driverPhone: { 
+              $ifNull: ["$driverPhone", ""] 
+            },
+            vehicleNumber: { 
+              $ifNull: ["$vehicleNumber", ""] 
+            }
+          }
+        },
+        { $sort: { totalAmount: -1 } },
+        { $skip: skip },
+        { $limit: parseInt(limit) }
+      ]);
+      const totalGroups = await DriverPayout.aggregate([
+        { $match: filter },
+        { $group: { _id: "$driver" } },
+        { $count: "total" }
+      ]);
+      
+      const total = totalGroups.length > 0 ? totalGroups[0].total : 0;
+      
+      res.json({
+        payouts: aggregatedData,
+        view: 'aggregated',
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          pages: Math.ceil(total / limit)
+        }
+      });
+      
+    } else {
+      const payouts = await DriverPayout.find(filter)
+        .populate('driver', 'name email phone vehicleNumber')
+        .populate('processedBy', 'name email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit));
+      
+      const total = await DriverPayout.countDocuments(filter);
+      
+      res.json({
+        payouts,
+        view: 'detailed',
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          pages: Math.ceil(total / limit)
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Error in getDriverPayouts:', error);
+    res.status(500).json({ 
+      error: error.message,
+      success: false 
+    });
+  }
+};
+
+exports.getDriverDetails = async (req, res) => {
+  try {
+    const { driverId } = req.params;
+    
+    const driver = await Driver.findById(driverId).select('name email phone vehicleNumber');
+    
+    const earnings = await DriverEarning.find({ driver: driverId })
+      .populate('order', 'orderId')
+      .sort({ createdAt: -1 });
+    
+    const totalPendingEarnings = earnings
+      .filter(e => e.status === 'earned')
+      .reduce((sum, e) => sum + e.amount, 0);
+    
+    const totalPaidEarnings = earnings
+      .filter(e => e.status === 'paid')
+      .reduce((sum, e) => sum + e.amount, 0);
+    
+    const totalEarnings = earnings.reduce((sum, e) => sum + e.amount, 0);
+    
+    res.json({
+      success: true,
+      data: {
+        driver,
+        earnings,
+        totalPendingEarnings,
+        totalPaidEarnings,
+        totalEarnings,
+        earningCount: earnings.length,
+        summary: {
+          perOrderAmount: 18,
+          totalOrders: earnings.length,
+          totalAmount: totalEarnings
+        }
+      }
+    });
+    
+  } catch (error) {
+    console.error('Error in getDriverDetails:', error);
+    res.status(500).json({ 
+      error: error.message,
+      success: false 
+    });
+  }
+};
+
+exports.processBulkDriverPayout = async (req, res) => {
+  try {
+    const { driverId } = req.params;
+    const { status, paymentMethod, transactionId, remarks } = req.body;
+
+    if (!driverId) {
+      return res.status(400).json({ error: 'Driver ID is required' });
+    }
+
+    const result = await DriverPayout.updateMany(
+      {
+        driver: driverId,
+        status: 'pending'
+      },
+      {
+        $set: {
+          status: status || 'paid',
+          payoutMethod: paymentMethod,
+          transactionId,
+          notes: remarks,
+          paidAt: new Date(),
+          processedBy: req.user._id
+        }
+      }
+    );
+
+    res.json({
+      success: true,
+      message: `Updated ${result.modifiedCount} payout batches`,
+      processedCount: result.modifiedCount
+    });
+
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};

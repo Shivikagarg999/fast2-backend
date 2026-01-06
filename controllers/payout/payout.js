@@ -329,7 +329,16 @@ const requestPayout = async (req, res) => {
 
 const getSellerPayouts = async (req, res) => {
   try {
-    const { sellerId, status, startDate, endDate, page = 1, limit = 10 } = req.query;
+    const { 
+      sellerId, 
+      status, 
+      startDate, 
+      endDate, 
+      page = 1, 
+      limit = 10,
+      view = 'detailed'
+    } = req.query;
+    
     const filter = {};
     
     if (sellerId) filter.seller = sellerId;
@@ -342,24 +351,167 @@ const getSellerPayouts = async (req, res) => {
     
     const skip = (page - 1) * limit;
     
-    const payouts = await SellerPayout.find(filter)
-      .populate('order', 'orderId finalAmount status')
-      .populate('seller', 'name businessName')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
-    
-    const total = await SellerPayout.countDocuments(filter);
-    
-    res.json({
-      payouts,
-      pagination: {
-        total,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        pages: Math.ceil(total / limit)
-      }
+    if (view === 'aggregated') {
+      const aggregatedData = await SellerPayout.aggregate([
+        { $match: filter },
+        {
+          $lookup: {
+            from: "sellers",
+            localField: "seller",
+            foreignField: "_id",
+            as: "sellerInfo"
+          }
+        },
+        { $unwind: { path: "$sellerInfo", preserveNullAndEmptyArrays: true } },
+        
+        {
+          $group: {
+            _id: "$seller",
+            sellerId: { $first: "$seller" },
+            sellerName: { $first: "$sellerInfo.name" },
+            businessName: { $first: "$sellerInfo.businessName" },
+            sellerEmail: { $first: "$sellerInfo.email" },
+            sellerPhone: { $first: "$sellerInfo.phone" },
+            sellerBankDetails: { $first: "$sellerInfo.bankDetails" },
+            totalOrderAmount: { $sum: "$orderAmount" },
+            totalPlatformFee: { $sum: "$platformFee" },
+            totalGstOnPlatformFee: { $sum: "$gstOnPlatformFee" },
+            totalTdsDeduction: { $sum: "$tdsDeduction" },
+            totalPayableAmount: { $sum: "$payableAmount" },
+            totalNetAmount: { $sum: "$netAmount" },
+            
+            totalOrders: { $sum: 1 },
+            pendingOrders: {
+              $sum: { $cond: [{ $eq: ["$status", "pending"] }, 1, 0] }
+            },
+            paidOrders: {
+              $sum: { $cond: [{ $eq: ["$status", "paid"] }, 1, 0] }
+            },
+            
+            pendingAmount: {
+              $sum: { $cond: [{ $eq: ["$status", "pending"] }, "$netAmount", 0] }
+            },
+            paidAmount: {
+              $sum: { $cond: [{ $eq: ["$status", "paid"] }, "$netAmount", 0] }
+            },
+            
+            lastUpdated: { $max: "$updatedAt" },
+            earliestPayout: { $min: "$createdAt" },
+            latestPayout: { $max: "$createdAt" },
+            
+            statuses: { $push: "$status" }
+          }
+        },
+        {
+          $addFields: {
+            sellerName: { 
+              $ifNull: ["$sellerName", "Seller"] 
+            },
+            businessName: { 
+              $ifNull: ["$businessName", "Business"] 
+            },
+            sellerEmail: { 
+              $ifNull: ["$sellerEmail", ""] 
+            },
+            sellerPhone: { 
+              $ifNull: ["$sellerPhone", ""] 
+            },
+            bankDetails: { 
+              $ifNull: ["$sellerBankDetails", {}] 
+            }
+          }
+        },
+        {
+          $project: {
+            sellerBankDetails: 0,
+            statuses: 0
+          }
+        },
+        { $sort: { totalNetAmount: -1 } },
+        { $skip: skip },
+        { $limit: parseInt(limit) }
+      ]);
+      
+      const totalGroups = await SellerPayout.aggregate([
+        { $match: filter },
+        { $group: { _id: "$seller" } },
+        { $count: "total" }
+      ]);
+      
+      const total = totalGroups.length > 0 ? totalGroups[0].total : 0;
+      
+      res.json({
+        payouts: aggregatedData,
+        view: 'aggregated',
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          pages: Math.ceil(total / limit)
+        }
+      });
+      
+    } else {
+      const payouts = await SellerPayout.find(filter)
+        .populate('order', 'orderId finalAmount status')
+        .populate('seller', 'name businessName email phone bankDetails')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit));
+      
+      const total = await SellerPayout.countDocuments(filter);
+      
+      res.json({
+        payouts,
+        view: 'detailed',
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          pages: Math.ceil(total / limit)
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Error in getSellerPayouts:', error);
+    res.status(500).json({ 
+      error: error.message,
+      success: false 
     });
+  }
+};
+
+const processBulkPayout = async (req, res) => {
+  try {
+    const { sellerId } = req.params;
+    const { status, paymentMethod, transactionId, remarks } = req.body;
+
+    if (!sellerId) {
+      return res.status(400).json({ error: 'Seller ID is required' });
+    }
+
+    const result = await SellerPayout.updateMany(
+      {
+        seller: sellerId,
+        status: 'pending'
+      },
+      {
+        $set: {
+          status: status || 'paid',
+          paymentMethod,
+          transactionId,
+          remarks,
+          paidAt: new Date()
+        }
+      }
+    );
+
+    res.json({
+      success: true,
+      message: `Updated ${result.modifiedCount} payouts`,
+      processedCount: result.modifiedCount
+    });
+
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -367,7 +519,16 @@ const getSellerPayouts = async (req, res) => {
 
 const getPromotorPayouts = async (req, res) => {
   try {
-    const { promotorId, status, startDate, endDate, page = 1, limit = 10 } = req.query;
+    const { 
+      promotorId, 
+      status, 
+      startDate, 
+      endDate, 
+      page = 1, 
+      limit = 10,
+      view = 'detailed'
+    } = req.query;
+    
     const filter = {};
     
     if (promotorId) filter.promotor = promotorId;
@@ -380,25 +541,155 @@ const getPromotorPayouts = async (req, res) => {
     
     const skip = (page - 1) * limit;
     
-    const payouts = await PromotorPayout.find(filter)
-      .populate('order', 'orderId finalAmount')
-      .populate('promotor', 'name email phone')
-      .populate('seller', 'name businessName')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
-    
-    const total = await PromotorPayout.countDocuments(filter);
-    
-    res.json({
-      payouts,
-      pagination: {
-        total,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        pages: Math.ceil(total / limit)
+    if (view === 'aggregated') {
+      const aggregatedData = await PromotorPayout.aggregate([
+        { $match: filter },
+        
+        {
+          $lookup: {
+            from: "promotors", 
+            localField: "promotor",
+            foreignField: "_id",
+            as: "promotorInfo"
+          }
+        },
+        { $unwind: { path: "$promotorInfo", preserveNullAndEmptyArrays: true } },
+        
+        {
+          $group: {
+            _id: "$promotor",
+            promotorId: { $first: "$promotor" },
+            
+            promotorName: { $first: "$promotorInfo.name" },
+            promotorEmail: { $first: "$promotorInfo.email" },
+            promotorPhone: { $first: "$promotorInfo.phone" },
+            promotorBankDetails: { $first: "$promotorInfo.bankDetails" },
+            
+            totalCommissionAmount: { $sum: "$commissionAmount" },
+            
+            totalOrders: { $sum: 1 },
+            pendingOrders: {
+              $sum: { $cond: [{ $eq: ["$status", "pending"] }, 1, 0] }
+            },
+            paidOrders: {
+              $sum: { $cond: [{ $eq: ["$status", "paid"] }, 1, 0] }
+            },
+            
+            pendingAmount: {
+              $sum: { $cond: [{ $eq: ["$status", "pending"] }, "$commissionAmount", 0] }
+            },
+            paidAmount: {
+              $sum: { $cond: [{ $eq: ["$status", "paid"] }, "$commissionAmount", 0] }
+            },
+            
+            lastUpdated: { $max: "$updatedAt" },
+            earliestPayout: { $min: "$createdAt" },
+            latestPayout: { $max: "$createdAt" }
+          }
+        },
+        {
+          $addFields: {
+            promotorName: { 
+              $ifNull: ["$promotorName", "Promotor"] 
+            },
+            promotorEmail: { 
+              $ifNull: ["$promotorEmail", ""] 
+            },
+            promotorPhone: { 
+              $ifNull: ["$promotorPhone", ""] 
+            },
+            bankDetails: { 
+              $ifNull: ["$promotorBankDetails", {}] 
+            }
+          }
+        },
+        {
+          $project: {
+            promotorBankDetails: 0 
+          }
+        },
+        { $sort: { totalCommissionAmount: -1 } },
+        { $skip: skip },
+        { $limit: parseInt(limit) }
+      ]);
+
+      const totalGroups = await PromotorPayout.aggregate([
+        { $match: filter },
+        { $group: { _id: "$promotor" } },
+        { $count: "total" }
+      ]);
+      
+      const total = totalGroups.length > 0 ? totalGroups[0].total : 0;
+      
+      res.json({
+        payouts: aggregatedData,
+        view: 'aggregated',
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          pages: Math.ceil(total / limit)
+        }
+      });
+      
+    } else {
+      const payouts = await PromotorPayout.find(filter)
+        .populate('order', 'orderId finalAmount')
+        .populate('promotor', 'name email phone bankDetails')
+        .populate('seller', 'name businessName')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit));
+      
+      const total = await PromotorPayout.countDocuments(filter);
+      
+      res.json({
+        payouts,
+        view: 'detailed',
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          pages: Math.ceil(total / limit)
+        }
+      });
+    }
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+const processBulkPromotorPayout = async (req, res) => {
+  try {
+    const { promotorId } = req.params;
+    const { status, paymentMethod, transactionId, remarks } = req.body;
+
+    if (!promotorId) {
+      return res.status(400).json({ error: 'Promotor ID is required' });
+    }
+
+    const result = await PromotorPayout.updateMany(
+      {
+        promotor: promotorId,
+        status: 'pending'
+      },
+      {
+        $set: {
+          status: status || 'paid',
+          paymentMethod,
+          transactionId,
+          remarks,
+          paidAt: new Date()
+        }
       }
+    );
+
+    res.json({
+      success: true,
+      message: `Updated ${result.modifiedCount} payouts`,
+      processedCount: result.modifiedCount
     });
+
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -723,6 +1014,8 @@ module.exports = {
   getSellerOwnPayoutDetails,
   getSellerOwnPayouts,
   requestPayout,
+  processBulkPayout,
+  processBulkPromotorPayout,
   getSellerPayouts,
   getPromotorPayouts,
   updateSellerPayoutStatus,

@@ -6,9 +6,10 @@ const sellerAuth= require('../../middlewares/sellerAuth');
 router.get('/seller/my-payouts', sellerAuth, payoutController.getSellerOwnPayouts);
 router.get('/seller/my-payout-details', sellerAuth, payoutController.getSellerOwnPayoutDetails);
 router.post('/seller/request-payout', sellerAuth, payoutController.requestPayout);
-
 router.get('/seller-payouts', payoutController.getSellerPayouts);
+router.put('/bulk-payout/:sellerId', payoutController.processBulkPayout);
 router.get('/promotor-payouts', payoutController.getPromotorPayouts);
+router.put('/bulk-promotor-payout/:promotorId', payoutController.processBulkPromotorPayout);
 router.put('/seller-payouts/:id/status', payoutController.updateSellerPayoutStatus);
 router.put('/promotor-payouts/:id/status', payoutController.updatePromotorPayoutStatus);
 router.get('/summary', payoutController.getPayoutSummary);
