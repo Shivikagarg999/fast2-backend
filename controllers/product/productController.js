@@ -111,8 +111,9 @@ const createProduct = async (req, res) => {
         message: 'Seller is required'
       });
     }
+const sellerId = productData.seller?.id || productData.seller;
+const seller = await Seller.findById(sellerId);
 
-    const seller = await Seller.findById(productData.seller);
     if (!seller) {
       return res.status(404).json({
         success: false,
@@ -257,12 +258,7 @@ const createProduct = async (req, res) => {
       description: productData.description,
       brand: productData.brand,
       category: categoryId,
-      seller: {
-        id: seller._id,
-        name: seller.name,
-        businessName: seller.businessName,
-        email: seller.email
-      },
+      seller: seller._id,
       price: price,
       oldPrice: oldPrice,
       discountPercentage: discountPercentage,
