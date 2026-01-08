@@ -361,7 +361,7 @@ exports.serveResetPasswordPage = (req, res) => {
                 }
                 
                 try {
-                    const response = await fetch('http://localhost:5000/api/user/reset-password', {
+                    const response = await fetch('https://api.fast2.in/api/user/reset-password', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -378,7 +378,7 @@ exports.serveResetPasswordPage = (req, res) => {
                         showMessage(data.message, 'success');
                         document.getElementById('resetPasswordForm').reset();
                         setTimeout(() => {
-                            window.location.href = 'http://localhost:3000/login';
+                            window.location.href = 'https://fast2.in/login';
                         }, 3000);
                     } else {
                         showMessage(data.error || 'Failed to reset password', 'error');
