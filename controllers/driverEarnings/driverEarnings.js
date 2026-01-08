@@ -1,7 +1,6 @@
 const DriverEarning = require('../../models/driverEarnings');
 const Driver = require('../../models/driver');
 
-
 exports.getAllEarnings = async (req, res) => {
   try {
     const {
@@ -32,9 +31,9 @@ exports.getAllEarnings = async (req, res) => {
     if (search) {
       const drivers = await Driver.find({
         $or: [
-          { fullName: { $regex: search, $options: 'i' } },
-          { email: { $regex: search, $options: 'i' } },
-          { phoneNumber: { $regex: search, $options: 'i' } }
+          { 'personalInfo.name': { $regex: search, $options: 'i' } },
+          { 'personalInfo.email': { $regex: search, $options: 'i' } },
+          { 'personalInfo.phone': { $regex: search, $options: 'i' } }
         ]
       }).select('_id');
 
@@ -50,7 +49,10 @@ exports.getAllEarnings = async (req, res) => {
     sort[sortBy] = sortOrder === 'asc' ? 1 : -1;
 
     const earnings = await DriverEarning.find(filter)
-      .populate('driver', 'fullName email phoneNumber vehicleNumber')
+      .populate({
+        path: 'driver',
+        select: '_id personalInfo.name personalInfo.email personalInfo.phone vehicle.registrationNumber'
+      })
       .populate('order', 'orderId finalAmount createdAt deliveryAddress')
       .sort(sort)
       .limit(limit * 1)
@@ -63,10 +65,10 @@ exports.getAllEarnings = async (req, res) => {
       id: earning._id,
       driver: earning.driver ? {
         id: earning.driver._id,
-        name: earning.driver.fullName,
-        email: earning.driver.email,
-        phone: earning.driver.phoneNumber,
-        vehicleNumber: earning.driver.vehicleNumber
+        name: earning.driver.personalInfo?.name || 'Unknown Driver',
+        email: earning.driver.personalInfo?.email || '',
+        phone: earning.driver.personalInfo?.phone || '',
+        vehicleNumber: earning.driver.vehicle?.registrationNumber || ''
       } : null,
       orderId: earning.orderId,
       amount: earning.amount,
@@ -353,7 +355,7 @@ exports.getDriverEarningsDetail = async (req, res) => {
         .limit(limit * 1)
         .skip((page - 1) * limit)
         .lean(),
-      Driver.findById(driverId).select('fullName email phoneNumber vehicleNumber earnings'),
+      Driver.findById(driverId).select('personalInfo.name personalInfo.email personalInfo.phone vehicle.registrationNumber earnings'),
       DriverEarning.aggregate([
         { $match: filter },
         {
@@ -442,10 +444,10 @@ exports.getDriverEarningsDetail = async (req, res) => {
       data: {
         driver: {
           id: driver._id,
-          name: driver.fullName,
-          email: driver.email,
-          phone: driver.phoneNumber,
-          vehicleNumber: driver.vehicleNumber,
+          name: driver.personalInfo?.name || 'Unknown',
+          email: driver.personalInfo?.email || '',
+          phone: driver.personalInfo?.phone || '',
+          vehicleNumber: driver.vehicle?.registrationNumber || '',
           earnings: driver.earnings
         },
         earnings: formattedEarnings,
