@@ -716,7 +716,7 @@ exports.refundPayment = async (req, res) => {
 exports.getTestPaymentDetails = (req, res) => {
   res.status(200).json({
     success: true,
-    test_mode: true,
+    test_mode: false,
     environment: process.env.RAZORPAY_MODE || 'test',
     test_cards: [
       {

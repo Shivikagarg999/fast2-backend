@@ -9,7 +9,6 @@ router.get("/:orderId/payment-status", auth, orderController.checkPaymentStatus)
 router.get("/:orderId/razorpay-details", auth, orderController.getRazorpayOrder);
 router.post("/:orderId/refund", auth, orderController.refundPayment);
 router.post("/webhooks/razorpay", orderController.razorpayWebhook);
-router.get("/test-payment-details", auth, orderController.getTestPaymentDetails);
 router.get("/my-orders", auth, orderController.getMyOrders);
 router.put("/:orderId/status", auth, orderController.updateOrderStatus);
 router.get('/:orderId/invoice', auth, orderController.downloadInvoice);
