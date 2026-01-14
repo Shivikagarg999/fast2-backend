@@ -75,26 +75,6 @@ exports.createOrder = async (req, res) => {
       });
     }
 
-    const productsWithoutSellers = [];
-    for (const product of products) {
-      if (!product.seller) {
-        productsWithoutSellers.push({
-          productId: product._id,
-          productName: product.name
-        });
-      }
-    }
-
-    if (productsWithoutSellers.length > 0) {
-      await session.abortTransaction();
-      session.endSession();
-      return res.status(400).json({
-        success: false,
-        error: "Some products don't have sellers assigned",
-        productsWithoutSellers
-      });
-    }
-
     const nonServiceableProducts = [];
     
     for (const item of items) {
@@ -136,10 +116,72 @@ exports.createOrder = async (req, res) => {
       });
     }
 
-    let total = 0;
+    let subtotal = 0;
+    let deliveryCharges = 0;
+    let isFreeDelivery = false;
+    
+    const sellerDeliveryMap = new Map();
+    
     for (const item of items) {
-      total += item.price * item.quantity;
+      const product = products.find(p => p._id.toString() === item.product.toString());
+      const itemTotal = item.price * item.quantity;
+      subtotal += itemTotal;
+      
+      const productDelivery = product.delivery || {};
+      const productDeliveryCharges = productDelivery.deliveryCharges || 0;
+      const productFreeThreshold = productDelivery.freeDeliveryThreshold || 0;
+      
+      if (product.seller) {
+        const sellerId = product.seller._id.toString();
+        
+        if (sellerDeliveryMap.has(sellerId)) {
+          const existing = sellerDeliveryMap.get(sellerId);
+          sellerDeliveryMap.set(sellerId, {
+            ...existing,
+            subtotal: existing.subtotal + itemTotal,
+            highestDeliveryCharge: Math.max(existing.highestDeliveryCharge, productDeliveryCharges),
+            lowestFreeThreshold: existing.lowestFreeThreshold > 0 ? 
+              Math.min(existing.lowestFreeThreshold, productFreeThreshold) : 
+              productFreeThreshold,
+            items: [...existing.items, { productId: product._id, itemTotal }]
+          });
+        } else {
+          sellerDeliveryMap.set(sellerId, {
+            sellerId: sellerId,
+            sellerName: product.seller.name,
+            subtotal: itemTotal,
+            highestDeliveryCharge: productDeliveryCharges,
+            lowestFreeThreshold: productFreeThreshold,
+            items: [{ productId: product._id, itemTotal }]
+          });
+        }
+      } else {
+        deliveryCharges += productDeliveryCharges;
+        
+        if (productFreeThreshold > 0 && itemTotal >= productFreeThreshold) {
+          isFreeDelivery = true;
+        }
+      }
     }
+    
+    for (const [sellerId, sellerData] of sellerDeliveryMap.entries()) {
+      if (sellerData.lowestFreeThreshold > 0 && sellerData.subtotal >= sellerData.lowestFreeThreshold) {
+        continue;
+      }
+      
+      deliveryCharges += sellerData.highestDeliveryCharge;
+    }
+    
+    const anySellerFreeDelivery = Array.from(sellerDeliveryMap.values()).some(seller => 
+      seller.lowestFreeThreshold > 0 && seller.subtotal >= seller.lowestFreeThreshold
+    );
+    
+    if (anySellerFreeDelivery) {
+      deliveryCharges = 0;
+      isFreeDelivery = true;
+    }
+    
+    let total = subtotal + deliveryCharges;
 
     let discount = 0;
     let finalAmount = total;
@@ -262,9 +304,12 @@ exports.createOrder = async (req, res) => {
     const order = new Order({
       user: userId,
       items: orderItems,
-      total,
+      subtotal: subtotal,
+      deliveryCharges: deliveryCharges,
+      isFreeDelivery: isFreeDelivery,
+      total: total,
       coupon: coupon || {},
-      finalAmount,
+      finalAmount: finalAmount,
       shippingAddress: normalizedShippingAddress,
       paymentMethod,
       paymentStatus,
@@ -322,10 +367,13 @@ exports.createOrder = async (req, res) => {
       order: {
         orderId: order.orderId,
         secretCode: order.secretCode,
-        total,
-        finalAmount,
-        walletDeduction,
-        cashOnDelivery,
+        subtotal: subtotal,
+        deliveryCharges: deliveryCharges,
+        isFreeDelivery: isFreeDelivery,
+        total: total,
+        finalAmount: finalAmount,
+        walletDeduction: walletDeduction,
+        cashOnDelivery: cashOnDelivery,
         paymentStatus: order.paymentStatus,
         status: order.status,
         items: order.items,
