@@ -137,6 +137,63 @@ const assignDriver = async (req, res) => {
   }
 };
 
+const getOnlineOrders = async (req, res) => {
+  try {
+    const {
+      page = 1,
+      limit = 20,
+      paymentStatus,
+      startDate,
+      endDate,
+      sortBy = "createdAt",
+      sortOrder = "desc"
+    } = req.query;
+
+    const filter = {
+      paymentMethod: 'online',
+      paymentStatus: 'paid'
+    };
+    
+    if (paymentStatus) filter.paymentStatus = paymentStatus;
+    
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) filter.createdAt.$lte = new Date(endDate);
+    }
+
+    const sort = {};
+    sort[sortBy] = sortOrder === "desc" ? -1 : 1;
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const orders = await Order.find(filter)
+      .populate("user", "name email phone")
+      .populate("seller", "name businessName")
+      .populate("items.product", "name images")
+      .sort(sort)
+      .limit(parseInt(limit))
+      .skip(skip);
+
+    const total = await Order.countDocuments(filter);
+
+    res.json({
+      success: true,
+      orders,
+      total,
+      page: parseInt(page),
+      totalPages: Math.ceil(total / limit)
+    });
+  } catch (error) {
+    console.error('Get online orders error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: "Server error", 
+      error: error.message 
+    });
+  }
+};
+
 const updatePaymentStatus = async (req, res) => {
   try {
     const { paymentStatus } = req.body;
@@ -493,5 +550,6 @@ module.exports = {
   getOrderStats,
   getFreshOrders,
   getFreshOrdersNotifications,
-  getFreshOrdersStats
+  getFreshOrdersStats,
+  getOnlineOrders
 };

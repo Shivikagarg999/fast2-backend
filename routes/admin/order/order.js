@@ -10,10 +10,13 @@ const {
   getOrderStats,
   getFreshOrders,
   getFreshOrdersNotifications,
+  getOnlineOrders,
   getFreshOrdersStats
 } = require("../../../controllers/admin/order/order");
 
 router.get("/getall", getAllOrders);
+
+router.get("/getonline", getOnlineOrders);
 
 router.get("/stats", getOrderStats);
 
