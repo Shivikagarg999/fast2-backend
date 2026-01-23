@@ -97,9 +97,11 @@ const getDashboardOverview = async (req, res) => {
       sellerNetAmount: 0
     };
 
-    const averageOrderValue = result.totalOrders > 0 
-      ? result.totalRevenue / result.totalOrders 
+    const averageOrderValue = result.totalOrders > 0
+      ? result.totalRevenue / result.totalOrders
       : 0;
+
+    const totalOnlinePayment = result.totalRevenue - result.totalWalletDeduction - result.totalCashOnDelivery;
 
     res.json({
       totalRevenue: {
@@ -118,7 +120,8 @@ const getDashboardOverview = async (req, res) => {
       breakdown: {
         paymentMethods: {
           wallet: result.totalWalletDeduction,
-          cod: result.totalCashOnDelivery
+          cod: result.totalCashOnDelivery,
+          online: totalOnlinePayment
         },
         platformEarnings: {
           serviceFee: result.platformServiceFee,
