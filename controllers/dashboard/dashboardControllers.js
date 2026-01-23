@@ -55,6 +55,20 @@ const getDashboardOverview = async (req, res) => {
           totalOrders: { $sum: 1 },
           totalWalletDeduction: { $sum: "$walletDeduction" },
           totalCashOnDelivery: { $sum: "$cashOnDelivery" },
+          totalOnlinePayment: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $eq: ["$paymentMethod", "online"] },
+                    { $eq: ["$paymentStatus", "paid"] }
+                  ]
+                },
+                { $subtract: ["$finalAmount", "$walletDeduction"] },
+                0
+              ]
+            }
+          },
           platformServiceFee: { $sum: "$payout.platform.serviceFee" },
           platformGstCollection: { $sum: "$payout.platform.gstCollection" },
           promotorCommission: { $sum: "$payout.promotor.commissionAmount" },
@@ -88,6 +102,7 @@ const getDashboardOverview = async (req, res) => {
       totalOrders: 0,
       totalWalletDeduction: 0,
       totalCashOnDelivery: 0,
+      totalOnlinePayment: 0,
       platformServiceFee: 0,
       platformGstCollection: 0,
       promotorCommission: 0,
@@ -100,8 +115,6 @@ const getDashboardOverview = async (req, res) => {
     const averageOrderValue = result.totalOrders > 0
       ? result.totalRevenue / result.totalOrders
       : 0;
-
-    const totalOnlinePayment = result.totalRevenue - result.totalWalletDeduction - result.totalCashOnDelivery;
 
     res.json({
       totalRevenue: {
@@ -121,7 +134,7 @@ const getDashboardOverview = async (req, res) => {
         paymentMethods: {
           wallet: result.totalWalletDeduction,
           cod: result.totalCashOnDelivery,
-          online: totalOnlinePayment
+          online: result.totalOnlinePayment
         },
         platformEarnings: {
           serviceFee: result.platformServiceFee,
