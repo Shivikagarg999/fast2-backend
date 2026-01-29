@@ -60,6 +60,7 @@ exports.register = async (req, res) => {
         }
 
         // Send Welcome Notification
+        let debugError = null;
         try {
             const notificationService = require("../../services/notificationService");
             await notificationService.sendNotification(
@@ -71,6 +72,7 @@ exports.register = async (req, res) => {
             );
         } catch (notifError) {
             console.error('Notification error:', notifError);
+            debugError = notifError.message + " | Stack: " + notifError.stack;
         }
 
         return res.status(201).json({
@@ -78,6 +80,7 @@ exports.register = async (req, res) => {
             token,
             wallet: user.wallet,
             referralCode: user.referralCode,
+            notification_debug_error: debugError, // <--- EXPOSING ERROR HERE
             user: {
                 id: user._id,
                 email: user.email
