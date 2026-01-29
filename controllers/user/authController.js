@@ -7,7 +7,7 @@ const User = require("../../models/user");
 exports.register = async (req, res) => {
     try {
         const { email, password, referralCode } = req.body;
-        
+
         if (!email || !password) {
             return res.status(400).json({ error: "Email and password required" });
         }
@@ -57,6 +57,20 @@ exports.register = async (req, res) => {
             await emailService.sendWelcomeEmail(email);
         } catch (emailError) {
             console.error("Welcome email failed:", emailError.message);
+        }
+
+        // Send Welcome Notification
+        try {
+            const notificationService = require("../../services/notificationService");
+            await notificationService.sendNotification(
+                user._id,
+                'Welcome to Fast2!',
+                'Thanks for joining us. Check out our latest products!',
+                'promo',
+                null
+            );
+        } catch (notifError) {
+            console.error('Notification error:', notifError);
         }
 
         return res.status(201).json({
@@ -124,11 +138,11 @@ exports.forgotPassword = async (req, res) => {
         }
 
         const user = await User.findOne({ email });
-        
+
         // Always return success message for security
         if (!user) {
-            return res.status(200).json({ 
-                message: "If an account exists with this email, reset instructions have been sent" 
+            return res.status(200).json({
+                message: "If an account exists with this email, reset instructions have been sent"
             });
         }
 
@@ -149,8 +163,8 @@ exports.forgotPassword = async (req, res) => {
             return res.status(500).json({ error: "Failed to send reset email" });
         }
 
-        return res.status(200).json({ 
-            message: "Password reset email sent" 
+        return res.status(200).json({
+            message: "Password reset email sent"
         });
     } catch (err) {
         console.error("Forgot password error:", err);
@@ -200,8 +214,8 @@ exports.resetPassword = async (req, res) => {
 
         console.log("Password reset successful for:", user.email);
 
-        return res.status(200).json({ 
-            message: "Password reset successful. You can now login with your new password." 
+        return res.status(200).json({
+            message: "Password reset successful. You can now login with your new password."
         });
     } catch (err) {
         console.error("Reset password error:", err);
@@ -212,7 +226,7 @@ exports.resetPassword = async (req, res) => {
 
 exports.serveResetPasswordPage = (req, res) => {
     const token = req.query.token;
-    
+
     if (!token) {
         return res.status(400).send("Invalid reset link");
     }

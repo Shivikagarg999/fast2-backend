@@ -67,16 +67,16 @@ const couponSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-couponSchema.index({ code: 1 });
+
 couponSchema.index({ startDate: 1, endDate: 1 });
 couponSchema.index({ isActive: 1 });
 
-couponSchema.statics.validateCoupon = async function(code, userId, orderAmount) {
-  const coupon = await this.findOne({ 
-    code: code.toUpperCase(), 
-    isActive: true 
+couponSchema.statics.validateCoupon = async function (code, userId, orderAmount) {
+  const coupon = await this.findOne({
+    code: code.toUpperCase(),
+    isActive: true
   });
-  
+
   if (!coupon) {
     throw new Error("Invalid coupon code");
   }
@@ -97,9 +97,9 @@ couponSchema.statics.validateCoupon = async function(code, userId, orderAmount) 
   return coupon;
 };
 
-couponSchema.methods.calculateDiscount = function(orderAmount) {
+couponSchema.methods.calculateDiscount = function (orderAmount) {
   let discount = 0;
-  
+
   if (this.discountType === "percentage") {
     discount = (orderAmount * this.discountValue) / 100;
     if (this.maxDiscountAmount && discount > this.maxDiscountAmount) {
@@ -108,7 +108,7 @@ couponSchema.methods.calculateDiscount = function(orderAmount) {
   } else {
     discount = this.discountValue;
   }
-  
+
   return Math.min(discount, orderAmount);
 };
 

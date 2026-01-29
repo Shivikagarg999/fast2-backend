@@ -266,13 +266,13 @@ const driverSchema = new mongoose.Schema({
 driverSchema.index({ 'workInfo.availability': 1 });
 driverSchema.index({ 'workInfo.currentLocation.coordinates': '2dsphere' });
 driverSchema.index({ 'workInfo.status': 1 });
-driverSchema.index({ 'personalInfo.phone': 1 });
+
 driverSchema.index({ 'earnings.pendingPayout': 1 });
 driverSchema.index({ 'payoutDetails.preferredMethod': 1 });
 
-driverSchema.pre('save', async function(next) {
+driverSchema.pre('save', async function (next) {
   if (!this.isModified('auth.password')) return next();
-  
+
   try {
     const salt = await bcrypt.genSalt(10);
     this.auth.password = await bcrypt.hash(this.auth.password, salt);
@@ -282,11 +282,11 @@ driverSchema.pre('save', async function(next) {
   }
 });
 
-driverSchema.methods.comparePassword = async function(candidatePassword) {
+driverSchema.methods.comparePassword = async function (candidatePassword) {
   return await bcrypt.compare(candidatePassword, this.auth.password);
 };
 
-driverSchema.pre('save', async function(next) {
+driverSchema.pre('save', async function (next) {
   if (this.isNew && !this.workInfo.driverId) {
     const count = await this.constructor.countDocuments();
     this.workInfo.driverId = `DRV${String(count + 1).padStart(6, '0')}`;
@@ -294,7 +294,7 @@ driverSchema.pre('save', async function(next) {
   next();
 });
 
-driverSchema.methods.updateLocation = function(lat, lng, address = null) {
+driverSchema.methods.updateLocation = function (lat, lng, address = null) {
   this.workInfo.currentLocation = {
     coordinates: { lat, lng },
     lastUpdated: new Date(),
@@ -304,70 +304,70 @@ driverSchema.methods.updateLocation = function(lat, lng, address = null) {
   return this.save();
 };
 
-driverSchema.methods.setAvailability = function(status) {
+driverSchema.methods.setAvailability = function (status) {
   const allowedStatuses = ['online', 'offline', 'on-delivery', 'break'];
   if (allowedStatuses.includes(status)) {
     this.workInfo.availability = status;
-    
+
     if (status === 'online') {
       this.activity.currentSessionStart = new Date();
       this.activity.totalSessions += 1;
     } else if (status === 'offline' && this.activity.currentSessionStart) {
       const sessionHours = (new Date() - this.activity.currentSessionStart) / (1000 * 60 * 60);
       this.activity.totalOnlineHours += sessionHours;
-      
+
       const totalSessions = Math.max(1, this.activity.totalSessions);
       this.activity.averageSessionHours = this.activity.totalOnlineHours / totalSessions;
-      
+
       this.activity.currentSessionStart = null;
     }
-    
+
     this.activity.lastActive = new Date();
     return this.save();
   }
   throw new Error('Invalid availability status');
 };
 
-driverSchema.methods.assignOrder = function(orderId) {
+driverSchema.methods.assignOrder = function (orderId) {
   if (this.workInfo.availability !== 'online') {
     throw new Error('Driver is not available for delivery');
   }
-  
+
   this.workInfo.currentOrder = orderId;
   this.workInfo.availability = 'on-delivery';
   return this.save();
 };
 
-driverSchema.methods.completeDelivery = function(earnings, deliveryTime, distance = 0, rating = null) {
+driverSchema.methods.completeDelivery = function (earnings, deliveryTime, distance = 0, rating = null) {
   this.workInfo.currentOrder = null;
   this.workInfo.availability = 'online';
-  
+
   this.deliveryStats.totalOrders += 1;
   this.deliveryStats.completedOrders += 1;
-  
+
   if (distance > 0) {
     this.deliveryStats.totalDistance += distance;
   }
-  
+
   const totalTime = this.deliveryStats.averageDeliveryTime * (this.deliveryStats.completedOrders - 1) + deliveryTime;
   this.deliveryStats.averageDeliveryTime = totalTime / this.deliveryStats.completedOrders;
-  
+
   if (this.deliveryStats.totalOrders > 0) {
     this.deliveryStats.onTimeDeliveryRate = (this.deliveryStats.completedOrders / this.deliveryStats.totalOrders) * 100;
   }
-  
+
   if (rating) {
     const totalRating = this.deliveryStats.averageRating * this.deliveryStats.totalRatings + rating;
     this.deliveryStats.totalRatings += 1;
     this.deliveryStats.averageRating = totalRating / this.deliveryStats.totalRatings;
   }
-  
+
   this.activity.currentSessionStart = new Date();
-  
+
   return this.save();
 };
 
-driverSchema.methods.cancelDelivery = function() {
+driverSchema.methods.cancelDelivery = function () {
   this.workInfo.currentOrder = null;
   this.workInfo.availability = 'online';
   this.deliveryStats.cancelledOrders += 1;
@@ -375,7 +375,7 @@ driverSchema.methods.cancelDelivery = function() {
   return this.save();
 };
 
-driverSchema.methods.addEarning = function(amount, description = 'Delivery completed') {
+driverSchema.methods.addEarning = function (amount, description = 'Delivery completed') {
   this.earnings.totalEarnings += amount;
   this.earnings.currentBalance += amount;
   this.earnings.pendingPayout += amount;
@@ -383,27 +383,27 @@ driverSchema.methods.addEarning = function(amount, description = 'Delivery compl
   return this.save();
 };
 
-driverSchema.methods.processPayout = function(amount, payoutMethod = 'upi', transactionId = null) {
+driverSchema.methods.processPayout = function (amount, payoutMethod = 'upi', transactionId = null) {
   if (amount > this.earnings.pendingPayout) {
     throw new Error('Insufficient pending payout balance');
   }
-  
+
   this.earnings.pendingPayout -= amount;
   this.earnings.totalPayouts += amount;
   this.earnings.lastPayoutDate = new Date();
   this.earnings.lastPayoutAmount = amount;
-  
+
   this.payoutDetails.preferredMethod = payoutMethod;
-  
+
   return this.save();
 };
 
-driverSchema.methods.resetTodayEarnings = function() {
+driverSchema.methods.resetTodayEarnings = function () {
   this.earnings.todayEarnings = 0;
   return this.save();
 };
 
-driverSchema.methods.updatePayoutDetails = function(details) {
+driverSchema.methods.updatePayoutDetails = function (details) {
   if (details.preferredMethod) {
     this.payoutDetails.preferredMethod = details.preferredMethod;
   }
@@ -425,7 +425,7 @@ driverSchema.methods.updatePayoutDetails = function(details) {
   return this.save();
 };
 
-driverSchema.statics.findAvailableDrivers = function(lat, lng, maxDistance = 5000) {
+driverSchema.statics.findAvailableDrivers = function (lat, lng, maxDistance = 5000) {
   return this.find({
     'workInfo.availability': 'online',
     'workInfo.status': 'approved',
@@ -438,14 +438,14 @@ driverSchema.statics.findAvailableDrivers = function(lat, lng, maxDistance = 500
         $maxDistance: maxDistance
       }
     }
-  }).sort({ 
+  }).sort({
     'deliveryStats.averageRating': -1,
     'deliveryStats.onTimeDeliveryRate': -1,
     'earnings.pendingPayout': -1
   });
 };
 
-driverSchema.statics.findDriversForPayout = function(minAmount = 100) {
+driverSchema.statics.findDriversForPayout = function (minAmount = 100) {
   return this.find({
     'workInfo.status': 'approved',
     'earnings.pendingPayout': { $gte: minAmount },
@@ -453,12 +453,12 @@ driverSchema.statics.findDriversForPayout = function(minAmount = 100) {
   }).sort({ 'earnings.pendingPayout': -1 });
 };
 
-driverSchema.methods.calculateAcceptanceRate = function(totalOrdersOffered) {
+driverSchema.methods.calculateAcceptanceRate = function (totalOrdersOffered) {
   if (totalOrdersOffered === 0) return 0;
   return (this.deliveryStats.completedOrders / totalOrdersOffered) * 100;
 };
 
-driverSchema.methods.getEarningsSummary = function() {
+driverSchema.methods.getEarningsSummary = function () {
   return {
     totalEarnings: this.earnings.totalEarnings,
     currentBalance: this.earnings.currentBalance,
@@ -474,32 +474,32 @@ driverSchema.methods.getEarningsSummary = function() {
   };
 };
 
-driverSchema.virtual('fullAddress').get(function() {
+driverSchema.virtual('fullAddress').get(function () {
   const addr = this.address.currentAddress;
   return `${addr.addressLine}, ${addr.city}, ${addr.state} - ${addr.pinCode}`;
 });
 
-driverSchema.virtual('performanceScore').get(function() {
+driverSchema.virtual('performanceScore').get(function () {
   const ratingScore = this.deliveryStats.averageRating * 20;
   const completionRate = (this.deliveryStats.completedOrders / Math.max(1, this.deliveryStats.totalOrders)) * 100;
   const acceptanceRate = this.deliveryStats.acceptanceRate || 0;
   const onTimeRate = this.deliveryStats.onTimeDeliveryRate || 0;
-  
+
   return (ratingScore + completionRate + acceptanceRate + onTimeRate) / 4;
 });
 
-driverSchema.virtual('isEligibleForPayout').get(function() {
-  return this.earnings.pendingPayout >= this.payoutDetails.payoutThreshold && 
-         this.workInfo.status === 'approved' &&
-         (this.payoutDetails.upiId || this.payoutDetails.bankAccount.accountNumber);
+driverSchema.virtual('isEligibleForPayout').get(function () {
+  return this.earnings.pendingPayout >= this.payoutDetails.payoutThreshold &&
+    this.workInfo.status === 'approved' &&
+    (this.payoutDetails.upiId || this.payoutDetails.bankAccount.accountNumber);
 });
 
-driverSchema.virtual('payoutEta').get(function() {
+driverSchema.virtual('payoutEta').get(function () {
   if (!this.isEligibleForPayout) return null;
-  
+
   const pendingAmount = this.earnings.pendingPayout;
   const threshold = this.payoutDetails.payoutThreshold;
-  
+
   if (pendingAmount >= threshold * 2) {
     return 'immediate';
   } else if (pendingAmount >= threshold * 1.5) {

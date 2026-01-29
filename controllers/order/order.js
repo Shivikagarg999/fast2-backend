@@ -57,12 +57,12 @@ exports.createOrder = async (req, res) => {
 
     const productIds = items.map(item => item.product);
 
-    const products = await Product.find({ 
-      _id: { $in: productIds } 
+    const products = await Product.find({
+      _id: { $in: productIds }
     })
-    .populate('seller')
-    .populate('promotor.id')
-    .session(session);
+      .populate('seller')
+      .populate('promotor.id')
+      .session(session);
 
     if (products.length !== items.length) {
       await session.abortTransaction();
@@ -76,10 +76,10 @@ exports.createOrder = async (req, res) => {
     }
 
     const nonServiceableProducts = [];
-    
+
     for (const item of items) {
       const product = products.find(p => p._id.toString() === item.product.toString());
-      
+
       if (!product) {
         await session.abortTransaction();
         session.endSession();
@@ -88,12 +88,12 @@ exports.createOrder = async (req, res) => {
           error: `Product not found: ${item.product}`
         });
       }
-      
+
       if (product.serviceablePincodes && product.serviceablePincodes.length > 0) {
-        const isServiceable = product.serviceablePincodes.some(pincode => 
+        const isServiceable = product.serviceablePincodes.some(pincode =>
           pincode.toString().trim() === shippingPincode.toString().trim()
         );
-        
+
         if (!isServiceable) {
           nonServiceableProducts.push({
             productId: product._id,
@@ -119,29 +119,29 @@ exports.createOrder = async (req, res) => {
     let subtotal = 0;
     let deliveryCharges = 0;
     let isFreeDelivery = false;
-    
+
     const sellerDeliveryMap = new Map();
-    
+
     for (const item of items) {
       const product = products.find(p => p._id.toString() === item.product.toString());
       const itemTotal = item.price * item.quantity;
       subtotal += itemTotal;
-      
+
       const productDelivery = product.delivery || {};
       const productDeliveryCharges = productDelivery.deliveryCharges || 0;
       const productFreeThreshold = productDelivery.freeDeliveryThreshold || 0;
-      
+
       if (product.seller) {
         const sellerId = product.seller._id.toString();
-        
+
         if (sellerDeliveryMap.has(sellerId)) {
           const existing = sellerDeliveryMap.get(sellerId);
           sellerDeliveryMap.set(sellerId, {
             ...existing,
             subtotal: existing.subtotal + itemTotal,
             highestDeliveryCharge: Math.max(existing.highestDeliveryCharge, productDeliveryCharges),
-            lowestFreeThreshold: existing.lowestFreeThreshold > 0 ? 
-              Math.min(existing.lowestFreeThreshold, productFreeThreshold) : 
+            lowestFreeThreshold: existing.lowestFreeThreshold > 0 ?
+              Math.min(existing.lowestFreeThreshold, productFreeThreshold) :
               productFreeThreshold,
             items: [...existing.items, { productId: product._id, itemTotal }]
           });
@@ -157,30 +157,30 @@ exports.createOrder = async (req, res) => {
         }
       } else {
         deliveryCharges += productDeliveryCharges;
-        
+
         if (productFreeThreshold > 0 && itemTotal >= productFreeThreshold) {
           isFreeDelivery = true;
         }
       }
     }
-    
+
     for (const [sellerId, sellerData] of sellerDeliveryMap.entries()) {
       if (sellerData.lowestFreeThreshold > 0 && sellerData.subtotal >= sellerData.lowestFreeThreshold) {
         continue;
       }
-      
+
       deliveryCharges += sellerData.highestDeliveryCharge;
     }
-    
-    const anySellerFreeDelivery = Array.from(sellerDeliveryMap.values()).some(seller => 
+
+    const anySellerFreeDelivery = Array.from(sellerDeliveryMap.values()).some(seller =>
       seller.lowestFreeThreshold > 0 && seller.subtotal >= seller.lowestFreeThreshold
     );
-    
+
     if (anySellerFreeDelivery) {
       deliveryCharges = 0;
       isFreeDelivery = true;
     }
-    
+
     let total = subtotal + deliveryCharges;
 
     let discount = 0;
@@ -197,7 +197,7 @@ exports.createOrder = async (req, res) => {
 
     if (useWallet) {
       const user = await User.findById(userId).session(session);
-      
+
       if (!user) {
         await session.abortTransaction();
         session.endSession();
@@ -208,7 +208,7 @@ exports.createOrder = async (req, res) => {
       }
 
       const walletBalance = user.wallet || 0;
-      
+
       if (walletBalance > 0) {
         walletDeduction = Math.min(walletBalance, finalAmount);
         cashOnDelivery = finalAmount - walletDeduction;
@@ -236,7 +236,7 @@ exports.createOrder = async (req, res) => {
         };
 
         razorpayOrder = await razorpay.orders.create(razorpayOptions);
-        
+
         paymentStatus = "pending";
         cashOnDelivery = 0;
       } catch (razorpayError) {
@@ -256,17 +256,17 @@ exports.createOrder = async (req, res) => {
       pincode: shippingPincode
     };
 
-    const sellerMap = new Map(); 
-    
+    const sellerMap = new Map();
+
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       const product = products[i];
-      
+
       if (product.seller) {
         const sellerId = product.seller._id.toString();
         const itemTotal = item.price * item.quantity;
         const sellerAmount = (itemTotal * 30) / 100;
-        
+
         if (sellerMap.has(sellerId)) {
           const existing = sellerMap.get(sellerId);
           sellerMap.set(sellerId, {
@@ -327,10 +327,10 @@ exports.createOrder = async (req, res) => {
     await order.save({ session });
 
     const payoutPromises = [];
-    
+
     for (const [sellerId, data] of sellerMap.entries()) {
       const sellerAmount = parseFloat(data.amount.toFixed(2));
-      
+
       const payout = new Payout({
         seller: sellerId,
         order: order._id,
@@ -339,7 +339,7 @@ exports.createOrder = async (req, res) => {
         percentage: 30,
         status: 'pending'
       });
-      
+
       payoutPromises.push(payout.save({ session }));
 
       payoutPromises.push(
@@ -357,10 +357,10 @@ exports.createOrder = async (req, res) => {
     }
 
     await Promise.all(payoutPromises);
-    
+
     await session.commitTransaction();
     session.endSession();
-    
+
     const response = {
       success: true,
       message: "Order created successfully",
@@ -395,6 +395,21 @@ exports.createOrder = async (req, res) => {
         createdAt: order.createdAt
       }
     };
+
+    // Send Notification
+    try {
+      const notificationService = require('../../services/notificationService');
+      await notificationService.sendNotification(
+        userId,
+        'Order Placed Successfully',
+        `Your order #${order.orderId} has been placed.`,
+        'order',
+        order.orderId,
+        { orderId: order.orderId }
+      );
+    } catch (notifError) {
+      console.error('Notification error:', notifError);
+    }
 
     return res.status(201).json(response);
 
@@ -438,7 +453,7 @@ exports.verifyRazorpayPayment = async (req, res) => {
     }
 
     const order = await Order.findOneAndUpdate(
-      { 
+      {
         $or: [
           { razorpayOrderId: razorpay_order_id },
           { orderId: orderId }
@@ -465,6 +480,21 @@ exports.verifyRazorpayPayment = async (req, res) => {
 
     await session.commitTransaction();
     session.endSession();
+
+    // Send Notification
+    try {
+      const notificationService = require('../../services/notificationService');
+      await notificationService.sendNotification(
+        order.user,
+        'Payment Successful',
+        `Payment for order #${order.orderId} verified successfully.`,
+        'payment',
+        order.orderId,
+        { orderId: order.orderId }
+      );
+    } catch (notifError) {
+      console.error('Notification error:', notifError);
+    }
 
     res.status(200).json({
       success: true,
@@ -506,7 +536,7 @@ exports.razorpayWebhook = async (req, res) => {
 
     if (event === 'payment.captured') {
       await handlePaymentCaptured(payload.payment.entity);
-    } 
+    }
     else if (event === 'payment.failed') {
       await handlePaymentFailed(payload.payment.entity);
     }
@@ -539,6 +569,21 @@ const handlePaymentCaptured = async (payment) => {
 
     if (order) {
       console.log(`Order ${order.orderId} marked as paid via webhook`);
+
+      // Send Notification
+      try {
+        const notificationService = require('../../services/notificationService');
+        await notificationService.sendNotification(
+          order.user,
+          'Payment Successful',
+          `We have received your payment for order #${order.orderId}.`,
+          'payment',
+          order.orderId,
+          { orderId: order.orderId }
+        );
+      } catch (notifError) {
+        console.error('Notification error:', notifError);
+      }
     } else {
       console.warn(`No order found for payment ${payment.id}`);
     }
@@ -562,6 +607,21 @@ const handlePaymentFailed = async (payment) => {
 
     if (order) {
       console.log(`Order ${order.orderId} payment failed`);
+
+      // Send Notification
+      try {
+        const notificationService = require('../../services/notificationService');
+        await notificationService.sendNotification(
+          order.user,
+          'Payment Failed',
+          `Payment for order #${order.orderId} failed. Please try again.`,
+          'payment',
+          order.orderId,
+          { orderId: order.orderId }
+        );
+      } catch (notifError) {
+        console.error('Notification error:', notifError);
+      }
     } else {
       console.warn(`No order found for failed payment ${payment.id}`);
     }
@@ -714,7 +774,7 @@ exports.refundPayment = async (req, res) => {
     }
 
     const refundAmount = amount ? Math.round(amount * 100) : Math.round(order.finalAmount * 100);
-    
+
     const refund = await razorpay.payments.refund(
       order.razorpayPaymentId,
       {
@@ -841,10 +901,10 @@ exports.getOrderPayoutDetails = async (req, res) => {
       const product = item.product;
       const itemTotal = item.price * item.quantity;
       const gstRate = product.gstPercent || 0;
-      
+
       let gstAmount = 0;
       let taxableValue = itemTotal;
-      
+
       if (product.taxType === 'inclusive' && gstRate > 0) {
         taxableValue = itemTotal / (1 + gstRate / 100);
         gstAmount = itemTotal - taxableValue;
@@ -970,7 +1030,7 @@ exports.processSellerPayout = async (req, res) => {
 
     if (order.seller) {
       await Seller.findByIdAndUpdate(order.seller._id, {
-        $inc: { 
+        $inc: {
           totalEarnings: order.payout.seller.netAmount,
           totalOrders: 1
         }
@@ -1164,17 +1224,17 @@ exports.getPromotorPayouts = async (req, res) => {
         $in: await Product.find({ 'promotor.id': promotorId }).distinct('_id')
       }
     })
-    .populate('user', 'name email')
-    .populate('seller', 'businessName')
-    .sort({ createdAt: -1 })
-    .limit(limit * 1)
-    .skip((page - 1) * limit);
+      .populate('user', 'name email')
+      .populate('seller', 'businessName')
+      .sort({ createdAt: -1 })
+      .limit(limit * 1)
+      .skip((page - 1) * limit);
 
     const filteredOrders = orders.filter(order => {
-      return order.items.some(item => 
-        item.product && 
-        item.product.promotor && 
-        item.product.promotor.id && 
+      return order.items.some(item =>
+        item.product &&
+        item.product.promotor &&
+        item.product.promotor.id &&
         item.product.promotor.id.toString() === promotorId
       );
     });
@@ -1388,11 +1448,11 @@ exports.downloadInvoice = async (req, res) => {
     const itemsWithGST = order.items.map(item => {
       const itemTotal = item.price * item.quantity;
       const gstRate = item.product?.gstPercent || 0;
-      
+
       const sellerState = item.product?.seller?.address?.state;
       const shippingState = order.shippingAddress.state;
       const isWithinState = sellerState && shippingState && sellerState === shippingState;
-      
+
       let gstAmount = 0;
       let cgstAmount = 0;
       let sgstAmount = 0;
@@ -1496,7 +1556,7 @@ exports.downloadInvoice = async (req, res) => {
 
 exports.generatePDFInvoice = async (invoiceData) => {
   const PDFDocument = require('pdfkit');
-  
+
   return new Promise((resolve, reject) => {
     try {
       const doc = new PDFDocument({ margin: 50, size: 'A4' });
@@ -1509,79 +1569,79 @@ exports.generatePDFInvoice = async (invoiceData) => {
       });
 
       doc.fillColor('#1e40af')
-         .rect(0, 0, 600, 80)
-         .fill();
-      
+        .rect(0, 0, 600, 80)
+        .fill();
+
       doc.fillColor('#ffffff')
-         .fontSize(20)
-         .font('Helvetica-Bold')
-         .text('Fast 2', 50, 30);
-      
+        .fontSize(20)
+        .font('Helvetica-Bold')
+        .text('Fast 2', 50, 30);
+
       doc.fontSize(10)
-         .text('TAX INVOICE', 50, 55);
+        .text('TAX INVOICE', 50, 55);
 
       doc.font('Helvetica')
-         .fontSize(8)
-         .text('GSTIN: 07AABCU9603R1ZM', 400, 35, { align: 'right' })
-         .text('PAN: AABCU9603R', 400, 47, { align: 'right' })
-         .text('123 Business Street, Delhi - 110001', 400, 59, { align: 'right' });
+        .fontSize(8)
+        .text('GSTIN: 07AABCU9603R1ZM', 400, 35, { align: 'right' })
+        .text('PAN: AABCU9603R', 400, 47, { align: 'right' })
+        .text('123 Business Street, Delhi - 110001', 400, 59, { align: 'right' });
 
       let yPosition = 100;
 
       doc.fillColor('#000000')
-         .fontSize(10)
-         .font('Helvetica-Bold')
-         .text('Invoice Details:', 50, yPosition);
-      
+        .fontSize(10)
+        .font('Helvetica-Bold')
+        .text('Invoice Details:', 50, yPosition);
+
       doc.font('Helvetica')
-         .text(`Invoice Number: ${invoiceData.orderId}`, 150, yPosition)
-         .text(`Invoice Date: ${new Date(invoiceData.orderDate).toLocaleDateString('en-IN')}`, 350, yPosition);
-      
+        .text(`Invoice Number: ${invoiceData.orderId}`, 150, yPosition)
+        .text(`Invoice Date: ${new Date(invoiceData.orderDate).toLocaleDateString('en-IN')}`, 350, yPosition);
+
       yPosition += 15;
       doc.text(`Order Number: ${invoiceData.orderId}`, 150, yPosition)
-         .text(`Place of Supply: ${invoiceData.shippingAddress.state}`, 350, yPosition);
+        .text(`Place of Supply: ${invoiceData.shippingAddress.state}`, 350, yPosition);
 
       yPosition += 25;
 
       doc.font('Helvetica-Bold')
-         .text('Sold By:', 50, yPosition);
-      
+        .text('Sold By:', 50, yPosition);
+
       const sellerName = invoiceData.seller?.businessName || 'Store';
       const sellerGST = invoiceData.seller?.gstNumber || 'Not Available';
-      
+
       doc.font('Helvetica')
-         .text(sellerName, 150, yPosition)
-         .text(`GSTIN: ${sellerGST}`, 350, yPosition);
-      
+        .text(sellerName, 150, yPosition)
+        .text(`GSTIN: ${sellerGST}`, 350, yPosition);
+
       yPosition += 12;
-      
-      const sellerAddress = invoiceData.seller?.address ? 
-        `${invoiceData.seller.address.street || ''}, ${invoiceData.seller.address.city || ''}, ${invoiceData.seller.address.state || ''} - ${invoiceData.seller.address.pincode || ''}` : 
+
+      const sellerAddress = invoiceData.seller?.address ?
+        `${invoiceData.seller.address.street || ''}, ${invoiceData.seller.address.city || ''}, ${invoiceData.seller.address.state || ''} - ${invoiceData.seller.address.pincode || ''}` :
         'Address not available';
-      
+
       doc.text(sellerAddress, 150, yPosition, { width: 200 });
 
       yPosition += 25;
 
       doc.font('Helvetica-Bold')
-         .text('Bill To:', 50, yPosition);
-      
+        .text('Bill To:', 50, yPosition);
+
       doc.font('Helvetica')
-         .text(invoiceData.customer.name, 150, yPosition)
-         .text(`Phone: ${invoiceData.customer.phone}`, 350, yPosition);
-      
+        .text(invoiceData.customer.name, 150, yPosition)
+        .text(`Phone: ${invoiceData.customer.phone}`, 350, yPosition);
+
       yPosition += 12;
       doc.text(invoiceData.shippingAddress.addressLine, 150, yPosition, { width: 200 })
-         .text(`Email: ${invoiceData.customer.email}`, 350, yPosition);
-      
+        .text(`Email: ${invoiceData.customer.email}`, 350, yPosition);
+
       yPosition += 12;
       doc.text(`${invoiceData.shippingAddress.city}, ${invoiceData.shippingAddress.state} - ${invoiceData.shippingAddress.pinCode}`, 150, yPosition);
 
       yPosition += 30;
 
       doc.font('Helvetica-Bold')
-         .fontSize(9);
-      
+        .fontSize(9);
+
       doc.text('Description', 50, yPosition);
       doc.text('HSN', 200, yPosition);
       doc.text('Qty', 250, yPosition);
@@ -1597,8 +1657,8 @@ exports.generatePDFInvoice = async (invoiceData) => {
       yPosition += 5;
 
       doc.font('Helvetica')
-         .fontSize(8);
-      
+        .fontSize(8);
+
       invoiceData.items.forEach((item, index) => {
         if (yPosition > 650) {
           doc.addPage();
@@ -1629,7 +1689,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
         doc.text(`₹${item.taxableValue.toFixed(2)}`, 400, yPosition);
         doc.text(`₹${item.gstAmount.toFixed(2)}`, 450, yPosition);
         doc.text(`₹${item.totalWithTax.toFixed(2)}`, 500, yPosition);
-        
+
         yPosition += 20;
       });
 
@@ -1640,7 +1700,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
       doc.fontSize(9);
       doc.text('Subtotal:', 400, yPosition);
       doc.text(`₹${invoiceData.summary.subtotal.toFixed(2)}`, 500, yPosition, { align: 'right' });
-      
+
       yPosition += 12;
       doc.text('Delivery Charges:', 400, yPosition);
       doc.text(`₹${invoiceData.summary.deliveryFee.toFixed(2)}`, 500, yPosition, { align: 'right' });
@@ -1682,18 +1742,18 @@ exports.generatePDFInvoice = async (invoiceData) => {
       yPosition += 5;
 
       doc.font('Helvetica-Bold')
-         .fontSize(11);
+        .fontSize(11);
       doc.text('Grand Total:', 400, yPosition);
       doc.text(`₹${invoiceData.summary.payableAmount.toFixed(2)}`, 500, yPosition, { align: 'right' });
 
       yPosition += 30;
       doc.font('Helvetica')
-         .fontSize(9);
+        .fontSize(9);
       doc.text('Payment Details:', 50, yPosition);
       yPosition += 12;
       doc.text(`Method: ${invoiceData.payment.method.toUpperCase()}`, 50, yPosition);
       doc.text(`Status: ${invoiceData.payment.status}`, 200, yPosition);
-      
+
       if (invoiceData.secretCode) {
         yPosition += 12;
         doc.text(`Secret Code: ${invoiceData.secretCode}`, 50, yPosition);
@@ -1701,25 +1761,25 @@ exports.generatePDFInvoice = async (invoiceData) => {
 
       yPosition += 25;
       doc.font('Helvetica-Bold')
-         .text('GST Summary:', 50, yPosition);
-      
+        .text('GST Summary:', 50, yPosition);
+
       yPosition += 15;
       doc.font('Helvetica')
-         .fontSize(8);
-      
+        .fontSize(8);
+
       if (invoiceData.gstSummary.withinState) {
         doc.text(`Within State Supply (CGST + SGST): ₹${invoiceData.summary.totalCGST.toFixed(2)} + ₹${invoiceData.summary.totalSGST.toFixed(2)}`, 50, yPosition);
         yPosition += 10;
       }
-      
+
       if (invoiceData.gstSummary.interState) {
         doc.text(`Inter-State Supply (IGST): ₹${invoiceData.summary.totalIGST.toFixed(2)}`, 50, yPosition);
         yPosition += 10;
       }
 
       doc.fontSize(7)
-         .text('This is a computer-generated invoice and does not require a physical signature.', 50, 750, { align: 'center' })
-         .text('Thank you for your business!', 50, 760, { align: 'center' });
+        .text('This is a computer-generated invoice and does not require a physical signature.', 50, 750, { align: 'center' })
+        .text('Thank you for your business!', 50, 760, { align: 'center' });
 
       doc.end();
     } catch (error) {

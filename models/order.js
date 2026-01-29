@@ -6,7 +6,7 @@ const orderItemSchema = new mongoose.Schema({
     ref: "Product",
     required: true
   },
-  quantity: { 
+  quantity: {
     type: Number,
     required: true,
     min: 1
@@ -31,7 +31,7 @@ const orderSchema = new mongoose.Schema(
     orderId: {
       type: String,
       unique: true,
-      sparse: true 
+      sparse: true
     },
     user: {
       type: mongoose.Schema.Types.ObjectId,
@@ -71,16 +71,16 @@ const orderSchema = new mongoose.Schema(
       type: String,
       default: "pending"
     },
-    shippingAddress: shippingSchema, 
-    paymentMethod: { 
-      type: String, 
-      enum: ["cod", "online"], 
-      default: "cod" 
+    shippingAddress: shippingSchema,
+    paymentMethod: {
+      type: String,
+      enum: ["cod", "online"],
+      default: "cod"
     },
-    paymentStatus: { 
-      type: String, 
-      enum: ["pending", "paid", "failed", "refunded"], 
-      default: "pending" 
+    paymentStatus: {
+      type: String,
+      enum: ["pending", "paid", "failed", "refunded"],
+      default: "pending"
     },
     secretCode: {
       type: String,
@@ -125,10 +125,10 @@ const orderSchema = new mongoose.Schema(
         gstDeduction: { type: Number, default: 0 },
         tdsDeduction: { type: Number, default: 0 },
         netAmount: { type: Number, default: 0 },
-        payoutStatus: { 
-          type: String, 
-          enum: ["pending", "processing", "paid", "failed"], 
-          default: "pending" 
+        payoutStatus: {
+          type: String,
+          enum: ["pending", "processing", "paid", "failed"],
+          default: "pending"
         },
         paidAt: { type: Date }
       },
@@ -136,10 +136,10 @@ const orderSchema = new mongoose.Schema(
         commissionAmount: { type: Number, default: 0 },
         commissionType: { type: String, enum: ["percentage", "fixed"], default: "percentage" },
         commissionRate: { type: Number, default: 0 },
-        payoutStatus: { 
-          type: String, 
-          enum: ["pending", "processing", "paid", "failed"], 
-          default: "pending" 
+        payoutStatus: {
+          type: String,
+          enum: ["pending", "processing", "paid", "failed"],
+          default: "pending"
         },
         paidAt: { type: Date }
       },
@@ -152,7 +152,7 @@ const orderSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-orderSchema.pre('save', async function(next) {
+orderSchema.pre('save', async function (next) {
   if (this.isNew) {
     try {
       const lastOrder = await this.constructor.findOne(
@@ -160,18 +160,18 @@ orderSchema.pre('save', async function(next) {
         { orderId: 1 },
         { sort: { createdAt: -1 } }
       );
-      
+
       let nextNumber = 1;
       if (lastOrder && lastOrder.orderId) {
         const lastNumber = parseInt(lastOrder.orderId.replace('FST', ''));
         nextNumber = lastNumber + 1;
       }
-      
+
       this.orderId = `FST${String(nextNumber).padStart(3, '0')}`;
-      
+
       let secretCode;
       let isUnique = false;
-      
+
       while (!isUnique) {
         secretCode = Math.floor(100000 + Math.random() * 900000).toString();
         const existingOrder = await this.constructor.findOne({ secretCode });
@@ -179,7 +179,7 @@ orderSchema.pre('save', async function(next) {
           isUnique = true;
         }
       }
-      
+
       this.secretCode = secretCode;
 
       if (this.walletDeduction > 0 && this.cashOnDelivery === 0) {
@@ -193,7 +193,7 @@ orderSchema.pre('save', async function(next) {
 
       await this.calculatePayouts();
       await this.createPayoutRecords();
-      
+
     } catch (error) {
       return next(error);
     }
@@ -206,10 +206,10 @@ orderSchema.pre('save', async function(next) {
   next();
 });
 
-orderSchema.methods.calculatePayouts = async function() {
+orderSchema.methods.calculatePayouts = async function () {
   const Product = mongoose.model('Product');
   const Seller = mongoose.model('Seller');
-  
+
   const sellerData = await Seller.findById(this.seller);
   if (!sellerData) return;
 
@@ -241,14 +241,14 @@ orderSchema.methods.calculatePayouts = async function() {
     if (product && product.promotor && product.promotor.id) {
       const commissionRate = product.promotor.commissionRate || 5;
       const commissionType = product.promotor.commissionType || 'percentage';
-      
+
       let commissionAmount = 0;
       if (commissionType === 'percentage') {
         commissionAmount = (item.price * item.quantity * commissionRate) / 100;
       } else if (commissionType === 'fixed') {
         commissionAmount = product.promotor.commissionAmount * item.quantity;
       }
-      
+
       promotorCommission += commissionAmount;
     }
   }
@@ -257,29 +257,29 @@ orderSchema.methods.calculatePayouts = async function() {
   this.payout.promotor.commissionRate = 5;
 };
 
-orderSchema.methods.createPayoutRecords = async function() {
+orderSchema.methods.createPayoutRecords = async function () {
   const SellerPayout = mongoose.model('SellerPayout');
   const PromotorPayout = mongoose.model('PromotorPayout');
   const Product = mongoose.model('Product');
   const Seller = mongoose.model('Seller');
-  
+
   const seller = await Seller.findById(this.seller);
   if (!seller) return;
-  
+
   const productIds = this.items.map(item => item.product);
   const products = await Product.find({ _id: { $in: productIds } });
-  
+
   const platformFeePercentage = 10;
   const gstRate = 18;
   const tdsRate = 1;
-  
+
   const platformFee = (this.finalAmount * platformFeePercentage) / 100;
   const gstOnPlatformFee = (platformFee * gstRate) / 100;
   const tdsDeduction = (this.finalAmount * tdsRate) / 100;
-  
+
   const payableAmount = this.finalAmount - platformFee - gstOnPlatformFee;
   const netAmount = payableAmount - tdsDeduction;
-  
+
   const sellerPayout = new SellerPayout({
     order: this._id,
     seller: this.seller,
@@ -294,22 +294,22 @@ orderSchema.methods.createPayoutRecords = async function() {
     netAmount: netAmount,
     status: "pending"
   });
-  
+
   await sellerPayout.save();
-  
+
   for (const item of this.items) {
     const product = products.find(p => p._id.toString() === item.product.toString());
     if (product && product.promotor && product.promotor.id) {
       const commissionRate = product.promotor.commissionRate || 5;
       const commissionType = product.promotor.commissionType || 'percentage';
-      
+
       let commissionAmount = 0;
       if (commissionType === 'percentage') {
         commissionAmount = (item.price * item.quantity * commissionRate) / 100;
       } else if (commissionType === 'fixed') {
         commissionAmount = product.promotor.commissionAmount * item.quantity;
       }
-      
+
       const promotorPayout = new PromotorPayout({
         order: this._id,
         promotor: product.promotor.id,
@@ -320,17 +320,17 @@ orderSchema.methods.createPayoutRecords = async function() {
         commissionAmount: commissionAmount,
         status: "pending"
       });
-      
+
       await promotorPayout.save();
     }
   }
 };
 
-orderSchema.virtual('displayAmount').get(function() {
+orderSchema.virtual('displayAmount').get(function () {
   return this.cashOnDelivery > 0 ? this.cashOnDelivery : this.finalAmount;
 });
 
-orderSchema.virtual('paymentMethodDisplay').get(function() {
+orderSchema.virtual('paymentMethodDisplay').get(function () {
   if (this.walletDeduction > 0 && this.cashOnDelivery > 0) {
     return 'Wallet + COD';
   } else if (this.walletDeduction > 0) {
@@ -340,12 +340,12 @@ orderSchema.virtual('paymentMethodDisplay').get(function() {
   }
 });
 
-orderSchema.methods.canCancel = function() {
+orderSchema.methods.canCancel = function () {
   const nonCancellableStatuses = ['picked-up', 'delivered'];
   return !nonCancellableStatuses.includes(this.status);
 };
 
-orderSchema.methods.processCancellation = async function(reason = '') {
+orderSchema.methods.processCancellation = async function (reason = '') {
   if (!this.canCancel()) {
     throw new Error('Order cannot be cancelled at this stage');
   }
@@ -357,7 +357,7 @@ orderSchema.methods.processCancellation = async function(reason = '') {
   if (this.walletDeduction > 0) {
     this.refundAmount = this.walletDeduction;
     this.refundStatus = 'pending';
-    
+
     const User = mongoose.model('User');
     await User.findByIdAndUpdate(this.user, {
       $inc: { wallet: this.walletDeduction }
@@ -370,17 +370,17 @@ orderSchema.methods.processCancellation = async function(reason = '') {
   return this.save();
 };
 
-orderSchema.statics.findByUserWithWallet = function(userId) {
+orderSchema.statics.findByUserWithWallet = function (userId) {
   return this.find({ user: userId })
     .populate('items.product')
     .sort({ createdAt: -1 });
 };
 
-orderSchema.statics.getWalletPaymentSummary = async function(userId) {
+orderSchema.statics.getWalletPaymentSummary = async function (userId) {
   const result = await this.aggregate([
     {
       $match: {
-        user: mongoose.Types.ObjectId(userId),
+        user: new mongoose.Types.ObjectId(userId),
         walletDeduction: { $gt: 0 }
       }
     },
@@ -396,7 +396,7 @@ orderSchema.statics.getWalletPaymentSummary = async function(userId) {
   return result.length > 0 ? result[0] : { totalWalletSpent: 0, totalOrders: 0 };
 };
 
-orderSchema.index({ orderId: 1 });
+
 orderSchema.index({ secretCode: 1 });
 orderSchema.index({ user: 1, createdAt: -1 });
 orderSchema.index({ 'shippingAddress.pinCode': 1 });

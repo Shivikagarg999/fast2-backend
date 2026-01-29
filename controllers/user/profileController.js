@@ -24,6 +24,7 @@ exports.updateProfile = async (req, res) => {
     if (phone) user.phone = phone;
     if (avatar) user.avatar = avatar;
     if (address) user.address = address;
+    if (req.body.fcmToken) user.fcmToken = req.body.fcmToken;
     await user.save();
     res.json({ success: true, message: "Profile updated successfully", user });
   } catch (error) {

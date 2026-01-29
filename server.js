@@ -10,17 +10,17 @@ const categoryRoutes = require('./routes/category/categoryRoutes');
 const cartRoutes = require('./routes/cart/cartRoutes');
 const contactRoutes = require('./routes/contact/contact');
 const userProfileRoutes = require('./routes/user/profileRoutes');
-const orderRoutes= require('./routes/order/orderRoutes');
-const payoutRoutes= require('./routes/payout/payoutRoutes');
-const addressesRoutes= require('./routes/addresses/addressesRoutes');
-const sellerRoutes= require('./routes/seller/seller');
-const referralRoutes= require('./routes/referral/referralRoutes');
-const policyRoutes= require('./routes/policy/policyRoutes');
-const driverRoutes=require('./routes/driver/driverAuth');
-const driverEarningRoutes= require('./routes/driverEarnings/driverEarnings');
-const driverOrderRoutes= require('./routes/driver/driverRoutes');
-const driverWithdrawRoutes=require('./routes/withdraw/withdraw');
-const driverPayoutRoutes=require('./routes/driverPayout/driverPayoutRoutes');
+const orderRoutes = require('./routes/order/orderRoutes');
+const payoutRoutes = require('./routes/payout/payoutRoutes');
+const addressesRoutes = require('./routes/addresses/addressesRoutes');
+const sellerRoutes = require('./routes/seller/seller');
+const referralRoutes = require('./routes/referral/referralRoutes');
+const policyRoutes = require('./routes/policy/policyRoutes');
+const driverRoutes = require('./routes/driver/driverAuth');
+const driverEarningRoutes = require('./routes/driverEarnings/driverEarnings');
+const driverOrderRoutes = require('./routes/driver/driverRoutes');
+const driverWithdrawRoutes = require('./routes/withdraw/withdraw');
+const driverPayoutRoutes = require('./routes/driverPayout/driverPayoutRoutes');
 const adminRoutes = require('./routes/admin/adminRoutes');
 const adminDashboardRoutes = require('./routes/dashboard/dashboardRoutes');
 const adminUserRoutes = require('./routes/admin/user/adminUserRoutes');
@@ -29,12 +29,14 @@ const adminPromotorRoutes = require('./routes/admin/promotor/promotor');
 const adminWarehouseRoutes = require('./routes/admin/warehouse/warehouseRoutes');
 const adminDriverRoutes = require('./routes/admin/driver/driver');
 const adminOrderRoutes = require('./routes/admin/order/order');
-const adminBannerRoutes= require('./routes/admin/banner/banner');
-const adminCouponRoutes= require('./routes/admin/coupon/coupon');
-const adminDiscountRoutes= require('./routes/admin/discount/discount');
-const adminSellerRoutes= require('./routes/admin/seller/seller');
-const adminTermsRoutes= require('./routes/admin/termsAndConditions/terms');
-const adminProductRoutes= require('./routes/admin/product/product');
+const adminBannerRoutes = require('./routes/admin/banner/banner');
+const adminCouponRoutes = require('./routes/admin/coupon/coupon');
+const adminDiscountRoutes = require('./routes/admin/discount/discount');
+const adminSellerRoutes = require('./routes/admin/seller/seller');
+const adminTermsRoutes = require('./routes/admin/termsAndConditions/terms');
+
+const adminProductRoutes = require('./routes/admin/product/product');
+const notificationRoutes = require('./routes/notificationRoutes');
 const app = express();
 
 const allowedOrigins = [
@@ -83,6 +85,7 @@ app.use('/api/driverOrder', driverOrderRoutes);
 app.use('/api/driver/withdraw', driverWithdrawRoutes);
 app.use('/api/driver/payout', driverPayoutRoutes);
 app.use('/api/policy', policyRoutes);
+app.use('/api/notifications', notificationRoutes);
 app.use('/api/admin/roles', adminRoleRoutes);
 app.use('/api/admin/dashboard', adminDashboardRoutes);
 app.use('/api/admin/promotor', adminPromotorRoutes);
@@ -98,12 +101,9 @@ app.use('/api/admin/products', adminProductRoutes);
 app.use('/api/admin', adminUserRoutes);
 app.use('/api/admin', adminRoutes);
 
-mongoose.connect(process.env.MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
-.then(() => console.log('MongoDB connected'))
-.catch((err) => console.error('❌ MongoDB connection error:', err));
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => console.log('MongoDB connected'))
+  .catch((err) => console.error('❌ MongoDB connection error:', err));
 
 app.get('/', (req, res) => {
   res.send('Backend is running...');

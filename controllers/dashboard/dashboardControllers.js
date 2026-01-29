@@ -361,7 +361,7 @@ const getTopPromotors = async (req, res) => {
           city: "$promotorInfo.address.city",
           sellersAdded: 1,
           totalProducts: 1,
-          totalCommission: { $arrayElemAt: ["$commissionData.totalCommission", 0] } || 0
+          totalCommission: { $ifNull: [{ $arrayElemAt: ["$commissionData.totalCommission", 0] }, 0] }
         }
       }
     ]);

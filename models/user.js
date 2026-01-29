@@ -29,6 +29,8 @@ const userSchema = new mongoose.Schema(
     resetPasswordToken: { type: String },
     resetPasswordExpires: { type: Date },
 
+    fcmToken: { type: String },
+
     wallet: {
       type: Number,
       default: 0,

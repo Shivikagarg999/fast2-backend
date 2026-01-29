@@ -16,11 +16,11 @@ const getAllOrders = async (req, res) => {
 
     // Build filter object
     const filter = {};
-    
+
     if (status) filter.status = status;
     if (paymentStatus) filter.paymentStatus = paymentStatus;
     if (paymentMethod) filter.paymentMethod = paymentMethod;
-    
+
     // Date range filter
     if (startDate || endDate) {
       filter.createdAt = {};
@@ -74,9 +74,9 @@ const getOrderById = async (req, res) => {
 const updateOrderStatus = async (req, res) => {
   try {
     const { status, deliveryNotes, estimatedDelivery, trackingNumber } = req.body;
-    
+
     const validStatuses = ["pending", "confirmed", "shipped", "delivered", "cancelled"];
-    
+
     if (status && !validStatuses.includes(status)) {
       return res.status(400).json({ message: "Invalid status value" });
     }
@@ -97,6 +97,14 @@ const updateOrderStatus = async (req, res) => {
 
     if (!order) {
       return res.status(404).json({ message: "Order not found" });
+    }
+
+    // Send Notification
+    try {
+      const notificationService = require('../../../services/notificationService');
+      await notificationService.notifyOrderStatus(order.user._id || order.user, order.orderId, status);
+    } catch (notifError) {
+      console.error('Notification error:', notifError);
     }
 
     res.json({
@@ -128,6 +136,22 @@ const assignDriver = async (req, res) => {
       return res.status(404).json({ message: "Order not found" });
     }
 
+    // Send Notification
+    try {
+      const notificationService = require('../../../services/notificationService');
+      const driverName = order.driver.name;
+      await notificationService.sendNotification(
+        order.user._id || order.user,
+        'Driver Assigned',
+        `${driverName} is picking up your order #${order.orderId}.`,
+        'delivery',
+        order.orderId,
+        { orderId: order.orderId, driverId: driverId }
+      );
+    } catch (notifError) {
+      console.error('Notification error:', notifError);
+    }
+
     res.json({
       message: "Driver assigned successfully",
       order
@@ -153,9 +177,9 @@ const getOnlineOrders = async (req, res) => {
       paymentMethod: 'online',
       paymentStatus: 'paid'
     };
-    
+
     if (paymentStatus) filter.paymentStatus = paymentStatus;
-    
+
     if (startDate || endDate) {
       filter.createdAt = {};
       if (startDate) filter.createdAt.$gte = new Date(startDate);
@@ -186,10 +210,10 @@ const getOnlineOrders = async (req, res) => {
     });
   } catch (error) {
     console.error('Get online orders error:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      message: "Server error", 
-      error: error.message 
+      message: "Server error",
+      error: error.message
     });
   }
 };
@@ -249,10 +273,10 @@ const cancelOrder = async (req, res) => {
 const getOrderStats = async (req, res) => {
   try {
     const { period = "month" } = req.query; // day, week, month, year
-    
+
     console.log("=== ORDER STATS DEBUG ===");
     console.log("Period received:", period);
-    
+
     const now = new Date();
     let startDate = new Date();
 
@@ -277,7 +301,7 @@ const getOrderStats = async (req, res) => {
     console.log("Current Date:", now);
 
     const totalOrders = await Order.countDocuments();
-    
+
     const recentOrders = await Order.countDocuments({
       createdAt: { $gte: startDate }
     });
@@ -380,7 +404,7 @@ const getFreshOrders = async (req, res) => {
     const filter = {
       createdAt: { $gte: twentyFourHoursAgo }
     };
-    
+
     if (status) filter.status = status;
     if (paymentStatus) filter.paymentStatus = paymentStatus;
 
@@ -420,7 +444,7 @@ const getFreshOrdersNotifications = async (req, res) => {
 
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);
     const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000);
-    
+
     const ordersLastHour = await Order.countDocuments({
       createdAt: { $gte: oneHourAgo }
     });
@@ -524,10 +548,10 @@ const getFreshOrdersStats = async (req, res) => {
         acc[curr._id] = curr.count;
         return acc;
       }, {}),
-      revenue: freshOrdersRevenue[0] || { 
-        totalRevenue: 0, 
-        averageOrderValue: 0, 
-        orderCount: 0 
+      revenue: freshOrdersRevenue[0] || {
+        totalRevenue: 0,
+        averageOrderValue: 0,
+        orderCount: 0
       },
       hourlyDistribution,
       timeRange: {
