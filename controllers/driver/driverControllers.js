@@ -1,6 +1,7 @@
 const Order = require("../../models/order");
 const Driver = require("../../models/driver");
 const DriverEarning = require('../../models/driverEarnings');
+const { sendNotification } = require("../../services/notificationService");
 
 exports.getPendingOrders = async (req, res) => {
   try {
@@ -53,11 +54,11 @@ exports.acceptOrder = async (req, res) => {
 
     order.driver = driver._id;
     order.status = "accepted";
-    
+
     if (!order.finalAmount) {
       order.finalAmount = order.total;
     }
-    
+
     await order.save();
 
     driver.workInfo.currentOrder = order._id;
@@ -170,9 +171,9 @@ exports.verifySecretCodeAndPayment = async (req, res) => {
     }
 
     if (order.status !== "picked-up") {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Order must be picked up before verifying delivery" 
+      return res.status(400).json({
+        success: false,
+        message: "Order must be picked up before verifying delivery"
       });
     }
 
@@ -210,11 +211,11 @@ exports.verifySecretCodeAndPayment = async (req, res) => {
     }
 
     if (order.paymentMethod === "online") {
-      order.driverMarkedPaid = true;s
+      order.driverMarkedPaid = true; s
     }
 
     order.isSecretCodeVerified = true;
-    
+
     await order.save();
 
     res.status(200).json({
@@ -229,16 +230,16 @@ exports.verifySecretCodeAndPayment = async (req, res) => {
         paymentMethod: order.paymentMethod,
         paidAmount: order.paymentMethod === "cod" ? paidAmount : 0,
         finalAmount: order.finalAmount,
-        paymentNote: order.paymentMethod === "cod" 
+        paymentNote: order.paymentMethod === "cod"
           ? `Customer paid ₹${paidAmount} cash to driver`
           : "Payment already completed online"
       }
     });
   } catch (error) {
     console.error("Error verifying secret code and payment:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: "Internal Server Error" 
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error"
     });
   }
 };
@@ -261,9 +262,9 @@ exports.markOrderDelivered = async (req, res) => {
     }
 
     if (order.status !== "picked-up") {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Order must be picked up before marking delivered" 
+      return res.status(400).json({
+        success: false,
+        message: "Order must be picked up before marking delivered"
       });
     }
 
@@ -421,9 +422,9 @@ exports.verifySecretCodeAndPayment = async (req, res) => {
     }
 
     if (order.status !== "picked-up") {
-      return res.status(400).json({ 
-        success: false, 
-        message: "Order must be picked up before verifying delivery" 
+      return res.status(400).json({
+        success: false,
+        message: "Order must be picked up before verifying delivery"
       });
     }
 
@@ -436,7 +437,7 @@ exports.verifySecretCodeAndPayment = async (req, res) => {
 
     order.isSecretCodeVerified = true;
     order.driverMarkedPaid = isPaid;
-    
+
     if (order.paymentMethod === "cod" && isPaid) {
       order.paymentStatus = "paid";
     }
@@ -456,9 +457,9 @@ exports.verifySecretCodeAndPayment = async (req, res) => {
     });
   } catch (error) {
     console.error("Error verifying secret code:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: "Internal Server Error" 
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error"
     });
   }
 };
@@ -470,7 +471,7 @@ exports.checkOrderPlaced = async (req, res) => {
     const order = await Order.findOne({
       $or: [
         { _id: orderId },
-        { orderId: orderId } 
+        { orderId: orderId }
       ]
     }).select("orderId status user finalAmount paymentStatus createdAt");
 
@@ -506,18 +507,18 @@ exports.checkOrderPlaced = async (req, res) => {
 
 exports.getDriverPayouts = async (req, res) => {
   try {
-    const { 
-      driverId, 
-      status, 
-      startDate, 
-      endDate, 
-      page = 1, 
+    const {
+      driverId,
+      status,
+      startDate,
+      endDate,
+      page = 1,
       limit = 10,
       view = 'detailed'
     } = req.query;
-    
+
     const filter = {};
-    
+
     if (driverId) filter.driver = driverId;
     if (status) filter.status = status;
     if (startDate || endDate) {
@@ -525,13 +526,13 @@ exports.getDriverPayouts = async (req, res) => {
       if (startDate) filter.createdAt.$gte = new Date(startDate);
       if (endDate) filter.createdAt.$lte = new Date(endDate);
     }
-    
+
     const skip = (page - 1) * limit;
-    
+
     if (view === 'aggregated') {
       const aggregatedData = await DriverPayout.aggregate([
         { $match: filter },
-        
+
         {
           $lookup: {
             from: "drivers",
@@ -541,7 +542,7 @@ exports.getDriverPayouts = async (req, res) => {
           }
         },
         { $unwind: { path: "$driverInfo", preserveNullAndEmptyArrays: true } },
-        
+
         {
           $group: {
             _id: "$driver",
@@ -568,17 +569,17 @@ exports.getDriverPayouts = async (req, res) => {
         },
         {
           $addFields: {
-            driverName: { 
-              $ifNull: ["$driverName", "Driver"] 
+            driverName: {
+              $ifNull: ["$driverName", "Driver"]
             },
-            driverEmail: { 
-              $ifNull: ["$driverEmail", ""] 
+            driverEmail: {
+              $ifNull: ["$driverEmail", ""]
             },
-            driverPhone: { 
-              $ifNull: ["$driverPhone", ""] 
+            driverPhone: {
+              $ifNull: ["$driverPhone", ""]
             },
-            vehicleNumber: { 
-              $ifNull: ["$vehicleNumber", ""] 
+            vehicleNumber: {
+              $ifNull: ["$vehicleNumber", ""]
             }
           }
         },
@@ -591,9 +592,9 @@ exports.getDriverPayouts = async (req, res) => {
         { $group: { _id: "$driver" } },
         { $count: "total" }
       ]);
-      
+
       const total = totalGroups.length > 0 ? totalGroups[0].total : 0;
-      
+
       res.json({
         payouts: aggregatedData,
         view: 'aggregated',
@@ -604,7 +605,7 @@ exports.getDriverPayouts = async (req, res) => {
           pages: Math.ceil(total / limit)
         }
       });
-      
+
     } else {
       const payouts = await DriverPayout.find(filter)
         .populate('driver', 'name email phone vehicleNumber')
@@ -612,9 +613,9 @@ exports.getDriverPayouts = async (req, res) => {
         .sort({ createdAt: -1 })
         .skip(skip)
         .limit(parseInt(limit));
-      
+
       const total = await DriverPayout.countDocuments(filter);
-      
+
       res.json({
         payouts,
         view: 'detailed',
@@ -628,9 +629,9 @@ exports.getDriverPayouts = async (req, res) => {
     }
   } catch (error) {
     console.error('Error in getDriverPayouts:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: error.message,
-      success: false 
+      success: false
     });
   }
 };
@@ -638,23 +639,23 @@ exports.getDriverPayouts = async (req, res) => {
 exports.getDriverDetails = async (req, res) => {
   try {
     const { driverId } = req.params;
-    
+
     const driver = await Driver.findById(driverId).select('name email phone vehicleNumber');
-    
+
     const earnings = await DriverEarning.find({ driver: driverId })
       .populate('order', 'orderId')
       .sort({ createdAt: -1 });
-    
+
     const totalPendingEarnings = earnings
       .filter(e => e.status === 'earned')
       .reduce((sum, e) => sum + e.amount, 0);
-    
+
     const totalPaidEarnings = earnings
       .filter(e => e.status === 'paid')
       .reduce((sum, e) => sum + e.amount, 0);
-    
+
     const totalEarnings = earnings.reduce((sum, e) => sum + e.amount, 0);
-    
+
     res.json({
       success: true,
       data: {
@@ -671,12 +672,12 @@ exports.getDriverDetails = async (req, res) => {
         }
       }
     });
-    
+
   } catch (error) {
     console.error('Error in getDriverDetails:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       error: error.message,
-      success: false 
+      success: false
     });
   }
 };
@@ -715,5 +716,74 @@ exports.processBulkDriverPayout = async (req, res) => {
 
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+};
+
+exports.sendConfirmationOtp = async (req, res) => {
+  try {
+    const { orderId } = req.body;
+
+    if (!orderId) {
+      return res.status(400).json({ success: false, message: "Order ID is required" });
+    }
+
+    // Check by _id or custom orderId
+    // If orderId is a valid ObjectId, we can check both fields.
+    // If it's not a valid ObjectId (like 'FST123'), we only check orderId field or handle error if checking _id.
+    // Simplest is to assume it might be either.
+
+    const query = {
+      $or: [
+        { orderId: orderId }
+      ]
+    };
+
+    // Check if valid ObjectId to add to query
+    const mongoose = require('mongoose');
+    if (mongoose.Types.ObjectId.isValid(orderId)) {
+      query.$or.push({ _id: orderId });
+    }
+
+    const order = await Order.findOne(query).populate('user');
+
+    if (!order) {
+      return res.status(404).json({ success: false, message: "Order not found" });
+    }
+
+    // Verify driver assignment
+    const driverId = req.driver.driverId;
+    if (order.driver && order.driver.toString() !== driverId) {
+      return res.status(403).json({ success: false, message: "You are not assigned to this order" });
+    }
+
+    let secretCode = order.secretCode;
+    if (!secretCode) {
+      secretCode = Math.floor(100000 + Math.random() * 900000).toString();
+      order.secretCode = secretCode;
+      await order.save();
+    }
+
+    const message = `Your Fast2 Delivery Code is ${secretCode}. Please share this with the driver to receive your package.`;
+
+    // Send Push Notification
+    if (order.user) {
+      await sendNotification(
+        order.user._id,
+        "Delivery Confirmation Code",
+        message,
+        "order",
+        order._id,
+        { secretCode, orderId: order.orderId }
+      );
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Confirmation OTP sent successfully"
+    });
+
+  } catch (error) {
+    console.error("Error sending confirmation OTP:", error);
+    res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 };

@@ -10,7 +10,8 @@ const {
   getWalletDetails,
   getOngoingOrders,
   verifySecretCodeAndPayment,
-  checkOrderPlaced
+  checkOrderPlaced,
+  sendConfirmationOtp
 } = require("../../controllers/driver/driverControllers");
 const { authenticateToken } = require("../../middlewares/driverAuth");
 
@@ -38,6 +39,12 @@ router.post(
   "/orders/:orderId/verify-delivery",
   authenticateToken,
   verifySecretCodeAndPayment
+);
+
+router.post(
+  "/send-confirmation-otp",
+  authenticateToken,
+  sendConfirmationOtp
 );
 
 module.exports = router;
