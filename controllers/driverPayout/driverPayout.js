@@ -6,7 +6,7 @@ exports.getDriverPayouts = async (req, res) => {
   try {
     const { driverId, status, startDate, endDate, page = 1, limit = 10 } = req.query;
     const filter = {};
-    
+
     if (driverId) filter.driver = driverId;
     if (status) filter.status = status;
     if (startDate || endDate) {
@@ -14,17 +14,17 @@ exports.getDriverPayouts = async (req, res) => {
       if (startDate) filter.createdAt.$gte = new Date(startDate);
       if (endDate) filter.createdAt.$lte = new Date(endDate);
     }
-    
+
     const skip = (page - 1) * limit;
-    
+
     const payouts = await DriverPayout.find(filter)
       .populate('driver', 'name phone email profilePicture')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
-    
+
     const total = await DriverPayout.countDocuments(filter);
-    
+
     res.json({
       success: true,
       data: {
@@ -38,45 +38,49 @@ exports.getDriverPayouts = async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 };
 
+
+
 exports.getDriverPayoutDetails = async (req, res) => {
   try {
     const { payoutId } = req.params;
-    
+
     const payout = await DriverPayout.findById(payoutId)
       .populate('driver', 'name phone email profilePicture')
       .populate('earnings', 'orderId amount type description transactionDate');
-    
+
     if (!payout) {
-      return res.status(404).json({ 
-        success: false, 
-        error: "Payout not found" 
+      return res.status(404).json({
+        success: false,
+        error: "Payout not found"
       });
     }
-    
+
     res.json({
       success: true,
       data: payout
     });
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 };
+
+
 
 exports.getDriverEarnings = async (req, res) => {
   try {
     const { driverId, status, type, startDate, endDate, page = 1, limit = 20 } = req.query;
     const filter = {};
-    
+
     if (driverId) filter.driver = driverId;
     if (status) filter.status = status;
     if (type) filter.type = type;
@@ -85,18 +89,18 @@ exports.getDriverEarnings = async (req, res) => {
       if (startDate) filter.transactionDate.$gte = new Date(startDate);
       if (endDate) filter.transactionDate.$lte = new Date(endDate);
     }
-    
+
     const skip = (page - 1) * limit;
-    
+
     const earnings = await DriverEarning.find(filter)
       .populate('order', 'orderId finalAmount status')
       .populate('driver', 'name phone')
       .sort({ transactionDate: -1 })
       .skip(skip)
       .limit(parseInt(limit));
-    
+
     const total = await DriverEarning.countDocuments(filter);
-    
+
     const summary = await DriverEarning.aggregate([
       {
         $match: filter
@@ -109,7 +113,7 @@ exports.getDriverEarnings = async (req, res) => {
         }
       }
     ]);
-    
+
     res.json({
       success: true,
       data: {
@@ -124,9 +128,52 @@ exports.getDriverEarnings = async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+};
+
+exports.getMyPayouts = async (req, res) => {
+  try {
+    const driverId = req.driver.driverId;
+    const { page = 1, limit = 10, startDate, endDate, status } = req.query;
+
+    const filter = { driver: driverId };
+
+    if (status) filter.status = status;
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) filter.createdAt.$lte = new Date(endDate);
+    }
+
+    const skip = (page - 1) * limit;
+
+    const payouts = await DriverPayout.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const total = await DriverPayout.countDocuments(filter);
+
+    res.json({
+      success: true,
+      data: {
+        payouts,
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          pages: Math.ceil(total / limit)
+        }
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 };
@@ -135,31 +182,31 @@ exports.updatePayoutStatus = async (req, res) => {
   try {
     const { payoutId } = req.params;
     const { status, payoutMethod, transactionId, notes } = req.body;
-    
+
     const payout = await DriverPayout.findById(payoutId);
     if (!payout) {
-      return res.status(404).json({ 
-        success: false, 
-        error: "Payout not found" 
+      return res.status(404).json({
+        success: false,
+        error: "Payout not found"
       });
     }
-    
+
     if (status === 'paid') {
       payout.paidAt = new Date();
       payout.payoutMethod = payoutMethod || payout.payoutMethod;
       payout.transactionId = transactionId;
       payout.processedBy = req.admin?.id;
-      
+
       await DriverEarning.updateMany(
         { _id: { $in: payout.earnings } },
-        { 
+        {
           status: 'payout_paid',
           payoutDate: new Date(),
           payoutMethod: payout.payoutMethod,
           transactionId: payout.transactionId
         }
       );
-      
+
       const driver = await Driver.findById(payout.driver);
       if (driver) {
         driver.earnings.pendingPayout -= payout.totalAmount;
@@ -168,20 +215,63 @@ exports.updatePayoutStatus = async (req, res) => {
         await driver.save();
       }
     }
-    
+
     payout.status = status;
     if (notes) payout.notes = notes;
-    
+
     await payout.save();
-    
+
     res.json({
       success: true,
       data: payout
     });
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+};
+
+exports.getMyPayouts = async (req, res) => {
+  try {
+    const driverId = req.driver.driverId;
+    const { page = 1, limit = 10, startDate, endDate, status } = req.query;
+
+    const filter = { driver: driverId };
+
+    if (status) filter.status = status;
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) filter.createdAt.$lte = new Date(endDate);
+    }
+
+    const skip = (page - 1) * limit;
+
+    const payouts = await DriverPayout.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const total = await DriverPayout.countDocuments(filter);
+
+    res.json({
+      success: true,
+      data: {
+        payouts,
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          pages: Math.ceil(total / limit)
+        }
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 };
@@ -189,29 +279,29 @@ exports.updatePayoutStatus = async (req, res) => {
 exports.createDriverPayout = async (req, res) => {
   try {
     const { driverId, payoutMethod, notes } = req.body;
-    
+
     const driver = await Driver.findById(driverId);
     if (!driver) {
-      return res.status(404).json({ 
-        success: false, 
-        error: "Driver not found" 
+      return res.status(404).json({
+        success: false,
+        error: "Driver not found"
       });
     }
-    
+
     const pendingEarnings = await DriverEarning.find({
       driver: driverId,
       status: 'earned'
     });
-    
+
     if (pendingEarnings.length === 0) {
-      return res.status(400).json({ 
-        success: false, 
-        error: "No pending earnings to payout" 
+      return res.status(400).json({
+        success: false,
+        error: "No pending earnings to payout"
       });
     }
-    
+
     const totalAmount = pendingEarnings.reduce((sum, earning) => sum + earning.amount, 0);
-    
+
     const payout = new DriverPayout({
       driver: driverId,
       totalAmount,
@@ -223,26 +313,69 @@ exports.createDriverPayout = async (req, res) => {
       bankDetails: driver.payoutDetails?.bankAccount,
       upiId: driver.payoutDetails?.upiId
     });
-    
+
     await payout.save();
-    
+
     await DriverEarning.updateMany(
       { _id: { $in: pendingEarnings.map(e => e._id) } },
-      { 
+      {
         status: 'payout_processing',
         payoutBatch: payout._id
       }
     );
-    
+
     res.json({
       success: true,
       data: payout,
       message: `Payout created for ₹${totalAmount} from ${pendingEarnings.length} orders`
     });
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+};
+
+exports.getMyPayouts = async (req, res) => {
+  try {
+    const driverId = req.driver.driverId;
+    const { page = 1, limit = 10, startDate, endDate, status } = req.query;
+
+    const filter = { driver: driverId };
+
+    if (status) filter.status = status;
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) filter.createdAt.$lte = new Date(endDate);
+    }
+
+    const skip = (page - 1) * limit;
+
+    const payouts = await DriverPayout.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const total = await DriverPayout.countDocuments(filter);
+
+    res.json({
+      success: true,
+      data: {
+        payouts,
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          pages: Math.ceil(total / limit)
+        }
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 };
@@ -369,34 +502,36 @@ exports.getPayoutSummary = async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 };
 
+
+
 exports.getDriverById = async (req, res) => {
   try {
     const { driverId } = req.params;
-    
+
     const driver = await Driver.findById(driverId)
       .select('name phone email profilePicture earnings payoutDetails');
-    
+
     if (!driver) {
-      return res.status(404).json({ 
-        success: false, 
-        error: "Driver not found" 
+      return res.status(404).json({
+        success: false,
+        error: "Driver not found"
       });
     }
-    
+
     const pendingEarnings = await DriverEarning.find({
       driver: driverId,
       status: 'earned'
     });
-    
+
     const totalPending = pendingEarnings.reduce((sum, earning) => sum + earning.amount, 0);
-    
+
     res.json({
       success: true,
       data: {
@@ -409,9 +544,52 @@ exports.getDriverById = async (req, res) => {
       }
     });
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: error.message 
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 };
+
+exports.getMyPayouts = async (req, res) => {
+  try {
+    const driverId = req.driver.driverId;
+    const { page = 1, limit = 10, startDate, endDate, status } = req.query;
+
+    const filter = { driver: driverId };
+
+    if (status) filter.status = status;
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) filter.createdAt.$gte = new Date(startDate);
+      if (endDate) filter.createdAt.$lte = new Date(endDate);
+    }
+
+    const skip = (page - 1) * limit;
+
+    const payouts = await DriverPayout.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const total = await DriverPayout.countDocuments(filter);
+
+    res.json({
+      success: true,
+      data: {
+        payouts,
+        pagination: {
+          total,
+          page: parseInt(page),
+          limit: parseInt(limit),
+          pages: Math.ceil(total / limit)
+        }
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+}; 

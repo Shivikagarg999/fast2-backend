@@ -1,7 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const driverPayoutController = require('../../controllers/driverPayout/driverPayout');
+const { authenticateToken } = require('../../middlewares/driverAuth');
 
+router.get('/my-payouts', authenticateToken, driverPayoutController.getMyPayouts);
 router.get('/driver-payouts', driverPayoutController.getDriverPayouts);
 router.get('/driver-payouts/:payoutId', driverPayoutController.getDriverPayoutDetails);
 router.get('/driver-earnings', driverPayoutController.getDriverEarnings);
