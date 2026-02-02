@@ -778,35 +778,36 @@ exports.sendConfirmationOtp = async (req, res) => {
     console.error("Error sending confirmation OTP:", error);
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }
+};
 
 
-  exports.getMyPayouts = async (req, res) => {
-    try {
-      const driverId = req.driver.driverId;
-      const page = parseInt(req.query.page) || 1;
-      const limit = parseInt(req.query.limit) || 20;
-      const skip = (page - 1) * limit;
+exports.getMyPayouts = async (req, res) => {
+  try {
+    const driverId = req.driver.driverId;
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 20;
+    const skip = (page - 1) * limit;
 
-      const earnings = await DriverEarning.find({ driver: driverId })
-        .sort({ transactionDate: -1 })
-        .skip(skip)
-        .limit(limit);
+    const earnings = await DriverEarning.find({ driver: driverId })
+      .sort({ transactionDate: -1 })
+      .skip(skip)
+      .limit(limit);
 
-      const total = await DriverEarning.countDocuments({ driver: driverId });
+    const total = await DriverEarning.countDocuments({ driver: driverId });
 
-      res.status(200).json({
-        success: true,
-        count: earnings.length,
-        total,
-        totalPages: Math.ceil(total / limit),
-        currentPage: page,
-        data: earnings
-      });
-    } catch (error) {
-      console.error("Error fetching my payouts:", error);
-      res.status(500).json({
-        success: false,
-        message: "Internal Server Error"
-      });
-    }
-  };
+    res.status(200).json({
+      success: true,
+      count: earnings.length,
+      total,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page,
+      data: earnings
+    });
+  } catch (error) {
+    console.error("Error fetching my payouts:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error"
+    });
+  }
+};
