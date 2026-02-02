@@ -558,19 +558,20 @@ exports.getMyPayouts = async (req, res) => {
 
     if (status) filter.status = status;
     if (startDate || endDate) {
-      filter.createdAt = {};
-      if (startDate) filter.createdAt.$gte = new Date(startDate);
-      if (endDate) filter.createdAt.$lte = new Date(endDate);
+      filter.transactionDate = {};
+      if (startDate) filter.transactionDate.$gte = new Date(startDate);
+      if (endDate) filter.transactionDate.$lte = new Date(endDate);
     }
 
     const skip = (page - 1) * limit;
 
-    const payouts = await DriverPayout.find(filter)
-      .sort({ createdAt: -1 })
+    const payouts = await DriverEarning.find(filter)
+      .populate('order', 'orderId finalAmount status')
+      .sort({ transactionDate: -1 })
       .skip(skip)
       .limit(parseInt(limit));
 
-    const total = await DriverPayout.countDocuments(filter);
+    const total = await DriverEarning.countDocuments(filter);
 
     res.json({
       success: true,
