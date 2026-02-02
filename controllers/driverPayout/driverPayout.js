@@ -509,8 +509,6 @@ exports.getPayoutSummary = async (req, res) => {
   }
 };
 
-
-
 exports.getDriverById = async (req, res) => {
   try {
     const { driverId } = req.params;

@@ -727,18 +727,12 @@ exports.sendConfirmationOtp = async (req, res) => {
       return res.status(400).json({ success: false, message: "Order ID is required" });
     }
 
-    // Check by _id or custom orderId
-    // If orderId is a valid ObjectId, we can check both fields.
-    // If it's not a valid ObjectId (like 'FST123'), we only check orderId field or handle error if checking _id.
-    // Simplest is to assume it might be either.
-
     const query = {
       $or: [
         { orderId: orderId }
       ]
     };
 
-    // Check if valid ObjectId to add to query
     const mongoose = require('mongoose');
     if (mongoose.Types.ObjectId.isValid(orderId)) {
       query.$or.push({ _id: orderId });
@@ -750,7 +744,6 @@ exports.sendConfirmationOtp = async (req, res) => {
       return res.status(404).json({ success: false, message: "Order not found" });
     }
 
-    // Verify driver assignment
     const driverId = req.driver.driverId;
     if (order.driver && order.driver.toString() !== driverId) {
       return res.status(403).json({ success: false, message: "You are not assigned to this order" });
@@ -765,7 +758,6 @@ exports.sendConfirmationOtp = async (req, res) => {
 
     const message = `Your Fast2 Delivery Code is ${secretCode}. Please share this with the driver to receive your package.`;
 
-    // Send Push Notification
     if (order.user) {
       await sendNotification(
         order.user._id,
@@ -786,4 +778,35 @@ exports.sendConfirmationOtp = async (req, res) => {
     console.error("Error sending confirmation OTP:", error);
     res.status(500).json({ success: false, message: "Internal Server Error" });
   }
-};
+
+
+  exports.getMyPayouts = async (req, res) => {
+    try {
+      const driverId = req.driver.driverId;
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 20;
+      const skip = (page - 1) * limit;
+
+      const earnings = await DriverEarning.find({ driver: driverId })
+        .sort({ transactionDate: -1 })
+        .skip(skip)
+        .limit(limit);
+
+      const total = await DriverEarning.countDocuments({ driver: driverId });
+
+      res.status(200).json({
+        success: true,
+        count: earnings.length,
+        total,
+        totalPages: Math.ceil(total / limit),
+        currentPage: page,
+        data: earnings
+      });
+    } catch (error) {
+      console.error("Error fetching my payouts:", error);
+      res.status(500).json({
+        success: false,
+        message: "Internal Server Error"
+      });
+    }
+  };

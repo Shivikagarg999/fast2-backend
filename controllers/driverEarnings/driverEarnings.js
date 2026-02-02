@@ -38,7 +38,7 @@ exports.getAllEarnings = async (req, res) => {
       }).select('_id');
 
       const driverIds = drivers.map(d => d._id);
-      
+
       filter.$or = [
         { driver: { $in: driverIds } },
         { orderId: { $regex: search, $options: 'i' } }
@@ -102,9 +102,9 @@ exports.getAllEarnings = async (req, res) => {
           todayEarnings: {
             $sum: {
               $cond: [
-                { 
+                {
                   $gte: [
-                    '$transactionDate', 
+                    '$transactionDate',
                     new Date(new Date().setHours(0, 0, 0, 0))
                   ]
                 },
@@ -175,9 +175,9 @@ exports.getAllEarnings = async (req, res) => {
 
   } catch (error) {
     console.error("Error fetching all earnings:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: "Internal Server Error" 
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error"
     });
   }
 };
@@ -194,8 +194,8 @@ exports.getEarningsAnalytics = async (req, res) => {
     } else {
       const now = new Date();
       let startPeriod = new Date();
-      
-      switch(period) {
+
+      switch (period) {
         case 'day':
           startPeriod.setDate(now.getDate() - 1);
           break;
@@ -326,9 +326,9 @@ exports.getEarningsAnalytics = async (req, res) => {
 
   } catch (error) {
     console.error("Error fetching earnings analytics:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: "Internal Server Error" 
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error"
     });
   }
 };
@@ -366,9 +366,9 @@ exports.getDriverEarningsDetail = async (req, res) => {
             todayEarnings: {
               $sum: {
                 $cond: [
-                  { 
+                  {
                     $gte: [
-                      '$transactionDate', 
+                      '$transactionDate',
                       new Date(new Date().setHours(0, 0, 0, 0))
                     ]
                   },
@@ -394,9 +394,9 @@ exports.getDriverEarningsDetail = async (req, res) => {
     ]);
 
     if (!driver) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Driver not found" 
+      return res.status(404).json({
+        success: false,
+        message: "Driver not found"
       });
     }
 
@@ -470,9 +470,9 @@ exports.getDriverEarningsDetail = async (req, res) => {
 
   } catch (error) {
     console.error("Error fetching driver earnings detail:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: "Internal Server Error" 
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error"
     });
   }
 };
@@ -480,55 +480,39 @@ exports.getDriverEarningsDetail = async (req, res) => {
 exports.getEarningsBreakdown = async (req, res) => {
   try {
     const driverId = req.driver.driverId;
-    const { 
-      page = 1, 
+    const {
+      page = 1,
       limit = 20,
       startDate,
       endDate,
-      type 
+      type
     } = req.query;
 
     const driver = await Driver.findById(driverId);
     if (!driver) {
-      return res.status(404).json({ 
-        success: false, 
-        message: "Driver not found" 
+      return res.status(404).json({
+        success: false,
+        message: "Driver not found"
       });
     }
 
     const filter = { driver: driverId };
-    
+
     if (startDate || endDate) {
       filter.transactionDate = {};
       if (startDate) filter.transactionDate.$gte = new Date(startDate);
       if (endDate) filter.transactionDate.$lte = new Date(endDate);
     }
-    
+
     if (type) filter.type = type;
 
     const earnings = await DriverEarning.find(filter)
-      .populate('order', 'orderId finalAmount createdAt')
       .sort({ transactionDate: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit)
       .lean();
 
-    const formattedEarnings = earnings.map(earning => ({
-      id: earning._id,
-      orderId: earning.orderId,
-      amount: earning.amount,
-      type: earning.type,
-      description: earning.description,
-      date: earning.transactionDate,
-      status: earning.status,
-      deliveryAddress: earning.customerAddress ? {
-        addressLine: earning.customerAddress.addressLine,
-        city: earning.customerAddress.city,
-        state: earning.customerAddress.state,
-        pinCode: earning.customerAddress.pincode || earning.customerAddress.pinCode
-      } : null,
-      orderAmount: earning.order?.finalAmount || 0
-    }));
+    const formattedEarnings = earnings;
 
     const total = await DriverEarning.countDocuments(filter);
 
@@ -542,9 +526,9 @@ exports.getEarningsBreakdown = async (req, res) => {
           todayEarnings: {
             $sum: {
               $cond: [
-                { 
+                {
                   $gte: [
-                    '$transactionDate', 
+                    '$transactionDate',
                     new Date(new Date().setHours(0, 0, 0, 0))
                   ]
                 },
@@ -592,9 +576,9 @@ exports.getEarningsBreakdown = async (req, res) => {
 
   } catch (error) {
     console.error("Error fetching earnings breakdown:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: "Internal Server Error" 
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error"
     });
   }
 };
@@ -674,9 +658,9 @@ exports.getEarningsSummary = async (req, res) => {
 
   } catch (error) {
     console.error("Error fetching earnings summary:", error);
-    res.status(500).json({ 
-      success: false, 
-      message: "Internal Server Error" 
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error"
     });
   }
 };

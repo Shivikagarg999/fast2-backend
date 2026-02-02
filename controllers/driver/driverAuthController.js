@@ -31,21 +31,21 @@ const prepareDriverData = (driver) => {
   return {
     _id: driver._id,
     personalInfo: {
-      name: driver.personalInfo.name,
-      email: driver.personalInfo.email,
-      phone: driver.personalInfo.phone,
-      profilePhoto: driver.personalInfo.profilePhoto,
-      dateOfBirth: driver.personalInfo.dateOfBirth,
-      gender: driver.personalInfo.gender
+      name: driver.personalInfo?.name,
+      email: driver.personalInfo?.email,
+      phone: driver.personalInfo?.phone,
+      profilePhoto: driver.personalInfo?.profilePhoto,
+      dateOfBirth: driver.personalInfo?.dateOfBirth,
+      gender: driver.personalInfo?.gender
     },
     workInfo: {
-      driverId: driver.workInfo.driverId,
-      status: driver.workInfo.status,
-      availability: driver.workInfo.availability,
-      joiningDate: driver.workInfo.joiningDate
+      driverId: driver.workInfo?.driverId,
+      status: driver.workInfo?.status,
+      availability: driver.workInfo?.availability,
+      joiningDate: driver.workInfo?.joiningDate
     },
     auth: {
-      isVerified: driver.auth.isVerified
+      isVerified: driver.auth?.isVerified
     },
     address: driver.address,
     vehicle: driver.vehicle,
@@ -60,7 +60,7 @@ const prepareDriverData = (driver) => {
 const registerDriver = async (req, res) => {
   try {
     const { name, email, phone, password } = req.body;
-    
+
     // Check if files are present
     if (!req.files || !req.files['aadharFront'] || !req.files['aadharBack'] || !req.files['panCard']) {
       return res.status(400).json({
@@ -70,7 +70,7 @@ const registerDriver = async (req, res) => {
     }
 
     // Basic validation
-    if (!name || !email || !phone || !password ) {
+    if (!name || !email || !phone || !password) {
       return res.status(400).json({
         success: false,
         message: 'All fields are required'
@@ -96,7 +96,7 @@ const registerDriver = async (req, res) => {
     const aadharFrontFile = req.files['aadharFront'][0];
     const aadharBackFile = req.files['aadharBack'][0];
     const panCardFile = req.files['panCard'][0];
-    
+
     const aadharFrontUrl = await uploadBufferToImageKit(
       aadharFrontFile.buffer,
       `drivers/aadhar/${phone}_front.jpg`
@@ -190,7 +190,7 @@ const loginDriver = async (req, res) => {
     }
 
     // Check driver status
-    
+
 
     // Update FCM token and last login
     if (fcmToken) {
@@ -253,7 +253,7 @@ const getDriverProfile = async (req, res) => {
 const uploadDocuments = async (req, res) => {
   try {
     const { documentType } = req.body;
-    
+
     if (!req.files) {
       return res.status(400).json({
         success: false,
@@ -394,7 +394,7 @@ const completeDriverProfile = async (req, res) => {
     // Update basic info
     if (dateOfBirth) driver.personalInfo.dateOfBirth = dateOfBirth;
     if (gender) driver.personalInfo.gender = gender;
-    
+
     // Update address
     if (address) {
       try {

@@ -11,7 +11,8 @@ const {
   getOngoingOrders,
   verifySecretCodeAndPayment,
   checkOrderPlaced,
-  sendConfirmationOtp
+  sendConfirmationOtp,
+  getMyPayouts
 } = require("../../controllers/driver/driverControllers");
 const { authenticateToken } = require("../../middlewares/driverAuth");
 
@@ -34,6 +35,8 @@ router.get("/check/:orderId", checkOrderPlaced);
 router.get("/availability", authenticateToken, getAvailability);
 
 router.get("/wallet", authenticateToken, getWalletDetails);
+
+router.get("/my-payouts", authenticateToken, getMyPayouts);
 
 router.post(
   "/orders/:orderId/verify-delivery",
