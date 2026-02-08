@@ -5,6 +5,7 @@ const Promotor = require('../../models/promotor');
 const Category = require('../../models/category');
 const Order = require('../../models/order');
 const mongoose = require('mongoose');
+const imagekit = require('../../utils/imagekit');
 
 exports.addProduct = async (req, res) => {
   try {
@@ -22,7 +23,7 @@ exports.addProduct = async (req, res) => {
     let parsedAvailablePincodes = [];
     if (productData.availablePincodes) {
       try {
-        parsedAvailablePincodes = typeof productData.availablePincodes === 'string' ? 
+        parsedAvailablePincodes = typeof productData.availablePincodes === 'string' ?
           JSON.parse(productData.availablePincodes) : productData.availablePincodes;
       } catch (error) {
         console.error('Error parsing availablePincodes:', error);
@@ -53,7 +54,7 @@ exports.addProduct = async (req, res) => {
     }
 
     const seller = await Seller.findById(sellerId).populate('promotor');
-    
+
     if (!seller) {
       return res.status(404).json({
         success: false,
@@ -71,7 +72,7 @@ exports.addProduct = async (req, res) => {
     let categoryId = productData.category;
     if (productData.category && typeof productData.category === 'string') {
       const isObjectId = /^[0-9a-fA-F]{24}$/.test(productData.category);
-      
+
       if (!isObjectId) {
         const category = await Category.findOne({ name: productData.category });
         if (!category) {
@@ -94,7 +95,7 @@ exports.addProduct = async (req, res) => {
     const stockStatus = productData.quantity > 0 ? 'in-stock' : 'out-of-stock';
     const promotorCommission = seller.promotor?.commissionRate || 5;
     const commissionType = seller.promotor?.commissionType || 'percentage';
-    
+
     let commissionAmount = 0;
     if (commissionType === 'percentage') {
       commissionAmount = (productData.price * promotorCommission) / 100;
@@ -102,40 +103,39 @@ exports.addProduct = async (req, res) => {
       commissionAmount = promotorCommission;
     }
 
-    const discountPercentage = productData.oldPrice > 0 ? 
+    const discountPercentage = productData.oldPrice > 0 ?
       Math.round(((productData.oldPrice - productData.price) / productData.oldPrice) * 100) : 0;
 
-    const imagekit = require('../../utils/imagekit');
     let uploadedImages = [];
-    
+
     if (req.files && req.files.length > 0) {
       console.log('Uploading images to ImageKit...');
-      
+
       for (let i = 0; i < req.files.length; i++) {
         const imageFile = req.files[i];
-        
+
         try {
           const uploadedImage = await imagekit.upload({
             file: imageFile.buffer.toString('base64'),
             fileName: `product_${sellerId}_${Date.now()}_${i}.jpg`,
             folder: '/seller-products/images'
           });
-          
+
           console.log(`Image ${i} uploaded:`, uploadedImage.url);
-          
+
           uploadedImages.push({
             url: uploadedImage.url,
             altText: productData.imageAltText || `${productData.name} - Image ${i + 1}`,
             isPrimary: i === 0,
             order: i
           });
-          
+
         } catch (imageError) {
           console.error(`Error uploading image ${i}:`, imageError);
         }
       }
     }
-    
+
     console.log('Final images array:', uploadedImages);
 
     const newProduct = new Product({
@@ -210,93 +210,232 @@ exports.updateProduct = async (req, res) => {
   try {
     const sellerId = req.seller.id;
     const { productId } = req.params;
-    const updateData = req.body;
 
-    if (updateData.dimensions && typeof updateData.dimensions === 'string') {
-      try {
-        updateData.dimensions = JSON.parse(updateData.dimensions);
-      } catch (error) {
-        console.error('Error parsing dimensions:', error);
-      }
-    }
+    // Security check: Ensure product belongs to seller
+    const existingProduct = await Product.findOne({ _id: productId, seller: sellerId });
 
-    if (updateData.features && typeof updateData.features === 'string') {
-      try {
-        updateData.features = JSON.parse(updateData.features);
-      } catch (error) {
-        console.error('Error parsing features:', error);
-      }
-    }
-
-    if (updateData.tags && typeof updateData.tags === 'string') {
-      try {
-        updateData.tags = JSON.parse(updateData.tags);
-      } catch (error) {
-        console.error('Error parsing tags:', error);
-      }
-    }
-
-    if (updateData.availablePincodes) {
-      try {
-        updateData['delivery.availablePincodes'] = JSON.parse(updateData.availablePincodes);
-      } catch (error) {
-        console.error('Error parsing availablePincodes:', error);
-      }
-    }
-
-    if (updateData.serviceablePincodes) {
-      try {
-        const parsedServiceablePincodes = JSON.parse(updateData.serviceablePincodes);
-        if (Array.isArray(parsedServiceablePincodes)) {
-          updateData.serviceablePincodes = parsedServiceablePincodes;
-        }
-      } catch (error) {
-        console.error('Error parsing serviceablePincodes:', error);
-      }
-    }
-
-    if (updateData.variants) {
-      try {
-        const parsedVariants = JSON.parse(updateData.variants);
-        updateData.variants = Array.isArray(parsedVariants) ? parsedVariants : [];
-      } catch (error) {
-        console.error('Error parsing variants:', error);
-      }
-    }
-
-    const product = await Product.findOne({ _id: productId });
-    if (!product) {
+    if (!existingProduct) {
       return res.status(404).json({
         success: false,
-        message: 'Product not found'
+        message: 'Product not found or access denied'
       });
     }
 
-    if (updateData.quantity !== undefined) {
-      updateData.stockStatus = updateData.quantity > 0 ? 'in-stock' : 'out-of-stock';
-      
+    // Helper function to safely parse JSON
+    const parseJSON = (data, fallback = {}) => {
+      if (!data) return fallback;
+      if (typeof data === 'object') return data;
+      try {
+        return JSON.parse(data);
+      } catch (e) {
+        console.error('JSON Parse Error:', e);
+        return fallback;
+      }
+    };
+
+    // Parse complex fields
+    const parsedDimensions = parseJSON(req.body.dimensions, existingProduct.dimensions || {});
+    const parsedAvailablePincodes = parseJSON(req.body.availablePincodes, existingProduct.delivery?.availablePincodes || []);
+    const parsedServiceablePincodes = parseJSON(req.body.serviceablePincodes, existingProduct.serviceablePincodes || []);
+    const parsedVariants = parseJSON(req.body.variants, existingProduct.variants || []);
+    const parsedVideo = parseJSON(req.body.video, existingProduct.video || {});
+
+    // Handle Category
+    let categoryId = existingProduct.category;
+    if (req.body.category) {
+      if (mongoose.Types.ObjectId.isValid(req.body.category)) {
+        categoryId = req.body.category;
+      } else {
+        const category = await Category.findOne({ name: req.body.category });
+        if (category) categoryId = category._id;
+      }
+    }
+    const foundCategory = await Category.findById(categoryId);
+
+    // Calculate Prices & Discounts
+    const price = req.body.price !== undefined ? parseFloat(req.body.price) : existingProduct.price;
+    const oldPrice = req.body.oldPrice !== undefined ? parseFloat(req.body.oldPrice) : existingProduct.oldPrice;
+    const discountPercentage = oldPrice > 0 ? Math.round(((oldPrice - price) / oldPrice) * 100) : 0;
+
+    // Calculate Commission
+    let promotorInfo = existingProduct.promotor || {};
+    if (existingProduct.promotor && (req.body.price || req.body.commissionRate)) {
+      const commissionRate = existingProduct.promotor.commissionRate || 5;
+      const commissionType = existingProduct.promotor.commissionType || 'percentage';
+      let commissionAmount = existingProduct.promotor.commissionAmount;
+
+      if (commissionType === 'percentage') {
+        commissionAmount = (price * commissionRate) / 100;
+      } else {
+        commissionAmount = commissionRate;
+      }
+
+      promotorInfo = {
+        ...promotorInfo,
+        commissionAmount
+      };
+    }
+
+    // Handle Quantity and Stock
+    let quantity = existingProduct.quantity;
+    let stockStatus = existingProduct.stockStatus;
+
+    if (req.body.quantity !== undefined) {
+      quantity = parseInt(req.body.quantity) || 0;
+      stockStatus = quantity > 0 ? 'in-stock' : 'out-of-stock';
+
       const warehouse = await Warehouse.findOne({ sellers: sellerId });
       if (warehouse) {
-        const stockDifference = updateData.quantity - product.quantity;
-        warehouse.currentStock += stockDifference;
-        await warehouse.save();
+        const stockDifference = quantity - existingProduct.quantity;
+        if (stockDifference !== 0) {
+          warehouse.currentStock += stockDifference;
+          await warehouse.save();
+        }
       }
     }
 
-    if (updateData.oldPrice !== undefined && updateData.price !== undefined) {
-      updateData.discountPercentage = updateData.oldPrice > 0 ? 
-        Math.round(((updateData.oldPrice - updateData.price) / updateData.oldPrice) * 100) : 0;
+    // Handle Weight
+    let weightInGrams = existingProduct.weight;
+    if (req.body.weight !== undefined || req.body.weightUnit !== undefined) {
+      const weight = parseFloat(req.body.weight) || existingProduct.weight || 0;
+      const weightUnit = req.body.weightUnit || existingProduct.weightUnit || 'g';
+
+      if (weightUnit === 'kg') weightInGrams = weight * 1000;
+      else if (weightUnit === 'l') weightInGrams = weight * 1000;
+      else weightInGrams = weight;
     }
 
-    if (updateData.estimatedDeliveryTime) updateData['delivery.estimatedDeliveryTime'] = updateData.estimatedDeliveryTime;
-    if (updateData.deliveryCharges !== undefined) updateData['delivery.deliveryCharges'] = updateData.deliveryCharges;
-    if (updateData.freeDeliveryThreshold !== undefined) updateData['delivery.freeDeliveryThreshold'] = updateData.freeDeliveryThreshold;
+    // Handle Images
+    let images = existingProduct.images || [];
+
+    // Remove images
+    if (req.body.imagesToRemove) {
+      const imagesToRemove = Array.isArray(req.body.imagesToRemove) ?
+        req.body.imagesToRemove : [req.body.imagesToRemove];
+      images = images.filter(img => !imagesToRemove.includes(img._id.toString()));
+    }
+
+    // Upload New Images
+    if (req.files && req.files.images) {
+      const imageFiles = Array.isArray(req.files.images) ? req.files.images : [req.files.images];
+      const maxImages = 5 - images.length;
+      const filesToUpload = imageFiles.slice(0, maxImages);
+
+      for (let i = 0; i < filesToUpload.length; i++) {
+        const imageFile = filesToUpload[i];
+        try {
+          const uploadResponse = await imagekit.upload({
+            file: imageFile.buffer.toString('base64'),
+            fileName: `product_${sellerId}_${Date.now()}_${i}.jpg`,
+            folder: '/seller-products/images',
+            useUniqueFileName: true,
+            tags: ['product', 'seller', sellerId]
+          });
+
+          images.push({
+            url: uploadResponse.url,
+            thumbnailUrl: uploadResponse.thumbnailUrl,
+            fileId: uploadResponse.fileId,
+            altText: req.body.imageAltText || `${req.body.name || existingProduct.name} - Image ${images.length + 1}`,
+            isPrimary: images.length === 0,
+            order: images.length,
+            width: uploadResponse.width,
+            height: uploadResponse.height,
+            size: uploadResponse.size,
+            format: uploadResponse.format
+          });
+        } catch (uploadError) {
+          console.error(`Error uploading image ${i + 1}:`, uploadError);
+        }
+      }
+    }
+
+    // Set Primary Image
+    if (req.body.primaryImageIndex !== undefined) {
+      const primaryIndex = parseInt(req.body.primaryImageIndex);
+      if (primaryIndex >= 0 && primaryIndex < images.length) {
+        images = images.map((img, index) => ({
+          ...img,
+          isPrimary: index === primaryIndex
+        }));
+      }
+    }
+
+    // Handle Video
+    let videoInfo = existingProduct.video || {};
+    if (req.files && req.files.video) {
+      const videoFile = Array.isArray(req.files.video) ? req.files.video[0] : req.files.video;
+      try {
+        const videoUploadResponse = await imagekit.upload({
+          file: videoFile.buffer.toString('base64'),
+          fileName: `product_video_${sellerId}_${Date.now()}.mp4`,
+          folder: '/seller-products/videos',
+          useUniqueFileName: true,
+          tags: ['product', 'video', sellerId]
+        });
+
+        videoInfo = {
+          url: videoUploadResponse.url,
+          fileId: videoUploadResponse.fileId,
+          filename: videoUploadResponse.name,
+          size: videoUploadResponse.size,
+          mimetype: videoUploadResponse.mimeType,
+          thumbnail: videoUploadResponse.thumbnailUrl,
+          duration: req.body.videoDuration || 0,
+          fileSize: req.body.videoFileSize || videoFile.size
+        };
+      } catch (videoUploadError) {
+        console.error('Error uploading video:', videoUploadError);
+      }
+    } else if (req.body.removeVideo === 'true') {
+      videoInfo = {};
+    }
+
+    // Construct Update Data
+    const updateData = {
+      name: req.body.name !== undefined ? req.body.name : existingProduct.name,
+      description: req.body.description !== undefined ? req.body.description : existingProduct.description,
+      brand: req.body.brand !== undefined ? req.body.brand : existingProduct.brand,
+      category: categoryId,
+      price: price,
+      oldPrice: oldPrice,
+      discountPercentage: discountPercentage,
+      hsnCode: req.body.hsnCode || (foundCategory ? foundCategory.hsnCode : existingProduct.hsnCode),
+      gstPercent: req.body.gstPercent !== undefined ? parseFloat(req.body.gstPercent) : (foundCategory ? foundCategory.gstPercent : existingProduct.gstPercent),
+      taxType: req.body.taxType || (foundCategory ? foundCategory.taxType : existingProduct.taxType),
+      unit: req.body.unit !== undefined ? req.body.unit : existingProduct.unit,
+      unitValue: req.body.unitValue !== undefined ? parseFloat(req.body.unitValue) : existingProduct.unitValue,
+      promotor: promotorInfo,
+      quantity: quantity,
+      minOrderQuantity: req.body.minOrderQuantity !== undefined ? parseInt(req.body.minOrderQuantity) : existingProduct.minOrderQuantity,
+      maxOrderQuantity: req.body.maxOrderQuantity !== undefined ? parseInt(req.body.maxOrderQuantity) : existingProduct.maxOrderQuantity,
+      stockStatus: stockStatus,
+      lowStockThreshold: req.body.lowStockThreshold !== undefined ? parseInt(req.body.lowStockThreshold) : existingProduct.lowStockThreshold,
+      weight: weightInGrams,
+      weightUnit: req.body.weightUnit !== undefined ? req.body.weightUnit : existingProduct.weightUnit,
+      dimensions: parsedDimensions,
+      images: images,
+      video: videoInfo,
+      'delivery.estimatedDeliveryTime': req.body.estimatedDeliveryTime !== undefined ?
+        req.body.estimatedDeliveryTime : existingProduct.delivery?.estimatedDeliveryTime,
+      'delivery.deliveryCharges': req.body.deliveryCharges !== undefined ?
+        parseFloat(req.body.deliveryCharges) : existingProduct.delivery?.deliveryCharges,
+      'delivery.freeDeliveryThreshold': req.body.freeDeliveryThreshold !== undefined ?
+        parseFloat(req.body.freeDeliveryThreshold) : existingProduct.delivery?.freeDeliveryThreshold,
+      'delivery.availablePincodes': parsedAvailablePincodes,
+      serviceablePincodes: parsedServiceablePincodes,
+      variants: parsedVariants,
+      isActive: req.body.isActive !== undefined ?
+        (req.body.isActive === 'true' || req.body.isActive === true) : existingProduct.isActive
+    };
 
     const updatedProduct = await Product.findByIdAndUpdate(
       productId,
-      { $set: updateData },
+      updateData,
       { new: true, runValidators: true }
-    ).populate('category', 'name');
+    )
+      .populate('category', 'name')
+      .populate('seller', 'name email');
 
     res.status(200).json({
       success: true,
@@ -306,6 +445,14 @@ exports.updateProduct = async (req, res) => {
 
   } catch (error) {
     console.error('Update product error:', error);
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation error',
+        errors: errors
+      });
+    }
     res.status(500).json({
       success: false,
       message: 'Error updating product',
@@ -341,7 +488,7 @@ exports.getSellerProducts = async (req, res) => {
 
     // Build filter using product IDs
     const filter = { _id: { $in: productIds } };
-    
+
     if (search) {
       filter.$or = [
         { name: { $regex: search, $options: 'i' } },
@@ -376,11 +523,11 @@ exports.getSellerProducts = async (req, res) => {
     // Get sales and earnings data for each product
     const salesData = await Order.aggregate([
       { $unwind: '$items' },
-      { 
-        $match: { 
+      {
+        $match: {
           'items.product': { $in: productIds.map(id => new mongoose.Types.ObjectId(id)) },
           status: { $in: ['confirmed', 'picked-up', 'delivered'] } // Only count confirmed and delivered orders
-        } 
+        }
       },
       {
         $group: {

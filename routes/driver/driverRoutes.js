@@ -11,7 +11,7 @@ const {
   getOngoingOrders,
   verifySecretCodeAndPayment,
   checkOrderPlaced,
-  sendConfirmationOtp,
+  sendConfirmationOtp,  
   getMyPayouts
 } = require("../../controllers/driver/driverControllers");
 const { authenticateToken } = require("../../middlewares/driverAuth");

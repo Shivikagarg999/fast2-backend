@@ -18,7 +18,7 @@ const {
 } = require('../../controllers/seller/product');
 const sellerAuth = require('../../middlewares/sellerAuth');
 
-const upload = require('../../middlewares/upload'); 
+const upload = require('../../middlewares/upload');
 // Seller Auth
 router.post('/register', registerSeller);
 router.post('/login', loginSeller);
@@ -32,9 +32,12 @@ router.put('/orders/:orderId/status', sellerAuth, updateOrderStatus);
 router.get('/dashboard', sellerAuth, getSellerDashboard);
 
 // Products
-router.post('/products', sellerAuth, upload.array('images', 5), addProduct); 
+router.post('/products', sellerAuth, upload.array('images', 5), addProduct);
 router.get('/products', sellerAuth, getSellerProducts);
-router.put('/products/:productId', sellerAuth, upload.array('images', 5), updateProduct);
+router.put('/products/:productId', sellerAuth, upload.fields([
+  { name: 'images', maxCount: 5 },
+  { name: 'video', maxCount: 1 }
+]), updateProduct);
 router.patch('/products/:productId/toggle-status', sellerAuth, toggleProductStatus);
 
 module.exports = router;

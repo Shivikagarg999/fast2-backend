@@ -181,6 +181,12 @@ exports.createOrder = async (req, res) => {
       isFreeDelivery = true;
     }
 
+    // Global Free Delivery Threshold
+    if (subtotal > 199) {
+      deliveryCharges = 0;
+      isFreeDelivery = true;
+    }
+
     let total = subtotal + deliveryCharges;
 
     let discount = 0;
