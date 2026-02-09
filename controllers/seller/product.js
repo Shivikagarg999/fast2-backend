@@ -406,8 +406,8 @@ exports.updateProduct = async (req, res) => {
       video: videoInfo,
       delivery: {
         estimatedDeliveryTime: incomingDelivery.estimatedDeliveryTime !== undefined ? incomingDelivery.estimatedDeliveryTime : (req.body.estimatedDeliveryTime !== undefined ? req.body.estimatedDeliveryTime : existingProduct.delivery?.estimatedDeliveryTime),
-        deliveryCharges: incomingDelivery.deliveryCharges !== undefined ? parseFloat(incomingDelivery.deliveryCharges) : (req.body.deliveryCharges !== undefined ? parseFloat(req.body.deliveryCharges) : existingProduct.delivery?.deliveryCharges),
-        freeDeliveryThreshold: incomingDelivery.freeDeliveryThreshold !== undefined ? parseFloat(incomingDelivery.freeDeliveryThreshold) : (req.body.freeDeliveryThreshold !== undefined ? parseFloat(req.body.freeDeliveryThreshold) : existingProduct.delivery?.freeDeliveryThreshold),
+        deliveryCharges: incomingDelivery.deliveryCharges !== undefined ? (parseFloat(incomingDelivery.deliveryCharges) || 0) : (req.body.deliveryCharges !== undefined ? (parseFloat(req.body.deliveryCharges) || 0) : existingProduct.delivery?.deliveryCharges),
+        freeDeliveryThreshold: incomingDelivery.freeDeliveryThreshold !== undefined ? (parseFloat(incomingDelivery.freeDeliveryThreshold) || 0) : (req.body.freeDeliveryThreshold !== undefined ? (parseFloat(req.body.freeDeliveryThreshold) || 0) : existingProduct.delivery?.freeDeliveryThreshold),
         availablePincodes: incomingDelivery.availablePincodes || parsedAvailablePincodes
       },
       serviceablePincodes: parsedServiceablePincodes,
