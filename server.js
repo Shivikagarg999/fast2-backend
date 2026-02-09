@@ -34,7 +34,6 @@ const adminCouponRoutes = require('./routes/admin/coupon/coupon');
 const adminDiscountRoutes = require('./routes/admin/discount/discount');
 const adminSellerRoutes = require('./routes/admin/seller/seller');
 const adminTermsRoutes = require('./routes/admin/termsAndConditions/terms');
-
 const adminProductRoutes = require('./routes/admin/product/product');
 const notificationRoutes = require('./routes/notificationRoutes');
 const app = express();

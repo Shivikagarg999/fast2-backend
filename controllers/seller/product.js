@@ -211,7 +211,6 @@ exports.updateProduct = async (req, res) => {
     const sellerId = req.seller.id;
     const { productId } = req.params;
 
-    // Security check: Ensure product belongs to seller
     const existingProduct = await Product.findOne({ _id: productId, seller: sellerId });
 
     if (!existingProduct) {
@@ -220,8 +219,6 @@ exports.updateProduct = async (req, res) => {
         message: 'Product not found or access denied'
       });
     }
-
-    // Helper function to safely parse JSON
     const parseJSON = (data, fallback = {}) => {
       if (!data) return fallback;
       if (typeof data === 'object') return data;
@@ -233,14 +230,15 @@ exports.updateProduct = async (req, res) => {
       }
     };
 
-    // Parse complex fields
     const parsedDimensions = parseJSON(req.body.dimensions, existingProduct.dimensions || {});
     const parsedAvailablePincodes = parseJSON(req.body.availablePincodes, existingProduct.delivery?.availablePincodes || []);
     const parsedServiceablePincodes = parseJSON(req.body.serviceablePincodes, existingProduct.serviceablePincodes || []);
     const parsedVariants = parseJSON(req.body.variants, existingProduct.variants || []);
     const parsedVideo = parseJSON(req.body.video, existingProduct.video || {});
+    const parsedWarehouse = parseJSON(req.body.warehouse, existingProduct.warehouse || {});
+    const parsedPromotor = parseJSON(req.body.promotor, existingProduct.promotor || {});
+    const incomingDelivery = parseJSON(req.body.delivery, {});
 
-    // Handle Category
     let categoryId = existingProduct.category;
     if (req.body.category) {
       if (mongoose.Types.ObjectId.isValid(req.body.category)) {
@@ -252,17 +250,15 @@ exports.updateProduct = async (req, res) => {
     }
     const foundCategory = await Category.findById(categoryId);
 
-    // Calculate Prices & Discounts
     const price = req.body.price !== undefined ? parseFloat(req.body.price) : existingProduct.price;
     const oldPrice = req.body.oldPrice !== undefined ? parseFloat(req.body.oldPrice) : existingProduct.oldPrice;
     const discountPercentage = oldPrice > 0 ? Math.round(((oldPrice - price) / oldPrice) * 100) : 0;
 
-    // Calculate Commission
-    let promotorInfo = existingProduct.promotor || {};
-    if (existingProduct.promotor && (req.body.price || req.body.commissionRate)) {
-      const commissionRate = existingProduct.promotor.commissionRate || 5;
-      const commissionType = existingProduct.promotor.commissionType || 'percentage';
-      let commissionAmount = existingProduct.promotor.commissionAmount;
+    let promotorInfo = parsedPromotor;
+    if (req.body.price || req.body.commissionRate || req.body.promotor) {
+      const commissionRate = promotorInfo.commissionRate || 5;
+      const commissionType = promotorInfo.commissionType || 'percentage';
+      let commissionAmount = promotorInfo.commissionAmount;
 
       if (commissionType === 'percentage') {
         commissionAmount = (price * commissionRate) / 100;
@@ -276,7 +272,6 @@ exports.updateProduct = async (req, res) => {
       };
     }
 
-    // Handle Quantity and Stock
     let quantity = existingProduct.quantity;
     let stockStatus = existingProduct.stockStatus;
 
@@ -294,7 +289,6 @@ exports.updateProduct = async (req, res) => {
       }
     }
 
-    // Handle Weight
     let weightInGrams = existingProduct.weight;
     if (req.body.weight !== undefined || req.body.weightUnit !== undefined) {
       const weight = parseFloat(req.body.weight) || existingProduct.weight || 0;
@@ -305,17 +299,13 @@ exports.updateProduct = async (req, res) => {
       else weightInGrams = weight;
     }
 
-    // Handle Images
     let images = existingProduct.images || [];
 
-    // Remove images
     if (req.body.imagesToRemove) {
       const imagesToRemove = Array.isArray(req.body.imagesToRemove) ?
         req.body.imagesToRemove : [req.body.imagesToRemove];
       images = images.filter(img => !imagesToRemove.includes(img._id.toString()));
     }
-
-    // Upload New Images
     if (req.files && req.files.images) {
       const imageFiles = Array.isArray(req.files.images) ? req.files.images : [req.files.images];
       const maxImages = 5 - images.length;
@@ -350,7 +340,6 @@ exports.updateProduct = async (req, res) => {
       }
     }
 
-    // Set Primary Image
     if (req.body.primaryImageIndex !== undefined) {
       const primaryIndex = parseInt(req.body.primaryImageIndex);
       if (primaryIndex >= 0 && primaryIndex < images.length) {
@@ -361,8 +350,7 @@ exports.updateProduct = async (req, res) => {
       }
     }
 
-    // Handle Video
-    let videoInfo = existingProduct.video || {};
+    let videoInfo = parsedVideo;
     if (req.files && req.files.video) {
       const videoFile = Array.isArray(req.files.video) ? req.files.video[0] : req.files.video;
       try {
@@ -391,7 +379,6 @@ exports.updateProduct = async (req, res) => {
       videoInfo = {};
     }
 
-    // Construct Update Data
     const updateData = {
       name: req.body.name !== undefined ? req.body.name : existingProduct.name,
       description: req.body.description !== undefined ? req.body.description : existingProduct.description,
@@ -413,16 +400,16 @@ exports.updateProduct = async (req, res) => {
       lowStockThreshold: req.body.lowStockThreshold !== undefined ? parseInt(req.body.lowStockThreshold) : existingProduct.lowStockThreshold,
       weight: weightInGrams,
       weightUnit: req.body.weightUnit !== undefined ? req.body.weightUnit : existingProduct.weightUnit,
+      warehouse: parsedWarehouse,
       dimensions: parsedDimensions,
       images: images,
       video: videoInfo,
-      'delivery.estimatedDeliveryTime': req.body.estimatedDeliveryTime !== undefined ?
-        req.body.estimatedDeliveryTime : existingProduct.delivery?.estimatedDeliveryTime,
-      'delivery.deliveryCharges': req.body.deliveryCharges !== undefined ?
-        parseFloat(req.body.deliveryCharges) : existingProduct.delivery?.deliveryCharges,
-      'delivery.freeDeliveryThreshold': req.body.freeDeliveryThreshold !== undefined ?
-        parseFloat(req.body.freeDeliveryThreshold) : existingProduct.delivery?.freeDeliveryThreshold,
-      'delivery.availablePincodes': parsedAvailablePincodes,
+      delivery: {
+        estimatedDeliveryTime: incomingDelivery.estimatedDeliveryTime !== undefined ? incomingDelivery.estimatedDeliveryTime : (req.body.estimatedDeliveryTime !== undefined ? req.body.estimatedDeliveryTime : existingProduct.delivery?.estimatedDeliveryTime),
+        deliveryCharges: incomingDelivery.deliveryCharges !== undefined ? parseFloat(incomingDelivery.deliveryCharges) : (req.body.deliveryCharges !== undefined ? parseFloat(req.body.deliveryCharges) : existingProduct.delivery?.deliveryCharges),
+        freeDeliveryThreshold: incomingDelivery.freeDeliveryThreshold !== undefined ? parseFloat(incomingDelivery.freeDeliveryThreshold) : (req.body.freeDeliveryThreshold !== undefined ? parseFloat(req.body.freeDeliveryThreshold) : existingProduct.delivery?.freeDeliveryThreshold),
+        availablePincodes: incomingDelivery.availablePincodes || parsedAvailablePincodes
+      },
       serviceablePincodes: parsedServiceablePincodes,
       variants: parsedVariants,
       isActive: req.body.isActive !== undefined ?
@@ -475,7 +462,6 @@ exports.getSellerProducts = async (req, res) => {
       sortOrder = 'desc'
     } = req.query;
 
-    // Get seller's product IDs
     const seller = await Seller.findById(sellerId).select('products');
     if (!seller) {
       return res.status(404).json({
@@ -486,7 +472,6 @@ exports.getSellerProducts = async (req, res) => {
 
     const productIds = seller.products || [];
 
-    // Build filter using product IDs
     const filter = { _id: { $in: productIds } };
 
     if (search) {
