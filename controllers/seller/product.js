@@ -388,7 +388,7 @@ exports.updateProduct = async (req, res) => {
       oldPrice: oldPrice,
       discountPercentage: discountPercentage,
       hsnCode: req.body.hsnCode || (foundCategory ? foundCategory.hsnCode : existingProduct.hsnCode),
-      gstPercent: req.body.gstPercent !== undefined ? parseFloat(req.body.gstPercent) : (foundCategory ? foundCategory.gstPercent : existingProduct.gstPercent),
+      gstPercent: req.body.gstPercent !== undefined ? (parseFloat(req.body.gstPercent) || 0) : (foundCategory ? foundCategory.gstPercent : existingProduct.gstPercent),
       taxType: req.body.taxType || (foundCategory ? foundCategory.taxType : existingProduct.taxType),
       unit: req.body.unit !== undefined ? req.body.unit : existingProduct.unit,
       unitValue: req.body.unitValue !== undefined ? parseFloat(req.body.unitValue) : existingProduct.unitValue,
