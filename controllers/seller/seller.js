@@ -1,7 +1,8 @@
 const Seller = require('../../models/seller');
 const Promotor = require('../../models/promotor');
+const Shop = require('../../models/shop');
 const bcrypt = require('bcryptjs');
-const jwt= require('jsonwebtoken');
+const jwt = require('jsonwebtoken');
 
 exports.registerSeller = async (req, res) => {
   try {
@@ -18,22 +19,22 @@ exports.registerSeller = async (req, res) => {
       promotor
     } = req.body;
 
-    const existingSeller = await Seller.findOne({ 
-      $or: [{ email }, { phone }] 
+    const existingSeller = await Seller.findOne({
+      $or: [{ email }, { phone }]
     });
-    
+
     if (existingSeller) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: 'Seller with this email or phone already exists' 
+        message: 'Seller with this email or phone already exists'
       });
     }
 
     const promotorData = await Promotor.findById(promotor);
     if (!promotorData) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        message: 'Promotor not found' 
+        message: 'Promotor not found'
       });
     }
 
@@ -55,7 +56,26 @@ exports.registerSeller = async (req, res) => {
 
     await newSeller.save();
 
-    res.status(201).json({ 
+    // ── Auto-create a Shop for this seller ─────────────────────────────────────
+    try {
+      const newShop = new Shop({
+        seller: newSeller._id,
+        shopName: businessName,
+        contactEmail: email,
+        contactPhone: phone,
+        description: '',
+        address: address || {},
+      });
+      await newShop.save();
+      // Store shop ref on seller
+      newSeller.shop = newShop._id;
+      await newSeller.save();
+    } catch (shopError) {
+      // Shop creation failure shouldn't block seller registration
+      console.error('Auto shop creation error:', shopError);
+    }
+
+    res.status(201).json({
       success: true,
       message: 'Seller registered successfully. Awaiting admin approval.',
       data: {
@@ -76,15 +96,15 @@ exports.registerSeller = async (req, res) => {
 
   } catch (error) {
     console.error('Seller registration error:', error);
-    
+
     if (req.body.email) {
       await Seller.findOneAndDelete({ email: req.body.email });
     }
 
-    res.status(500).json({ 
+    res.status(500).json({
       success: false,
-      message: 'Error registering seller', 
-      error: error.message 
+      message: 'Error registering seller',
+      error: error.message
     });
   }
 };
@@ -97,7 +117,7 @@ exports.loginSeller = async (req, res) => {
     if (!seller) {
       return res.status(404).json({ message: 'Seller not found' });
     }
-    
+
     const token = jwt.sign(
       { id: seller._id, email: seller.email },
       process.env.JWT_SECRET,

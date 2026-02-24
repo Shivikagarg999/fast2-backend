@@ -36,6 +36,8 @@ const adminSellerRoutes = require('./routes/admin/seller/seller');
 const adminTermsRoutes = require('./routes/admin/termsAndConditions/terms');
 const adminProductRoutes = require('./routes/admin/product/product');
 const notificationRoutes = require('./routes/notificationRoutes');
+const sellerShopRoutes = require('./routes/seller/shopRoutes');
+const publicShopRoutes = require('./routes/public/shopRoutes');
 const app = express();
 
 const allowedOrigins = [
@@ -77,6 +79,8 @@ app.use('/api/contact', contactRoutes);
 app.use('/api/order', orderRoutes);
 app.use('/api/payout', payoutRoutes);
 app.use('/api/seller', sellerRoutes);
+app.use('/api/seller/shop', sellerShopRoutes);
+app.use('/api/shops', publicShopRoutes);
 app.use('/api/referral', referralRoutes);
 app.use('/api/driver', driverRoutes);
 app.use('/api/driver-earnings', driverEarningRoutes);

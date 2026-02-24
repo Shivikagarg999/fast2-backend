@@ -4,6 +4,7 @@ const Warehouse = require('../../models/warehouse');
 const Promotor = require('../../models/promotor');
 const Category = require('../../models/category');
 const Order = require('../../models/order');
+const Shop = require('../../models/shop');
 const mongoose = require('mongoose');
 const imagekit = require('../../utils/imagekit');
 
@@ -182,6 +183,19 @@ exports.addProduct = async (req, res) => {
 
     seller.products.push(newProduct._id);
     await seller.save();
+
+    // ── Sync product into the seller's Shop ────────────────────────────────────
+    const shop = await Shop.findOne({ seller: sellerId });
+    if (shop) {
+      shop.products.push(newProduct._id);
+      shop.analytics.totalProductsListed = shop.products.length;
+      // Add category to shop categories if not already listed
+      if (categoryId && !shop.categories.some((c) => c.toString() === categoryId.toString())) {
+        shop.categories.push(categoryId);
+      }
+      await shop.save();
+    }
+
 
     if (seller.promotor?._id) {
       await Promotor.findByIdAndUpdate(

@@ -53,6 +53,10 @@ const sellerSchema = new mongoose.Schema(
     rating: { type: Number, default: 0, min: 0, max: 5 },
     totalOrders: { type: Number, default: 0 },
     totalEarnings: { type: Number, default: 0 },
+    shop: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Shop',
+    },
   },
   { timestamps: true }
 );
