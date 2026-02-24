@@ -2,6 +2,62 @@ const Shop = require('../../models/shop');
 const Product = require('../../models/product');
 const mongoose = require('mongoose');
 
+// ─── POST: Create a new shop ──────────────────────────────────────────────────
+exports.createShop = async (req, res) => {
+    try {
+        const {
+            seller,
+            shopName,
+            description,
+            tagline,
+            contactEmail,
+            contactPhone,
+            address,
+            categories,
+            isOpen,
+            isActive,
+            isVerified,
+            socialLinks
+        } = req.body;
+
+        if (!seller || !shopName) {
+            return res.status(400).json({ success: false, message: 'Seller ID and Shop Name are required' });
+        }
+
+        // Check if seller already has a shop
+        const existingShop = await Shop.findOne({ seller });
+        if (existingShop) {
+            return res.status(400).json({ success: false, message: 'This seller already has a shop registered' });
+        }
+
+        const newShop = new Shop({
+            seller,
+            shopName,
+            description,
+            tagline,
+            contactEmail,
+            contactPhone,
+            address,
+            categories,
+            isOpen,
+            isActive,
+            isVerified,
+            socialLinks
+        });
+
+        await newShop.save();
+
+        res.status(201).json({
+            success: true,
+            message: 'Shop created successfully',
+            data: newShop
+        });
+    } catch (error) {
+        console.error('Admin createShop error:', error);
+        res.status(500).json({ success: false, message: 'Error creating shop', error: error.message });
+    }
+};
+
 // ─── GET: All shops for admin ──────────────────────────────────────────────────
 exports.getAllShops = async (req, res) => {
     try {
@@ -75,6 +131,36 @@ exports.getShopDetails = async (req, res) => {
     } catch (error) {
         console.error('Admin getShopDetails error:', error);
         res.status(500).json({ success: false, message: 'Error fetching shop details', error: error.message });
+    }
+};
+
+// ─── PUT: Update Shop Details ──────────────────────────────────────────────────
+exports.updateShop = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const updateData = req.body;
+
+        // Prevent direct update of sensitive fields if any, or handle them specifically
+        delete updateData.seller; // Seller cannot be changed once shop is created
+
+        const shop = await Shop.findByIdAndUpdate(
+            id,
+            { $set: updateData },
+            { new: true, runValidators: true }
+        );
+
+        if (!shop) {
+            return res.status(404).json({ success: false, message: 'Shop not found' });
+        }
+
+        res.status(200).json({
+            success: true,
+            message: 'Shop updated successfully',
+            data: shop
+        });
+    } catch (error) {
+        console.error('Admin updateShop error:', error);
+        res.status(500).json({ success: false, message: 'Error updating shop', error: error.message });
     }
 };
 

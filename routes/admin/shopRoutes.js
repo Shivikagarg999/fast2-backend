@@ -7,7 +7,9 @@ const { adminAuth } = require('../../middlewares/adminAuth');
 router.use(adminAuth);
 
 router.get('/', adminShopController.getAllShops);
+router.post('/', adminShopController.createShop);
 router.get('/:id', adminShopController.getShopDetails);
+router.put('/:id', adminShopController.updateShop);
 router.patch('/:id/verify', adminShopController.toggleVerification);
 router.patch('/:id/status', adminShopController.toggleActiveStatus);
 router.post('/:id/badges', adminShopController.manageBadges);
