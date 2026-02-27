@@ -47,7 +47,7 @@ const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:3000",
   "https://fast2-admin.vercel.app",
-  "https://api.fast2.in",
+  "http://localhost:5000",
   "https://admin.fast2.in",
   "https://www.admin.fast2.in",
   "https://seller.fast2.in",

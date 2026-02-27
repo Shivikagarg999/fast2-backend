@@ -1,5 +1,5 @@
 const Category = require('../../models/category');
-const Promotor = require('../../models/promotor'); 
+const Promotor = require('../../models/promotor');
 const Product = require('../../models/product');
 const Seller = require('../../models/seller');
 const Warehouse = require('../../models/warehouse');
@@ -36,7 +36,7 @@ const createProduct = async (req, res) => {
         parsedVariants = typeof productData.variants === 'string' ?
           JSON.parse(productData.variants) : productData.variants;
         if (!Array.isArray(parsedVariants)) parsedVariants = [];
-        
+
         parsedVariants = parsedVariants
           .filter(variant => variant.name && variant.name.trim())
           .map(variant => ({
@@ -51,7 +51,7 @@ const createProduct = async (req, res) => {
               }))
           }))
           .filter(variant => variant.options.length > 0);
-          
+
         console.log('Parsed variants:', parsedVariants);
       } catch (error) {
         console.error('Error parsing variants:', error);
@@ -62,10 +62,10 @@ const createProduct = async (req, res) => {
     if (isNaN(parsedWeight)) {
       parsedWeight = 0;
     }
-    
+
     const weightUnit = productData.weightUnit || 'g';
     let weightInGrams = parsedWeight;
-    
+
     if (weightUnit === 'kg') {
       weightInGrams = parsedWeight * 1000;
     } else if (weightUnit === 'l') {
@@ -77,7 +77,7 @@ const createProduct = async (req, res) => {
     let categoryId = productData.category;
     if (productData.category && typeof productData.category === 'string') {
       const isObjectId = /^[0-9a-fA-F]{24}$/.test(productData.category);
-      
+
       if (!isObjectId) {
         const category = await Category.findOne({ name: productData.category });
         if (!category) {
@@ -111,8 +111,8 @@ const createProduct = async (req, res) => {
         message: 'Seller is required'
       });
     }
-const sellerId = productData.seller?.id || productData.seller;
-const seller = await Seller.findById(sellerId);
+    const sellerId = productData.seller?.id || productData.seller;
+    const seller = await Seller.findById(sellerId);
 
     if (!seller) {
       return res.status(404).json({
@@ -130,7 +130,7 @@ const seller = await Seller.findById(sellerId);
           message: 'Promotor not found'
         });
       }
-      
+
       promotorInfo = {
         id: promotor._id,
         commissionRate: productData.commissionRate ? parseFloat(productData.commissionRate) : promotor.commissionRate || 5,
@@ -164,7 +164,7 @@ const seller = await Seller.findById(sellerId);
     }
 
     const oldPrice = parseFloat(productData.oldPrice) || 0;
-    const discountPercentage = oldPrice > 0 ? 
+    const discountPercentage = oldPrice > 0 ?
       Math.round(((oldPrice - price) / oldPrice) * 100) : 0;
 
     const quantity = parseInt(productData.quantity) || 0;
@@ -174,12 +174,12 @@ const seller = await Seller.findById(sellerId);
     if (req.files && req.files.images) {
       const imageFiles = Array.isArray(req.files.images) ? req.files.images : [req.files.images];
       const filesToUpload = imageFiles.slice(0, 5);
-      
+
       console.log(`Processing ${filesToUpload.length} images for ImageKit upload...`);
-      
+
       for (let i = 0; i < filesToUpload.length; i++) {
         const imageFile = filesToUpload[i];
-        
+
         try {
           const uploadResponse = await imagekit.upload({
             file: imageFile.buffer.toString('base64'),
@@ -191,7 +191,7 @@ const seller = await Seller.findById(sellerId);
           });
 
           console.log(`Image ${i} uploaded to ImageKit:`, uploadResponse.url);
-          
+
           uploadedImages.push({
             url: uploadResponse.url,
             thumbnailUrl: uploadResponse.thumbnailUrl,
@@ -221,7 +221,7 @@ const seller = await Seller.findById(sellerId);
     let videoInfo = null;
     if (req.files && req.files.video) {
       const videoFile = req.files.video;
-      
+
       try {
         const videoUploadResponse = await imagekit.upload({
           file: videoFile.buffer.toString('base64'),
@@ -290,7 +290,7 @@ const seller = await Seller.findById(sellerId);
       },
       serviceablePincodes: parsedServiceablePincodes,
       variants: parsedVariants,
-      isActive: productData.isActive !== undefined ? 
+      isActive: productData.isActive !== undefined ?
         (productData.isActive === 'true' || productData.isActive === true) : true,
       createdBy: 'admin',
       createdAt: new Date(),
@@ -304,7 +304,7 @@ const seller = await Seller.findById(sellerId);
     });
 
     console.log('Creating product...');
-    
+
     const newProduct = new Product(newProductData);
     await newProduct.save();
 
@@ -338,7 +338,7 @@ const seller = await Seller.findById(sellerId);
 
   } catch (error) {
     console.error('Create product error:', error);
-    
+
     if (error.name === 'ValidationError') {
       const errors = Object.values(error.errors).map(err => err.message);
       return res.status(400).json({
@@ -347,7 +347,7 @@ const seller = await Seller.findById(sellerId);
         errors: errors
       });
     }
-    
+
     res.status(500).json({
       success: false,
       message: 'Error creating product',
@@ -360,18 +360,18 @@ const updateProduct = async (req, res) => {
   try {
     const productId = req.params.id;
     const existingProduct = await Product.findById(productId);
-    
+
     if (!existingProduct) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        message: 'Product not found' 
+        message: 'Product not found'
       });
     }
 
     let parsedDimensions = existingProduct.dimensions || {};
     if (req.body.dimensions) {
       try {
-        parsedDimensions = typeof req.body.dimensions === 'string' ? 
+        parsedDimensions = typeof req.body.dimensions === 'string' ?
           JSON.parse(req.body.dimensions) : req.body.dimensions;
       } catch (error) {
         console.error('Error parsing dimensions:', error);
@@ -381,7 +381,7 @@ const updateProduct = async (req, res) => {
     let parsedAvailablePincodes = existingProduct.delivery?.availablePincodes || [];
     if (req.body.availablePincodes) {
       try {
-        parsedAvailablePincodes = typeof req.body.availablePincodes === 'string' ? 
+        parsedAvailablePincodes = typeof req.body.availablePincodes === 'string' ?
           JSON.parse(req.body.availablePincodes) : req.body.availablePincodes;
       } catch (error) {
         console.error('Error parsing availablePincodes:', error);
@@ -391,7 +391,7 @@ const updateProduct = async (req, res) => {
     let parsedServiceablePincodes = existingProduct.serviceablePincodes || [];
     if (req.body.serviceablePincodes) {
       try {
-        parsedServiceablePincodes = typeof req.body.serviceablePincodes === 'string' ? 
+        parsedServiceablePincodes = typeof req.body.serviceablePincodes === 'string' ?
           JSON.parse(req.body.serviceablePincodes) : req.body.serviceablePincodes;
       } catch (error) {
         console.error('Error parsing serviceablePincodes:', error);
@@ -401,7 +401,7 @@ const updateProduct = async (req, res) => {
     let parsedVariants = existingProduct.variants || [];
     if (req.body.variants) {
       try {
-        parsedVariants = typeof req.body.variants === 'string' ? 
+        parsedVariants = typeof req.body.variants === 'string' ?
           JSON.parse(req.body.variants) : req.body.variants;
       } catch (error) {
         console.error('Error parsing variants:', error);
@@ -411,7 +411,7 @@ const updateProduct = async (req, res) => {
     let parsedVideo = existingProduct.video || {};
     if (req.body.video) {
       try {
-        parsedVideo = typeof req.body.video === 'string' ? 
+        parsedVideo = typeof req.body.video === 'string' ?
           JSON.parse(req.body.video) : req.body.video;
       } catch (error) {
         console.error('Error parsing video:', error);
@@ -422,24 +422,36 @@ const updateProduct = async (req, res) => {
     if (req.body.category) {
       const category = await Category.findById(req.body.category);
       if (!category) {
-        return res.status(404).json({ 
+        return res.status(404).json({
           success: false,
-          message: 'Category not found' 
+          message: 'Category not found'
         });
       }
       categoryId = category._id;
+    }
+
+    let sellerId = existingProduct.seller;
+    if (req.body.seller) {
+      const seller = await Seller.findById(req.body.seller);
+      if (!seller) {
+        return res.status(404).json({
+          success: false,
+          message: 'Seller not found'
+        });
+      }
+      sellerId = seller._id;
     }
 
     let promotorInfo = existingProduct.promotor || {};
     if (req.body.promotor) {
       const promotor = await Promotor.findById(req.body.promotor);
       if (!promotor) {
-        return res.status(404).json({ 
+        return res.status(404).json({
           success: false,
-          message: 'Promotor not found' 
+          message: 'Promotor not found'
         });
       }
-      
+
       promotorInfo = {
         id: promotor._id,
         commissionRate: req.body.commissionRate ? parseFloat(req.body.commissionRate) : promotor.commissionRate || 5,
@@ -468,9 +480,9 @@ const updateProduct = async (req, res) => {
     if (req.body.warehouseId) {
       const warehouse = await Warehouse.findById(req.body.warehouseId);
       if (!warehouse) {
-        return res.status(404).json({ 
+        return res.status(404).json({
           success: false,
-          message: 'Warehouse not found' 
+          message: 'Warehouse not found'
         });
       }
       warehouseInfo = {
@@ -488,9 +500,9 @@ const updateProduct = async (req, res) => {
     }
 
     let discountPercentage = existingProduct.discountPercentage;
-    if (req.body.oldPrice !== undefined && req.body.price !== undefined) {
-      const oldPrice = parseFloat(req.body.oldPrice) || 0;
-      const price = parseFloat(req.body.price) || 0;
+    if (req.body.oldPrice !== undefined || req.body.price !== undefined) {
+      const oldPrice = req.body.oldPrice !== undefined ? parseFloat(req.body.oldPrice) : existingProduct.oldPrice || 0;
+      const price = req.body.price !== undefined ? parseFloat(req.body.price) : existingProduct.price || 0;
       discountPercentage = oldPrice > 0 ? Math.round(((oldPrice - price) / oldPrice) * 100) : 0;
     }
 
@@ -504,7 +516,7 @@ const updateProduct = async (req, res) => {
     if (req.body.weight !== undefined || req.body.weightUnit !== undefined) {
       const weight = parseFloat(req.body.weight) || existingProduct.weight || 0;
       const weightUnit = req.body.weightUnit || existingProduct.weightUnit || 'g';
-      
+
       if (weightUnit === 'kg') {
         weightInGrams = weight * 1000;
       } else if (weightUnit === 'l') {
@@ -517,9 +529,9 @@ const updateProduct = async (req, res) => {
     }
 
     let images = existingProduct.images || [];
-    
+
     if (req.body.imagesToRemove) {
-      const imagesToRemove = Array.isArray(req.body.imagesToRemove) ? 
+      const imagesToRemove = Array.isArray(req.body.imagesToRemove) ?
         req.body.imagesToRemove : [req.body.imagesToRemove];
       images = images.filter(img => !imagesToRemove.includes(img._id.toString()));
     }
@@ -528,10 +540,10 @@ const updateProduct = async (req, res) => {
       const imageFiles = Array.isArray(req.files.images) ? req.files.images : [req.files.images];
       const maxImages = 5 - images.length;
       const filesToUpload = imageFiles.slice(0, maxImages);
-      
+
       for (let i = 0; i < filesToUpload.length; i++) {
         const imageFile = filesToUpload[i];
-        
+
         try {
           const uploadResponse = await imagekit.upload({
             file: imageFile.buffer.toString('base64'),
@@ -541,13 +553,13 @@ const updateProduct = async (req, res) => {
             tags: ['product', 'image'],
             isPrivateFile: false
           });
-          
+
           images.push({
             url: uploadResponse.url,
             thumbnailUrl: uploadResponse.thumbnailUrl,
             fileId: uploadResponse.fileId,
             altText: req.body.imageAltText || `${req.body.name || existingProduct.name} - Image ${images.length + 1}`,
-            isPrimary: images.length === 0, 
+            isPrimary: images.length === 0,
             order: images.length,
             width: uploadResponse.width,
             height: uploadResponse.height,
@@ -579,7 +591,7 @@ const updateProduct = async (req, res) => {
     let videoInfo = existingProduct.video || {};
     if (req.files && req.files.video) {
       const videoFile = Array.isArray(req.files.video) ? req.files.video[0] : req.files.video;
-      
+
       try {
         const videoUploadResponse = await imagekit.upload({
           file: videoFile.buffer.toString('base64'),
@@ -625,6 +637,7 @@ const updateProduct = async (req, res) => {
       description: req.body.description !== undefined ? req.body.description : existingProduct.description,
       brand: req.body.brand !== undefined ? req.body.brand : existingProduct.brand,
       category: categoryId,
+      seller: sellerId,
       price: req.body.price !== undefined ? parseFloat(req.body.price) : existingProduct.price,
       oldPrice: req.body.oldPrice !== undefined ? parseFloat(req.body.oldPrice) : existingProduct.oldPrice,
       discountPercentage: discountPercentage,
@@ -643,16 +656,16 @@ const updateProduct = async (req, res) => {
       dimensions: parsedDimensions,
       images: images,
       video: videoInfo,
-      'delivery.estimatedDeliveryTime': req.body.estimatedDeliveryTime !== undefined ? 
+      'delivery.estimatedDeliveryTime': req.body.estimatedDeliveryTime !== undefined ?
         req.body.estimatedDeliveryTime : existingProduct.delivery?.estimatedDeliveryTime,
-      'delivery.deliveryCharges': req.body.deliveryCharges !== undefined ? 
+      'delivery.deliveryCharges': req.body.deliveryCharges !== undefined ?
         parseFloat(req.body.deliveryCharges) : existingProduct.delivery?.deliveryCharges,
-      'delivery.freeDeliveryThreshold': req.body.freeDeliveryThreshold !== undefined ? 
+      'delivery.freeDeliveryThreshold': req.body.freeDeliveryThreshold !== undefined ?
         parseFloat(req.body.freeDeliveryThreshold) : existingProduct.delivery?.freeDeliveryThreshold,
       'delivery.availablePincodes': parsedAvailablePincodes,
       serviceablePincodes: parsedServiceablePincodes,
       variants: parsedVariants,
-      isActive: req.body.isActive !== undefined ? 
+      isActive: req.body.isActive !== undefined ?
         (req.body.isActive === 'true' || req.body.isActive === true) : existingProduct.isActive,
       updatedAt: new Date()
     };
@@ -674,14 +687,14 @@ const updateProduct = async (req, res) => {
       updateData,
       { new: true, runValidators: true }
     )
-    .populate('category')
-    .populate('promotor.id')
-    .populate('seller');
+      .populate('category')
+      .populate('promotor.id')
+      .populate('seller');
 
     if (!updatedProduct) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        message: 'Product not found after update' 
+        message: 'Product not found after update'
       });
     }
 
@@ -693,7 +706,7 @@ const updateProduct = async (req, res) => {
 
   } catch (error) {
     console.error('Update product error:', error);
-    
+
     if (error.name === 'ValidationError') {
       const errors = Object.values(error.errors).map(err => err.message);
       return res.status(400).json({
@@ -702,7 +715,7 @@ const updateProduct = async (req, res) => {
         errors: errors
       });
     }
-    
+
     res.status(500).json({
       success: false,
       message: 'Error updating product',
@@ -713,16 +726,16 @@ const updateProduct = async (req, res) => {
 
 const getProducts = async (req, res) => {
   try {
-    const { 
-      category, 
-      search, 
-      minPrice, 
-      maxPrice, 
-      sortBy = 'createdAt', 
+    const {
+      category,
+      search,
+      minPrice,
+      maxPrice,
+      sortBy = 'createdAt',
       sortOrder = 'desc',
       page = 1,
       limit = 20,
-      pincode 
+      pincode
     } = req.query;
 
     const filter = { isActive: true };
@@ -786,16 +799,16 @@ const getProducts = async (req, res) => {
 
 const getProductsAdmin = async (req, res) => {
   try {
-    const { 
-      category, 
-      search, 
-      minPrice, 
-      maxPrice, 
-      sortBy = 'createdAt', 
+    const {
+      category,
+      search,
+      minPrice,
+      maxPrice,
+      sortBy = 'createdAt',
       sortOrder = 'desc',
       page = 1,
       limit = 20,
-      pincode 
+      pincode
     } = req.query;
 
     const filter = {};
@@ -860,18 +873,18 @@ const getProductsAdmin = async (req, res) => {
 const getProductsByPincode = async (req, res) => {
   try {
     const { pincode } = req.params;
-    const { 
-      category, 
-      search, 
-      page = 1, 
-      limit = 20 
+    const {
+      category,
+      search,
+      page = 1,
+      limit = 20
     } = req.query;
 
     if (!pincode) {
       return res.status(400).json({ message: 'Pincode is required' });
     }
 
-    const filter = { 
+    const filter = {
       isActive: true,
       $or: [
         { 'delivery.availablePincodes': pincode },
@@ -926,11 +939,11 @@ const getProductsByPincode = async (req, res) => {
 const getProductOrders = async (req, res) => {
   try {
     const { productId } = req.params;
-    const { 
-      page = 1, 
-      limit = 10, 
-      status, 
-      startDate, 
+    const {
+      page = 1,
+      limit = 10,
+      status,
+      startDate,
       endDate,
       sortBy = 'createdAt',
       sortOrder = 'desc'
@@ -1170,13 +1183,13 @@ const getProductSalesAnalytics = async (req, res) => {
 
 const getProductsOrderStats = async (req, res) => {
   try {
-    const { 
-      page = 1, 
+    const {
+      page = 1,
       limit = 20,
       sortBy = 'totalOrders',
       sortOrder = 'desc',
       category,
-      search 
+      search
     } = req.query;
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -1466,12 +1479,12 @@ const getProductStats = async (req, res) => {
     const totalProducts = await Product.countDocuments();
 
     const allProducts = await Product.find({});
-    
+
     const inStockProducts = allProducts.filter(product => product.stockStatus === 'in-stock').length;
     const outOfStockProducts = allProducts.filter(product => product.stockStatus === 'out-of-stock').length;
-    
-    const lowStockProducts = allProducts.filter(product => 
-      product.stockStatus === 'in-stock' && 
+
+    const lowStockProducts = allProducts.filter(product =>
+      product.stockStatus === 'in-stock' &&
       product.quantity <= (product.lowStockThreshold || 10)
     ).length;
 
@@ -1485,8 +1498,8 @@ const getProductStats = async (req, res) => {
     res.json(result);
   } catch (error) {
     console.error('Error in getProductStats:', error);
-    res.status(500).json({ 
-      message: "Server error", 
+    res.status(500).json({
+      message: "Server error",
       error: error.message
     });
   }
@@ -1500,10 +1513,10 @@ const getLowStockAlerts = async (req, res) => {
       $expr: { $lte: ["$quantity", "$lowStockThreshold"] },
       stockStatus: "in-stock"
     })
-    .populate('category', 'name')
-    .select('name quantity lowStockThreshold price stockStatus images')
-    .sort({ quantity: 1 })
-    .limit(parseInt(limit));
+      .populate('category', 'name')
+      .select('name quantity lowStockThreshold price stockStatus images')
+      .sort({ quantity: 1 })
+      .limit(parseInt(limit));
 
     res.json({
       lowStockProducts,
@@ -1521,10 +1534,10 @@ const getOutOfStockProducts = async (req, res) => {
     const outOfStockProducts = await Product.find({
       stockStatus: "out-of-stock"
     })
-    .populate('category', 'name')
-    .select('name quantity price stockStatus images createdAt')
-    .sort({ createdAt: -1 })
-    .limit(parseInt(limit));
+      .populate('category', 'name')
+      .select('name quantity price stockStatus images createdAt')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit));
 
     res.json({
       outOfStockProducts,
@@ -1538,14 +1551,14 @@ const getOutOfStockProducts = async (req, res) => {
 const getProductsByWarehouse = async (req, res) => {
   try {
     const { warehouseCode } = req.params;
-    
+
     const products = await Product.find({
       'warehouse.code': warehouseCode,
       isActive: true
     })
-    .populate('category')
-    .populate('promotor.id')
-    .populate('warehouse.id');
+      .populate('category')
+      .populate('promotor.id')
+      .populate('warehouse.id');
 
     res.json(products);
   } catch (error) {
@@ -1556,7 +1569,7 @@ const getProductsByWarehouse = async (req, res) => {
 const getProductsForPincode = async (req, res) => {
   try {
     const { pincode } = req.query;
-    
+
     if (!pincode) {
       return res.status(400).json({
         success: false,
@@ -1575,14 +1588,14 @@ const getProductsForPincode = async (req, res) => {
     }
 
     const warehouse = warehouseData.data;
-    
+
     const products = await Product.find({
       'warehouse.code': warehouse.code,
       isActive: true
     })
-    .populate('category')
-    .populate('promotor.id')
-    .populate('warehouse.id');
+      .populate('category')
+      .populate('promotor.id')
+      .populate('warehouse.id');
 
     res.json({
       success: true,
@@ -1647,7 +1660,7 @@ const toggleProductActiveStatus = async (req, res) => {
 
     const updatedProduct = await Product.findByIdAndUpdate(
       id,
-      { 
+      {
         isActive: !product.isActive,
         ...(!product.isActive && product.quantity > 0 ? { stockStatus: 'in-stock' } : {})
       },

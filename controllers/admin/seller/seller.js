@@ -1,5 +1,6 @@
 const Seller = require('../../../models/seller');
 const Promotor = require('../../../models/promotor');
+const Product = require('../../../models/product');
 const bcrypt = require('bcryptjs');
 
 exports.createSeller = async (req, res) => {
@@ -125,7 +126,7 @@ exports.createSeller = async (req, res) => {
 
   } catch (error) {
     console.error('Create seller error:', error);
-    
+
     if (error.code === 11000) {
       const field = Object.keys(error.keyPattern)[0];
       return res.status(409).json({
@@ -154,7 +155,7 @@ exports.createSeller = async (req, res) => {
 exports.updateSellerApproval = async (req, res) => {
   try {
     const { sellerId } = req.params;
-    const { action, adminId, rejectionReason } = req.body; 
+    const { action, adminId, rejectionReason } = req.body;
 
     const seller = await Seller.findById(sellerId);
     if (!seller) return res.status(404).json({ message: 'Seller not found' });
@@ -175,9 +176,9 @@ exports.updateSellerApproval = async (req, res) => {
 
     await seller.save();
 
-    res.status(200).json({ 
-      message: `Seller ${action}d successfully`, 
-      seller 
+    res.status(200).json({
+      message: `Seller ${action}d successfully`,
+      seller
     });
 
   } catch (error) {
@@ -199,7 +200,7 @@ exports.getAllSellers = async (req, res) => {
     } = req.query;
 
     const filter = {};
-    
+
     if (search) {
       filter.$or = [
         { name: { $regex: search, $options: 'i' } },
@@ -226,7 +227,7 @@ exports.getAllSellers = async (req, res) => {
       .sort(sort)
       .limit(limit * 1)
       .skip((page - 1) * limit)
-      .select('-bankDetails'); 
+      .select('-bankDetails');
 
     const total = await Seller.countDocuments(filter);
 
@@ -297,7 +298,7 @@ exports.toggleSellerStatus = async (req, res) => {
     }
 
     seller.isActive = isActive !== undefined ? isActive : !seller.isActive;
-    
+
     if (reason) {
       seller.statusChangeReason = reason;
       seller.statusChangedAt = new Date();
