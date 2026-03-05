@@ -1706,6 +1706,12 @@ const downloadProductsByStatusCSV = async (req, res) => {
       });
     }
 
+    // Function to strip HTML tags
+    const stripHtml = (html) => {
+      if (!html) return '';
+      return html.replace(/<[^>]*>/g, '').replace(/&[^;]+;/g, ' ').replace(/\s+/g, ' ').trim();
+    };
+
     const csvHeaders = [
       'Product ID',
       'Product Name',
@@ -1741,7 +1747,7 @@ const downloadProductsByStatusCSV = async (req, res) => {
       product.minOrderQuantity || 1,
       product.maxOrderQuantity || 10,
       product.weight || 0,
-      product.description ? `"${product.description.replace(/"/g, '""')}"` : 'N/A',
+      product.description ? `"${stripHtml(product.description).replace(/"/g, '""')}"` : 'N/A',
       product.createdAt ? product.createdAt.toISOString().split('T')[0] : 'N/A',
       product.updatedAt ? product.updatedAt.toISOString().split('T')[0] : 'N/A'
     ].map(field => `"${field}"`).join(','));
