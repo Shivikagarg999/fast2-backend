@@ -5,7 +5,8 @@ const {
   getUserById,
   updateUser,
   deleteUser,
-  addMoneyToWallet
+  addMoneyToWallet,
+  downloadUsersByStatusCSV
 } = require("../../../controllers/admin/user/adminUserController");
 
 const router = express.Router();
@@ -16,5 +17,6 @@ router.get("/users/:id", getUserById);
 router.put("/users/:id", updateUser);
 router.delete("/users/:id", deleteUser);
 router.post("/users/:id/wallet/add", addMoneyToWallet);
+router.get("/users/download/csv", downloadUsersByStatusCSV);
 
 module.exports = router;

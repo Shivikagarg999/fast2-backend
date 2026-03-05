@@ -1683,6 +1683,85 @@ const toggleProductActiveStatus = async (req, res) => {
   }
 };
 
+const downloadProductsByStatusCSV = async (req, res) => {
+  try {
+    const { status, stockStatus, isActive } = req.query;
+
+    const filter = {};
+    
+    if (status) filter.status = status;
+    if (stockStatus) filter.stockStatus = stockStatus;
+    if (isActive !== undefined) filter.isActive = isActive === 'true';
+
+    const products = await Product.find(filter)
+      .populate('category', 'name')
+      .populate('seller', 'name businessName')
+      .populate('warehouse.id', 'name code')
+      .sort({ createdAt: -1 });
+
+    if (products.length === 0) {
+      return res.status(404).json({ 
+        success: false,
+        message: "No products found with the specified status" 
+      });
+    }
+
+    const csvHeaders = [
+      'Product ID',
+      'Product Name',
+      'SKU',
+      'Category',
+      'Seller',
+      'Warehouse',
+      'Price',
+      'Quantity',
+      'Stock Status',
+      'Active Status',
+      'Low Stock Threshold',
+      'Min Order Quantity',
+      'Max Order Quantity',
+      'Weight',
+      'Description',
+      'Created Date',
+      'Updated Date'
+    ];
+
+    const csvRows = products.map(product => [
+      product._id || 'N/A',
+      product.name || 'N/A',
+      product.sku || 'N/A',
+      product.category?.name || 'N/A',
+      product.seller?.name || product.seller?.businessName || 'N/A',
+      product.warehouse?.id?.name || product.warehouse?.id?.code || 'N/A',
+      product.price || 0,
+      product.quantity || 0,
+      product.stockStatus || 'N/A',
+      product.isActive ? 'Active' : 'Inactive',
+      product.lowStockThreshold || 0,
+      product.minOrderQuantity || 1,
+      product.maxOrderQuantity || 10,
+      product.weight || 0,
+      product.description ? `"${product.description.replace(/"/g, '""')}"` : 'N/A',
+      product.createdAt ? product.createdAt.toISOString().split('T')[0] : 'N/A',
+      product.updatedAt ? product.updatedAt.toISOString().split('T')[0] : 'N/A'
+    ].map(field => `"${field}"`).join(','));
+
+    const csvContent = [csvHeaders.join(','), ...csvRows].join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="products_${status || stockStatus || (isActive ? 'active' : 'inactive')}_${Date.now()}.csv"`);
+    
+    res.send(csvContent);
+  } catch (error) {
+    console.error('Download products CSV error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: "Server error", 
+      error: error.message 
+    });
+  }
+};
+
 module.exports = {
   createProduct,
   getProducts,
@@ -1703,5 +1782,6 @@ module.exports = {
   getProductsByWarehouse,
   getProductsForPincode,
   toggleProductActiveStatus,
-  getProductActiveStatus
+  getProductActiveStatus,
+  downloadProductsByStatusCSV
 };

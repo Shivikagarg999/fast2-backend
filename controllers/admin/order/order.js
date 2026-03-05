@@ -1,5 +1,77 @@
 const Order = require("../../../models/order");
 
+const downloadOrdersByStatusCSV = async (req, res) => {
+  try {
+    const { status } = req.query;
+
+    if (!status) {
+      return res.status(400).json({ message: "Status parameter is required" });
+    }
+
+    const filter = { status };
+    
+    const orders = await Order.find(filter)
+      .populate("user", "name email phone")
+      .populate("driver", "name phone")
+      .populate("items.product", "name")
+      .sort({ createdAt: -1 });
+
+    if (orders.length === 0) {
+      return res.status(404).json({ message: "No orders found with the specified status" });
+    }
+
+    const csvHeaders = [
+      'Order ID',
+      'Customer Name',
+      'Customer Email',
+      'Customer Phone',
+      'Status',
+      'Payment Status',
+      'Payment Method',
+      'Total Amount',
+      'Delivery Address',
+      'Driver Name',
+      'Driver Phone',
+      'Order Date',
+      'Items Count',
+      'Product Names'
+    ];
+
+    const csvRows = orders.map(order => {
+      const items = order.items.map(item => item.product?.name || 'N/A').join('; ');
+      const address = order.shippingAddress ? 
+        `${order.shippingAddress.addressLine}, ${order.shippingAddress.city}, ${order.shippingAddress.state} - ${order.shippingAddress.pinCode}` : 
+        'N/A';
+      
+      return [
+        order.orderId || 'N/A',
+        order.user?.name || 'N/A',
+        order.user?.email || 'N/A',
+        order.user?.phone || 'N/A',
+        order.status || 'N/A',
+        order.paymentStatus || 'N/A',
+        order.paymentMethod || 'N/A',
+        order.total || 0,
+        address,
+        order.driver?.name || 'N/A',
+        order.driver?.phone || 'N/A',
+        order.createdAt ? order.createdAt.toISOString().split('T')[0] : 'N/A',
+        order.items.length,
+        items
+      ].map(field => `"${field}"`).join(',');
+    });
+
+    const csvContent = [csvHeaders.join(','), ...csvRows].join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="orders_${status}_${Date.now()}.csv"`);
+    
+    res.send(csvContent);
+  } catch (error) {
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
 const getAllOrders = async (req, res) => {
   try {
     const {
@@ -14,21 +86,18 @@ const getAllOrders = async (req, res) => {
       sortOrder = "desc"
     } = req.query;
 
-    // Build filter object
     const filter = {};
 
     if (status) filter.status = status;
     if (paymentStatus) filter.paymentStatus = paymentStatus;
     if (paymentMethod) filter.paymentMethod = paymentMethod;
 
-    // Date range filter
     if (startDate || endDate) {
       filter.createdAt = {};
       if (startDate) filter.createdAt.$gte = new Date(startDate);
       if (endDate) filter.createdAt.$lte = new Date(endDate);
     }
 
-    // Sort configuration
     const sort = {};
     sort[sortBy] = sortOrder === "desc" ? -1 : 1;
 
@@ -99,7 +168,6 @@ const updateOrderStatus = async (req, res) => {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    // Send Notification
     try {
       const notificationService = require('../../../services/notificationService');
       await notificationService.notifyOrderStatus(order.user._id || order.user, order.orderId, status);
@@ -136,7 +204,6 @@ const assignDriver = async (req, res) => {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    // Send Notification
     try {
       const notificationService = require('../../../services/notificationService');
       const driverName = order.driver.name;
@@ -575,5 +642,6 @@ module.exports = {
   getFreshOrders,
   getFreshOrdersNotifications,
   getFreshOrdersStats,
-  getOnlineOrders
+  getOnlineOrders,
+  downloadOrdersByStatusCSV
 };

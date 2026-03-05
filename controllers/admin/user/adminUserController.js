@@ -149,3 +149,76 @@ exports.addMoneyToWallet = async (req, res) => {
     });
   }
 };
+
+exports.downloadUsersByStatusCSV = async (req, res) => {
+  try {
+    const { isVerified, role, hasWallet } = req.query;
+
+    const filter = {};
+    
+    if (isVerified !== undefined) filter.isVerified = isVerified === 'true';
+    if (role) filter.role = role;
+    if (hasWallet !== undefined) {
+      if (hasWallet === 'true') {
+        filter.wallet = { $gt: 0 };
+      } else {
+        filter.wallet = { $lte: 0 };
+      }
+    }
+
+    const users = await User.find(filter)
+      .select("-password -otp -otpExpires -resetPasswordToken -resetPasswordExpires")
+      .sort({ createdAt: -1 });
+
+    if (users.length === 0) {
+      return res.status(404).json({ 
+        success: false,
+        message: "No users found with the specified status" 
+      });
+    }
+
+    const csvHeaders = [
+      'User ID',
+      'Name',
+      'Email',
+      'Phone',
+      'Role',
+      'Verified Status',
+      'Wallet Balance',
+      'Referral Code',
+      'Referral Count',
+      'Avatar',
+      'Created Date',
+      'Updated Date'
+    ];
+
+    const csvRows = users.map(user => [
+      user._id || 'N/A',
+      user.name || 'N/A',
+      user.email || 'N/A',
+      user.phone || 'N/A',
+      user.role || 'user',
+      user.isVerified ? 'Verified' : 'Not Verified',
+      user.wallet || 0,
+      user.referralCode || 'N/A',
+      user.referralCount || 0,
+      user.avatar || 'N/A',
+      user.createdAt ? user.createdAt.toISOString().split('T')[0] : 'N/A',
+      user.updatedAt ? user.updatedAt.toISOString().split('T')[0] : 'N/A'
+    ].map(field => `"${field}"`).join(','));
+
+    const csvContent = [csvHeaders.join(','), ...csvRows].join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="users_${isVerified !== undefined ? (isVerified ? 'verified' : 'unverified') : (role || (hasWallet ? 'with-wallet' : 'without-wallet'))}_${Date.now()}.csv"`);
+    
+    res.send(csvContent);
+  } catch (error) {
+    console.error('Download users CSV error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: "Server error", 
+      error: error.message 
+    });
+  }
+};

@@ -4,7 +4,8 @@ const {
   getProductsAdmin,
   getProductStats,
   getLowStockAlerts,
-  getOutOfStockProducts
+  getOutOfStockProducts,
+  downloadProductsByStatusCSV
 } = require('../../../controllers/product/productController');
 
 // Admin product routes
@@ -12,5 +13,6 @@ router.get('/getall', getProductsAdmin);
 router.get('/stats', getProductStats);
 router.get('/low-stock-alerts', getLowStockAlerts);
 router.get('/out-of-stock', getOutOfStockProducts);
+router.get('/download/csv', downloadProductsByStatusCSV);
 
 module.exports = router;

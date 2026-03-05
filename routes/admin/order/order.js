@@ -11,7 +11,8 @@ const {
   getFreshOrders,
   getFreshOrdersNotifications,
   getOnlineOrders,
-  getFreshOrdersStats
+  getFreshOrdersStats,
+  downloadOrdersByStatusCSV
 } = require("../../../controllers/admin/order/order");
 
 router.get("/getall", getAllOrders);
@@ -35,5 +36,7 @@ router.get("/admin/fresh-orders", getFreshOrders);
 router.get("/admin/fresh-orders/notifications", getFreshOrdersNotifications);
 
 router.get("/admin/fresh-orders/stats", getFreshOrdersStats);
+
+router.get("/download/csv", downloadOrdersByStatusCSV);
 
 module.exports = router;
