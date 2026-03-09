@@ -3,6 +3,7 @@ const Seller = require('../../models/seller');
 const Product = require('../../models/product');
 const Order = require('../../models/order');
 const ShopReview = require('../../models/shopReview');
+const mongoose = require('mongoose');
 const imagekit = require('../../utils/imagekit');
 
 exports.getMyShop = async (req, res) => {
@@ -11,8 +12,8 @@ exports.getMyShop = async (req, res) => {
 
         const shop = await Shop.findOne({ seller: sellerId })
             .populate('seller', 'name email phone businessName gstNumber approvalStatus isActive')
-            .populate('products', 'name price images stockStatus isActive category')
-            .populate('categories', 'name');
+            .populate('categories', 'name')
+            .lean();
 
         if (!shop) {
             return res.status(404).json({
@@ -21,10 +22,234 @@ exports.getMyShop = async (req, res) => {
             });
         }
 
-        res.status(200).json({ success: true, data: shop });
+        // Get detailed product information with sales data
+        const productIds = shop.products || [];
+        const products = await Product.find({ _id: { $in: productIds } })
+            .populate('category', 'name')
+            .select('name price images stockStatus isActive category quantity oldPrice discountPercentage createdAt views')
+            .lean();
+
+        // Get sales data for each product
+        const salesData = await Order.aggregate([
+            { $unwind: '$items' },
+            {
+                $match: {
+                    'items.product': { $in: productIds.map(id => new mongoose.Types.ObjectId(id)) },
+                    status: { $in: ['confirmed', 'picked-up', 'delivered'] }
+                }
+            },
+            {
+                $group: {
+                    _id: '$items.product',
+                    totalSales: { $sum: '$items.quantity' },
+                    totalEarnings: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+                    orderCount: { $sum: 1 },
+                    averageRating: { $avg: '$items.rating' }
+                }
+            }
+        ]);
+
+        // Create a map of product sales data
+        const salesMap = {};
+        salesData.forEach(item => {
+            salesMap[item._id.toString()] = {
+                totalSales: item.totalSales,
+                totalEarnings: item.totalEarnings,
+                orderCount: item.orderCount,
+                averageRating: item.averageRating || 0
+            };
+        });
+
+        // Combine product data with sales data
+        const productsWithDetails = products.map(product => ({
+            ...product,
+            sales: salesMap[product._id.toString()]?.totalSales || 0,
+            earnings: salesMap[product._id.toString()]?.totalEarnings || 0,
+            orderCount: salesMap[product._id.toString()]?.orderCount || 0,
+            averageRating: salesMap[product._id.toString()]?.averageRating || 0,
+            inStock: product.stockStatus === 'in-stock' && product.quantity > 0
+        }));
+
+        // Calculate shop statistics
+        const totalProducts = products.length;
+        const activeProducts = products.filter(p => p.isActive).length;
+        const inStockProducts = products.filter(p => p.inStock).length;
+        const totalSales = products.reduce((sum, p) => sum + p.sales, 0);
+        const totalEarnings = products.reduce((sum, p) => sum + p.earnings, 0);
+        const averageProductRating = products.length > 0 
+            ? products.reduce((sum, p) => sum + (p.averageRating || 0), 0) / products.length 
+            : 0;
+
+        // Get recent orders for the shop
+        const recentOrders = await Order.find({ seller: sellerId })
+            .populate('items.product', 'name images')
+            .populate('user', 'name')
+            .sort({ createdAt: -1 })
+            .limit(5)
+            .select('orderId status finalAmount createdAt items user')
+            .lean();
+
+        // Enhanced shop data
+        const enhancedShop = {
+            ...shop,
+            products: productsWithDetails,
+            statistics: {
+                totalProducts,
+                activeProducts,
+                inStockProducts,
+                outOfStockProducts: totalProducts - inStockProducts,
+                totalSales,
+                totalEarnings,
+                averageProductRating: Math.round(averageProductRating * 10) / 10,
+                totalReviews: shop.rating.totalReviews,
+                shopRating: shop.rating.average,
+                followersCount: shop.followersCount || 0
+            },
+            recentOrders: recentOrders.map(order => ({
+                orderId: order.orderId,
+                status: order.status,
+                amount: order.finalAmount,
+                date: order.createdAt,
+                customerName: order.user?.name || 'Customer',
+                itemCount: order.items?.length || 0
+            }))
+        };
+
+        res.status(200).json({ 
+            success: true, 
+            data: enhancedShop 
+        });
     } catch (error) {
         console.error('getMyShop error:', error);
-        res.status(500).json({ success: false, message: 'Error fetching shop', error: error.message });
+        res.status(500).json({ 
+            success: false, 
+            message: 'Error fetching shop', 
+            error: error.message 
+        });
+    }
+};
+
+// ─── GET: Shop products with pagination and filters ───────────────────────────────
+exports.getShopProducts = async (req, res) => {
+    try {
+        const sellerId = req.seller._id || req.seller.id;
+        const {
+            page = 1,
+            limit = 12,
+            search = '',
+            category,
+            stockStatus,
+            isActive,
+            sortBy = 'createdAt',
+            sortOrder = 'desc'
+        } = req.query;
+
+        // Get shop to verify seller
+        const shop = await Shop.findOne({ seller: sellerId }).select('products');
+        if (!shop) {
+            return res.status(404).json({
+                success: false,
+                message: 'Shop not found'
+            });
+        }
+
+        const productIds = shop.products || [];
+        const filter = { _id: { $in: productIds } };
+
+        // Apply filters
+        if (search) {
+            filter.$or = [
+                { name: { $regex: search, $options: 'i' } },
+                { description: { $regex: search, $options: 'i' } },
+                { brand: { $regex: search, $options: 'i' } }
+            ];
+        }
+        if (category) {
+            filter.category = category;
+        }
+        if (stockStatus) {
+            filter.stockStatus = stockStatus;
+        }
+        if (isActive !== undefined) {
+            filter.isActive = isActive === 'true';
+        }
+
+        const sort = {};
+        sort[sortBy] = sortOrder === 'desc' ? -1 : 1;
+
+        const products = await Product.find(filter)
+            .populate('category', 'name')
+            .sort(sort)
+            .limit(parseInt(limit))
+            .skip((parseInt(page) - 1) * parseInt(limit))
+            .lean();
+
+        // Get sales data for products
+        const salesData = await Order.aggregate([
+            { $unwind: '$items' },
+            {
+                $match: {
+                    'items.product': { $in: productIds.map(id => new mongoose.Types.ObjectId(id)) },
+                    status: { $in: ['confirmed', 'picked-up', 'delivered'] }
+                }
+            },
+            {
+                $group: {
+                    _id: '$items.product',
+                    totalSales: { $sum: '$items.quantity' },
+                    totalEarnings: { $sum: { $multiply: ['$items.price', '$items.quantity'] } },
+                    orderCount: { $sum: 1 }
+                }
+            }
+        ]);
+
+        const salesMap = {};
+        salesData.forEach(item => {
+            salesMap[item._id.toString()] = {
+                totalSales: item.totalSales,
+                totalEarnings: item.totalEarnings,
+                orderCount: item.orderCount
+            };
+        });
+
+        // Add sales data to products
+        const productsWithSales = products.map(product => ({
+            ...product,
+            sales: salesMap[product._id.toString()]?.totalSales || 0,
+            earnings: salesMap[product._id.toString()]?.totalEarnings || 0,
+            orderCount: salesMap[product._id.toString()]?.orderCount || 0,
+            inStock: product.stockStatus === 'in-stock' && product.quantity > 0
+        }));
+
+        const total = await Product.countDocuments(filter);
+
+        res.status(200).json({
+            success: true,
+            data: productsWithSales,
+            pagination: {
+                currentPage: parseInt(page),
+                totalPages: Math.ceil(total / limit),
+                totalProducts: total,
+                hasNext: page * limit < total,
+                hasPrev: page > 1,
+                limit: parseInt(limit)
+            },
+            filters: {
+                search,
+                category,
+                stockStatus,
+                isActive,
+                sortBy,
+                sortOrder
+            }
+        });
+    } catch (error) {
+        console.error('getShopProducts error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching shop products',
+            error: error.message
+        });
     }
 };
 

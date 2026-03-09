@@ -5,6 +5,7 @@ const upload = require('../../middlewares/upload');
 
 const {
     getMyShop,
+    getShopProducts,
     updateMyShop,
     getShopAnalytics,
     getMyShopReviews,
@@ -13,12 +14,10 @@ const {
     toggleShopStatus,
 } = require('../../controllers/seller/shop');
 
-// ─── All routes require seller authentication ─────────────────────────────────
-
-// Get my shop profile
 router.get('/', sellerAuth, getMyShop);
 
-// Update my shop profile (logo + coverImage via multipart)
+router.get('/products', sellerAuth, getShopProducts);
+
 router.put(
     '/',
     sellerAuth,
@@ -29,19 +28,14 @@ router.put(
     updateMyShop
 );
 
-// Shop analytics / dashboard
 router.get('/analytics', sellerAuth, getShopAnalytics);
 
-// Shop orders (with filters & pagination)
 router.get('/orders', sellerAuth, getShopOrders);
 
-// Shop reviews (seller view)
 router.get('/reviews', sellerAuth, getMyShopReviews);
 
-// Respond to a review
 router.post('/reviews/:reviewId/respond', sellerAuth, respondToReview);
 
-// Toggle shop open/closed (vacation mode)
 router.patch('/toggle-status', sellerAuth, toggleShopStatus);
 
 module.exports = router;
