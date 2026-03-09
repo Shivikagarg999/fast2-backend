@@ -331,6 +331,25 @@ const createProduct = async (req, res) => {
       { new: true }
     );
 
+    // ── Sync product into the seller's Shop ────────────────────────────────────
+    const Shop = require('../../models/shop');
+    const shop = await Shop.findOne({ seller: seller._id });
+    let shopId = null;
+    if (shop) {
+      shop.products.push(newProduct._id);
+      shop.analytics.totalProductsListed = shop.products.length;
+      // Add category to shop categories if not already listed
+      if (categoryId && !shop.categories.some((c) => c.toString() === categoryId.toString())) {
+        shop.categories.push(categoryId);
+      }
+      await shop.save();
+      shopId = shop._id;
+    }
+
+    // Update product with shop reference
+    newProduct.shop = shopId;
+    await newProduct.save();
+
     res.status(201).json({
       success: true,
       message: 'Product created successfully',
@@ -697,6 +716,57 @@ const updateProduct = async (req, res) => {
         success: false,
         message: 'Product not found after update'
       });
+    }
+
+    // ── Sync product changes with seller's Shop ────────────────────────────────────
+    const Shop = require('../../models/shop');
+    
+    // Handle seller change - remove from old seller's shop and add to new seller's shop
+    if (req.body.seller && existingProduct.seller.toString() !== sellerId.toString()) {
+      // Remove from old seller's shop
+      const oldShop = await Shop.findOne({ seller: existingProduct.seller });
+      if (oldShop) {
+        oldShop.products = oldShop.products.filter(p => p.toString() !== productId);
+        oldShop.analytics.totalProductsListed = oldShop.products.length;
+        await oldShop.save();
+      }
+      
+      // Add to new seller's shop
+      const newShop = await Shop.findOne({ seller: sellerId });
+      let newShopId = null;
+      if (newShop) {
+        newShop.products.push(productId);
+        newShop.analytics.totalProductsListed = newShop.products.length;
+        // Add category to shop categories if not already listed
+        if (categoryId && !newShop.categories.some((c) => c.toString() === categoryId.toString())) {
+          newShop.categories.push(categoryId);
+        }
+        await newShop.save();
+        newShopId = newShop._id;
+      }
+      
+      // Update product with new shop reference
+      await Product.findByIdAndUpdate(productId, { shop: newShopId });
+    } else {
+      // Same seller, just update category if changed
+      if (req.body.category && existingProduct.category.toString() !== categoryId.toString()) {
+        const shop = await Shop.findOne({ seller: sellerId });
+        if (shop) {
+          // Add new category to shop categories if not already listed
+          if (categoryId && !shop.categories.some((c) => c.toString() === categoryId.toString())) {
+            shop.categories.push(categoryId);
+            await shop.save();
+          }
+        }
+      }
+      
+      // Ensure product has shop reference set
+      if (!existingProduct.shop) {
+        const shop = await Shop.findOne({ seller: sellerId });
+        if (shop) {
+          await Product.findByIdAndUpdate(productId, { shop: shop._id });
+        }
+      }
     }
 
     res.status(200).json({
@@ -1469,6 +1539,22 @@ const deleteProduct = async (req, res) => {
     const product = await Product.findByIdAndDelete(req.params.id);
     if (!product) return res.status(404).json({ message: 'Product not found' });
 
+    // Remove product from seller's products array
+    await Seller.findByIdAndUpdate(
+      product.seller,
+      { $pull: { products: product._id } },
+      { new: true }
+    );
+
+    // Remove product from seller's shop
+    const Shop = require('../../models/shop');
+    const shop = await Shop.findOne({ seller: product.seller });
+    if (shop) {
+      shop.products = shop.products.filter(p => p.toString() !== product._id.toString());
+      shop.analytics.totalProductsListed = shop.products.length;
+      await shop.save();
+    }
+
     res.json({ message: 'Product deleted successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -1769,6 +1855,188 @@ const downloadProductsByStatusCSV = async (req, res) => {
   }
 };
 
+const downloadProductUploadTemplate = async (req, res) => {
+  try {
+    const templateHeaders = [
+      'Product Name',
+      'Description',
+      'Brand',
+      'Category',
+      'Price',
+      'Old Price',
+      'Discount Percentage',
+      'HSN Code',
+      'GST Percent',
+      'Tax Type',
+      'Unit',
+      'Unit Value',
+      'Promotor ID',
+      'Promotor Commission Rate',
+      'Promotor Commission Type',
+      'Promotor Commission Amount',
+      'Quantity',
+      'Stock Status',
+      'Active Status',
+      'Low Stock Threshold',
+      'Min Order Quantity',
+      'Max Order Quantity',
+      'Weight',
+      'Weight Unit',
+      'SKU',
+      'Seller',
+      'Warehouse',
+      'Storage Type',
+      'Estimated Delivery Time',
+      'Delivery Charges',
+      'Free Delivery Threshold',
+      'Serviceable Pincodes',
+      'Image 1',
+      'Image 2',
+      'Image 3',
+      'Image 4',
+      'Image 5',
+      'Video'
+    ];
+
+    const templateRows = [
+      [
+        '"Fresh Tomato"',
+        '"Fresh and juicy tomatoes perfect for salads and cooking"',
+        '"Farm Fresh"',
+        '"Vegetables"',
+        '"25"',
+        '"50"',
+        '"10"',
+        '"12345"',
+        '"5"',
+        '"inclusive"',
+        '"piece"',
+        '"1"',
+        '""',
+        '"5"',
+        '"percentage"',
+        '"0"',
+        '"100"',
+        '"in-stock"',
+        '"Active"',
+        '"10"',
+        '"1"',
+        '"10"',
+        '"500"',
+        '"g"',
+        '"TOMATO001"',
+        '"Thakuri Prasad"',
+        '"Main Warehouse"',
+        '"ambient"',
+        '"2-3 days"',
+        '"0"',
+        '"500"',
+        '"110001;110002;110003"',
+        '"https://example.com/tomato1.jpg"',
+        '"https://example.com/tomato2.jpg"',
+        '"https://example.com/tomato3.jpg"',
+        '""',
+        '""',
+        '"https://example.com/video.mp4"'
+      ],
+      [
+        '"Organic Apple"',
+        '"Crisp and sweet organic apples"',
+        '"Nature\'s Best"',
+        '"Fruits"',
+        '"80"',
+        '"100"',
+        '"20"',
+        '"67890"',
+        '"12"',
+        '"inclusive"',
+        '"kg"',
+        '"1"',
+        '""',
+        '"5"',
+        '"percentage"',
+        '"0"',
+        '"50"',
+        '"in-stock"',
+        '"Active"',
+        '"10"',
+        '"1"',
+        '"10"',
+        '"1000"',
+        '"g"',
+        '"APPLE001"',
+        '"Shivika Garg"',
+        '"Main Warehouse"',
+        '"cold-storage"',
+        '"1-2 days"',
+        '"10"',
+        '"1000"',
+        '"110004;110005;110006"',
+        '"https://example.com/apple1.jpg"',
+        '"https://example.com/apple2.jpg"',
+        '""',
+        '""',
+        '""',
+        '""'
+      ],
+      [
+        '"Whole Wheat Bread"',
+        '"Healthy whole wheat bread for daily consumption"',
+        '"Bakery Fresh"',
+        '"Bakery Items"',
+        '"40"',
+        '"60"',
+        '"0"',
+        '"54321"',
+        '"0"',
+        '"inclusive"',
+        '"piece"',
+        '"1"',
+        '""',
+        '"5"',
+        '"percentage"',
+        '"0"',
+        '"0"',
+        '"out-of-stock"',
+        '"Active"',
+        '"5"',
+        '"1"',
+        '"10"',
+        '"500"',
+        '"g"',
+        '"BREAD001"',
+        '"Rajesh Kumar"',
+        '"Main Warehouse"',
+        '"ambient"',
+        '"1 day"',
+        '"20"',
+        '"800"',
+        '"110007;110008"',
+        '"https://example.com/bread1.jpg"',
+        '"https://example.com/bread2.jpg"',
+        '""',
+        '""',
+        '""',
+        '""'
+      ]
+    ];
+
+    const csvContent = [templateHeaders.join(','), ...templateRows.map(row => row.join(','))].join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="product_upload_template.csv"');
+    
+    res.send(csvContent);
+  } catch (error) {
+    console.error('Download template error:', error);
+    res.status(500).json({ 
+      success: false,
+      message: "Server error generating template", 
+      error: error.message 
+    });
+  }
+};
+
 const uploadProductsCSV = async (req, res) => {
   try {
     if (!req.file) {
@@ -1791,7 +2059,7 @@ const uploadProductsCSV = async (req, res) => {
 
     // Parse CSV headers
     const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-    
+
     // Expected headers (case-insensitive)
     const expectedHeaders = [
       'Product Name',
@@ -1799,6 +2067,17 @@ const uploadProductsCSV = async (req, res) => {
       'Brand',
       'Category',
       'Price',
+      'Old Price',
+      'Discount Percentage',
+      'HSN Code',
+      'GST Percent',
+      'Tax Type',
+      'Unit',
+      'Unit Value',
+      'Promotor ID',
+      'Promotor Commission Rate',
+      'Promotor Commission Type',
+      'Promotor Commission Amount',
       'Quantity',
       'Stock Status',
       'Active Status',
@@ -1815,7 +2094,11 @@ const uploadProductsCSV = async (req, res) => {
       'Delivery Charges',
       'Free Delivery Threshold',
       'Serviceable Pincodes',
-      'Images',
+      'Image 1',
+      'Image 2',
+      'Image 3',
+      'Image 4',
+      'Image 5',
       'Video'
     ];
 
@@ -1845,13 +2128,29 @@ const uploadProductsCSV = async (req, res) => {
       if (!row.trim()) continue;
 
       const values = row.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
-      
+
       try {
+        // Collect images from separate columns
+        const images = [];
+        for (let imgNum = 1; imgNum <= 5; imgNum++) {
+          const imageUrl = values[getHeaderIndex(`Image ${imgNum}`)]?.trim();
+          if (imageUrl) {
+            images.push({ url: imageUrl });
+          }
+        }
+
         const productData = {
           name: values[getHeaderIndex('Product Name')] || '',
           description: values[getHeaderIndex('Description')] || '',
           brand: values[getHeaderIndex('Brand')] || '',
           price: parseFloat(values[getHeaderIndex('Price')]) || 0,
+          oldPrice: parseFloat(values[getHeaderIndex('Old Price')]) || 0,
+          discountPercentage: parseFloat(values[getHeaderIndex('Discount Percentage')]) || 0,
+          hsnCode: values[getHeaderIndex('HSN Code')] || '',
+          gstPercent: parseFloat(values[getHeaderIndex('GST Percent')]) || 0,
+          taxType: values[getHeaderIndex('Tax Type')] || 'inclusive',
+          unit: values[getHeaderIndex('Unit')] || 'piece',
+          unitValue: parseFloat(values[getHeaderIndex('Unit Value')]) || 1,
           quantity: parseInt(values[getHeaderIndex('Quantity')]) || 0,
           stockStatus: values[getHeaderIndex('Stock Status')] || 'out-of-stock',
           isActive: values[getHeaderIndex('Active Status')]?.toLowerCase() === 'active',
@@ -1867,46 +2166,118 @@ const uploadProductsCSV = async (req, res) => {
           freeDeliveryThreshold: parseFloat(values[getHeaderIndex('Free Delivery Threshold')]) || 0,
           serviceablePincodes: values[getHeaderIndex('Serviceable Pincodes')] ? 
             values[getHeaderIndex('Serviceable Pincodes')].split(';').filter(p => p.trim()) : [],
-          images: values[getHeaderIndex('Images')] ? 
-            values[getHeaderIndex('Images')].split(';').filter(img => img.trim()) : [],
+          images: images,
           video: values[getHeaderIndex('Video')] || null
         };
 
-        // Find category
-        if (productData.category) {
-          const category = await Category.findOne({ 
-            name: { $regex: productData.category, $options: 'i' } 
+        // Find or create category
+        const categoryName = values[getHeaderIndex('Category')]?.trim();
+        if (categoryName) {
+          let category = await Category.findOne({ 
+            name: { $regex: categoryName, $options: 'i' } 
           });
-          if (category) {
-            productData.category = category._id;
-          } else {
-            errors.push(`Row ${i + 1}: Category "${productData.category}" not found`);
+          if (!category) {
+            // Create category if not found
+            category = await Category.create({
+              name: categoryName,
+              description: `${categoryName} category`,
+              isActive: true
+            });
           }
+          productData.category = category._id;
+        } else {
+          errors.push(`Row ${i + 1}: Category is required`);
+          continue;
         }
 
-        // Find seller
-        if (productData.seller) {
-          const seller = await Seller.findOne({ 
-            name: { $regex: productData.seller, $options: 'i' } 
+        // Find or create seller
+        const sellerName = values[getHeaderIndex('Seller')]?.trim();
+        if (sellerName) {
+          let seller = await Seller.findOne({ 
+            name: { $regex: sellerName, $options: 'i' } 
           });
-          if (seller) {
-            productData.seller = seller._id;
-          } else {
-            errors.push(`Row ${i + 1}: Seller "${productData.seller}" not found`);
+          if (!seller) {
+            // Get or create default promotor for seller
+            let defaultPromotor = await Promotor.findOne({ email: 'default@promotor.com' });
+            if (!defaultPromotor) {
+              defaultPromotor = await Promotor.create({
+                name: 'Default Promotor',
+                email: 'default@promotor.com',
+                phone: '0000000000',
+                address: {
+                  city: 'Default City',
+                  street: 'Default Street',
+                  state: 'Default State',
+                  pincode: '000000',
+                  coordinates: { lat: 0, lng: 0 }
+                },
+                commissionRate: 5,
+                password: 'default123'
+              });
+            }
+            
+            // Create seller if not found
+            seller = await Seller.create({
+              name: sellerName,
+              email: sellerName.toLowerCase().replace(/\s+/g, '.') + '@example.com',
+              phone: '0000000000',
+              businessName: `${sellerName} Business`,
+              promotor: defaultPromotor._id,
+              password: 'default123',
+              approvalStatus: 'approved'
+            });
           }
+          productData.seller = seller._id;
         }
 
-        // Find warehouse
-        if (productData.warehouse) {
-          const warehouse = await Warehouse.findOne({ 
-            name: { $regex: productData.warehouse, $options: 'i' } 
+        // Find or create warehouse
+        const warehouseName = values[getHeaderIndex('Warehouse')]?.trim();
+        if (warehouseName) {
+          let warehouse = await Warehouse.findOne({ 
+            name: { $regex: warehouseName, $options: 'i' } 
           });
-          if (warehouse) {
-            productData.warehouseId = warehouse._id;
-            productData.warehouseCode = warehouse.code;
-          } else {
-            errors.push(`Row ${i + 1}: Warehouse "${productData.warehouse}" not found`);
+          if (!warehouse) {
+            // Create a default promotor first
+            let defaultPromotor = await Promotor.findOne({ email: 'default@promotor.com' });
+            if (!defaultPromotor) {
+              defaultPromotor = await Promotor.create({
+                name: 'Default Promotor',
+                email: 'default@promotor.com',
+                phone: '0000000000',
+                address: {
+                  city: 'Default City',
+                  street: 'Default Street',
+                  state: 'Default State',
+                  pincode: '000000',
+                  coordinates: { lat: 0, lng: 0 }
+                },
+                commissionRate: 5,
+                password: 'default123'
+              });
+            }
+            
+            // Create warehouse if not found
+            warehouse = await Warehouse.create({
+              name: warehouseName,
+              code: warehouseName.toUpperCase().replace(/\s+/g, '_'),
+              location: {
+                address: 'Default Address',
+                city: 'Default City',
+                state: 'Default State',
+                pincode: '000000',
+                coordinates: {
+                  lng: 0,
+                  lat: 0
+                }
+              },
+              promotor: defaultPromotor._id,
+              isActive: true,
+              capacity: 10000,
+              currentStock: 0
+            });
           }
+          productData.warehouseId = warehouse._id;
+          productData.warehouseCode = warehouse.code;
         }
 
         // Set default values
@@ -1928,6 +2299,10 @@ const uploadProductsCSV = async (req, res) => {
           thumbnail: '',
           duration: '',
           fileSize: ''
+        };
+        productData.promotor = {
+          id: null,
+          commission: 0
         };
 
         results.push(productData);
@@ -1969,7 +2344,8 @@ const uploadProductsCSV = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Server error during CSV import',
-      error: error.message
+      error: error.message,
+      data: null
     });
   }
 };
@@ -1996,5 +2372,6 @@ module.exports = {
   toggleProductActiveStatus,
   getProductActiveStatus,
   downloadProductsByStatusCSV,
+  downloadProductUploadTemplate,
   uploadProductsCSV
 };

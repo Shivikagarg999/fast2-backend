@@ -27,6 +27,10 @@ const productSchema = new mongoose.Schema({
         type: mongoose.Schema.Types.ObjectId,
         ref: 'Seller',
       },
+  shop: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Shop',
+  },
   quantity: { type: Number, default: 0 },
   minOrderQuantity: { type: Number, default: 1 },
   maxOrderQuantity: { type: Number, default: 10 },

@@ -7,6 +7,7 @@ const {
   getLowStockAlerts,
   getOutOfStockProducts,
   downloadProductsByStatusCSV,
+  downloadProductUploadTemplate,
   uploadProductsCSV
 } = require('../../../controllers/product/productController');
 
@@ -31,6 +32,7 @@ router.get('/stats', getProductStats);
 router.get('/low-stock-alerts', getLowStockAlerts);
 router.get('/out-of-stock', getOutOfStockProducts);
 router.get('/download/csv', downloadProductsByStatusCSV);
+router.get('/download/template', downloadProductUploadTemplate);
 router.post('/upload/csv', upload.single('csvFile'), uploadProductsCSV);
 
 module.exports = router;

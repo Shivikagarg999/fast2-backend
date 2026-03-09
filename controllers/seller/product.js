@@ -194,6 +194,10 @@ exports.addProduct = async (req, res) => {
         shop.categories.push(categoryId);
       }
       await shop.save();
+      
+      // Update product with shop reference
+      newProduct.shop = shop._id;
+      await newProduct.save();
     }
 
 
