@@ -201,8 +201,26 @@ exports.updateShop = async (req, res) => {
             }
 
             // 4. Propagate seller change to all products belonging to this shop
+            const shopProducts = await Product.find({ shop: shop._id }).select('_id');
+            const productIds = shopProducts.map(p => p._id);
+
             await Product.updateMany({ shop: shop._id }, { $set: { seller: newSellerId } });
-            console.log(`Updated all products for shop ${shop._id} to new seller ${newSellerId}`);
+            console.log(`Updated all ${productIds.length} products for shop ${shop._id} to new seller ${newSellerId}`);
+
+            // 5. Sync product arrays in Seller objects
+            if (productIds.length > 0) {
+                // Remove from old seller
+                if (oldSellerId) {
+                    await Seller.findByIdAndUpdate(oldSellerId, { 
+                        $pull: { products: { $in: productIds } } 
+                    });
+                }
+                // Add to new seller
+                await Seller.findByIdAndUpdate(newSellerId, { 
+                    $addToSet: { products: { $each: productIds } } 
+                });
+                console.log(`Synced products array from seller ${oldSellerId} to ${newSellerId}`);
+            }
         }
         
         console.log('Shop object after update but before save:', {
