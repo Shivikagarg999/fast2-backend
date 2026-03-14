@@ -24,6 +24,7 @@ router.put(
     upload.fields([
         { name: 'logo', maxCount: 1 },
         { name: 'coverImage', maxCount: 1 },
+        { name: 'video', maxCount: 1 },
     ]),
     updateMyShop
 );

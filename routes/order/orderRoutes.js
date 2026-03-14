@@ -2,8 +2,9 @@ const express = require("express");
 const router = express.Router();
 const orderController = require("../../controllers/order/order");
 const auth = require("../../middlewares/userauth");
+const upload = require("../../middlewares/upload");
 
-router.post("/create", auth, orderController.createOrder);
+router.post("/create", auth, upload.single("prescriptionImage"), orderController.createOrder);
 router.post("/verify-payment", auth, orderController.verifyRazorpayPayment);
 router.get("/:orderId/payment-status", auth, orderController.checkPaymentStatus);
 router.get("/:orderId/razorpay-details", auth, orderController.getRazorpayOrder);

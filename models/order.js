@@ -147,6 +147,10 @@ const orderSchema = new mongoose.Schema(
         serviceFee: { type: Number, default: 0 },
         gstCollection: { type: Number, default: 0 }
       }
+    },
+    prescriptionImage: {
+      url: { type: String, default: '' },
+      fileId: { type: String, default: '' }
     }
   },
   { timestamps: true }

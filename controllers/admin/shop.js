@@ -1,6 +1,7 @@
 const Shop = require('../../models/shop');
 const Product = require('../../models/product');
 const mongoose = require('mongoose');
+const imagekit = require('../../utils/imagekit');
 
 // ─── POST: Create a new shop ──────────────────────────────────────────────────
 exports.createShop = async (req, res) => {
@@ -17,7 +18,8 @@ exports.createShop = async (req, res) => {
             isOpen,
             isActive,
             isVerified,
-            socialLinks
+            socialLinks,
+            shopType
         } = req.body;
 
         if (!seller || !shopName) {
@@ -42,10 +44,14 @@ exports.createShop = async (req, res) => {
             isOpen,
             isActive,
             isVerified,
-            socialLinks
+            socialLinks,
+            shopType
         });
 
         await newShop.save();
+
+        // Link shop to seller
+        await Seller.findByIdAndUpdate(seller, { shop: newShop._id });
 
         res.status(201).json({
             success: true,
@@ -138,20 +144,104 @@ exports.getShopDetails = async (req, res) => {
 exports.updateShop = async (req, res) => {
     try {
         const { id } = req.params;
-        const updateData = req.body;
-
-        // Prevent direct update of sensitive fields if any, or handle them specifically
-        delete updateData.seller; // Seller cannot be changed once shop is created
-
-        const shop = await Shop.findByIdAndUpdate(
-            id,
-            { $set: updateData },
-            { new: true, runValidators: true }
-        );
-
+        
+        const shop = await Shop.findById(id);
         if (!shop) {
             return res.status(404).json({ success: false, message: 'Shop not found' });
         }
+
+        const allowedFields = [
+            'shopName',
+            'description',
+            'tagline',
+            'contactEmail',
+            'contactPhone',
+            'address',
+            'returnPolicy',
+            'shippingPolicy',
+            'socialLinks',
+            'isOpen',
+            'isActive',
+            'isVerified',
+            'shopType'
+        ];
+
+        console.log(`--- Admin Update Shop ${id} ---`);
+        console.log('Incoming fields:', Object.keys(req.body));
+        console.log('shopType in body:', req.body.shopType);
+
+        for (const field of allowedFields) {
+            if (req.body[field] !== undefined) {
+                console.log(`Updating field: ${field} with value:`, req.body[field]);
+                if (typeof req.body[field] === 'string') {
+                    try {
+                        const parsed = JSON.parse(req.body[field]);
+                        shop[field] = parsed;
+                    } catch {
+                        shop[field] = req.body[field];
+                    }
+                } else {
+                    shop[field] = req.body[field];
+                }
+            }
+        }
+        
+        console.log('Shop object after update but before save:', {
+            shopName: shop.shopName,
+            shopType: shop.shopType,
+            isModified: shop.isModified('shopType')
+        });
+
+        // Handle logo upload
+        if (req.files && req.files.logo && req.files.logo[0]) {
+            const logoFile = req.files.logo[0];
+            try {
+                const uploadedLogo = await imagekit.upload({
+                    file: logoFile.buffer.toString('base64'),
+                    fileName: `shop_logo_admin_${id}_${Date.now()}.jpg`,
+                    folder: '/shops/logos',
+                    useUniqueFileName: true,
+                });
+                shop.logo = { url: uploadedLogo.url, fileId: uploadedLogo.fileId };
+            } catch (err) {
+                console.error('Admin logo upload error:', err);
+            }
+        }
+
+        // Handle cover image upload
+        if (req.files && req.files.coverImage && req.files.coverImage[0]) {
+            const coverFile = req.files.coverImage[0];
+            try {
+                const uploadedCover = await imagekit.upload({
+                    file: coverFile.buffer.toString('base64'),
+                    fileName: `shop_cover_admin_${id}_${Date.now()}.jpg`,
+                    folder: '/shops/covers',
+                    useUniqueFileName: true,
+                });
+                shop.coverImage = { url: uploadedCover.url, fileId: uploadedCover.fileId };
+            } catch (err) {
+                console.error('Admin cover image upload error:', err);
+            }
+        }
+
+        // Handle video upload
+        if (req.files && req.files.video && req.files.video[0]) {
+            const videoFile = req.files.video[0];
+            try {
+                const uploadedVideo = await imagekit.upload({
+                    file: videoFile.buffer.toString('base64'),
+                    fileName: `shop_video_admin_${id}_${Date.now()}.mp4`,
+                    folder: '/shops/videos',
+                    useUniqueFileName: true,
+                    resourceType: 'video',
+                });
+                shop.video = { url: uploadedVideo.url, fileId: uploadedVideo.fileId };
+            } catch (err) {
+                console.error('Admin video upload error:', err);
+            }
+        }
+
+        await shop.save();
 
         res.status(200).json({
             success: true,

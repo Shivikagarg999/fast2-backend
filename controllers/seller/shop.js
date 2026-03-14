@@ -76,8 +76,8 @@ exports.getMyShop = async (req, res) => {
         const inStockProducts = products.filter(p => p.inStock).length;
         const totalSales = products.reduce((sum, p) => sum + p.sales, 0);
         const totalEarnings = products.reduce((sum, p) => sum + p.earnings, 0);
-        const averageProductRating = products.length > 0 
-            ? products.reduce((sum, p) => sum + (p.averageRating || 0), 0) / products.length 
+        const averageProductRating = products.length > 0
+            ? products.reduce((sum, p) => sum + (p.averageRating || 0), 0) / products.length
             : 0;
 
         // Get recent orders for the shop
@@ -115,16 +115,16 @@ exports.getMyShop = async (req, res) => {
             }))
         };
 
-        res.status(200).json({ 
-            success: true, 
-            data: enhancedShop 
+        res.status(200).json({
+            success: true,
+            data: enhancedShop
         });
     } catch (error) {
         console.error('getMyShop error:', error);
-        res.status(500).json({ 
-            success: false, 
-            message: 'Error fetching shop', 
-            error: error.message 
+        res.status(500).json({
+            success: false,
+            message: 'Error fetching shop',
+            error: error.message
         });
     }
 };
@@ -274,6 +274,7 @@ exports.updateMyShop = async (req, res) => {
             'shippingPolicy',
             'socialLinks',
             'isOpen',
+            'shopType',
         ];
 
         for (const field of allowedFields) {
@@ -320,6 +321,23 @@ exports.updateMyShop = async (req, res) => {
                 shop.coverImage = { url: uploadedCover.url, fileId: uploadedCover.fileId };
             } catch (err) {
                 console.error('Cover image upload error:', err);
+            }
+        }
+
+        // Handle video upload
+        if (req.files && req.files.video && req.files.video[0]) {
+            const videoFile = req.files.video[0];
+            try {
+                const uploadedVideo = await imagekit.upload({
+                    file: videoFile.buffer.toString('base64'),
+                    fileName: `shop_video_${sellerId}_${Date.now()}.mp4`,
+                    folder: '/shops/videos',
+                    useUniqueFileName: true,
+                    resourceType: 'video', // Added resourceType for video
+                });
+                shop.video = { url: uploadedVideo.url, fileId: uploadedVideo.fileId };
+            } catch (err) {
+                console.error('Video upload error:', err);
             }
         }
 

@@ -38,6 +38,15 @@ const shopSchema = new mongoose.Schema(
             url: { type: String, default: '' },
             fileId: { type: String, default: '' },
         },
+        video: {
+            url: { type: String, default: '' },
+            fileId: { type: String, default: '' },
+        },
+        shopType: {
+            type: String,
+            enum: ['general', 'medical'],
+            default: 'general',
+        },
 
         // ─── Contact & Location ───────────────────────────────────────────────────
         contactEmail: { type: String },

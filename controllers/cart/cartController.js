@@ -4,13 +4,25 @@ const Product = require("../../models/product");
 // Get user's cart
 const getCart = async (req, res) => {
   try {
-    const cart = await Cart.findOne({ user: req.user._id }).populate("items.product");
+    const cart = await Cart.findOne({ user: req.user._id }).populate({
+      path: "items.product",
+      populate: [
+        { path: "shop" },
+        { path: "seller", populate: { path: "shop" } }
+      ]
+    });
     
     if (!cart) {
       return res.status(200).json({ items: [], total: 0 });
     }
     
     res.status(200).json(cart);
+    console.log('--- Cart Fetch for Checkout ---');
+    console.log('Cart Items with Population:', cart.items.map(item => ({
+      product: item.product?._id,
+      shopType: item.product?.shop?.shopType,
+      sellerShopType: item.product?.seller?.shop?.shopType
+    })));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -81,7 +93,13 @@ const addToCart = async (req, res) => {
     }
     
     await cart.save();
-    await cart.populate("items.product");
+    await cart.populate({
+      path: "items.product",
+      populate: [
+        { path: "shop" },
+        { path: "seller", populate: { path: "shop" } }
+      ]
+    });
     
     res.status(200).json(cart);
   } catch (error) {
@@ -139,7 +157,13 @@ const updateCartItem = async (req, res) => {
     
     cart.items[itemIndex].quantity = quantity;
     await cart.save();
-    await cart.populate("items.product");
+    await cart.populate({
+      path: "items.product",
+      populate: [
+        { path: "shop" },
+        { path: "seller", populate: { path: "shop" } }
+      ]
+    });
     
     res.status(200).json(cart);
   } catch (error) {
@@ -162,7 +186,13 @@ const removeFromCart = async (req, res) => {
     );
     
     await cart.save();
-    await cart.populate("items.product");
+    await cart.populate({
+      path: "items.product",
+      populate: [
+        { path: "shop" },
+        { path: "seller", populate: { path: "shop" } }
+      ]
+    });
     
     res.status(200).json(cart);
   } catch (error) {

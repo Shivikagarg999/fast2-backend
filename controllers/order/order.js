@@ -6,6 +6,8 @@ const Promotor = require('../../models/promotor');
 const Payout = require('../../models/payout');
 const mongoose = require('mongoose');
 const Razorpay = require('razorpay');
+const imagekit = require('../../utils/imagekit');
+const Shop = require('../../models/shop');
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -17,13 +19,29 @@ exports.createOrder = async (req, res) => {
   session.startTransaction();
 
   try {
-    const {
+    let {
       items,
       shippingAddress,
       paymentMethod = "cod",
       useWallet = false,
       coupon
     } = req.body;
+
+    // Parse stringified JSON if sent via FormData
+    if (typeof items === 'string') {
+      try {
+        items = JSON.parse(items);
+      } catch (e) {
+        console.error("Failed to parse items:", e);
+      }
+    }
+    if (typeof shippingAddress === 'string') {
+      try {
+        shippingAddress = JSON.parse(shippingAddress);
+      } catch (e) {
+        console.error("Failed to parse shippingAddress:", e);
+      }
+    }
 
     const userId = req.user._id;
 
@@ -61,8 +79,65 @@ exports.createOrder = async (req, res) => {
       _id: { $in: productIds }
     })
       .populate('seller')
+      .populate('shop')
       .populate('promotor.id')
       .session(session);
+
+    // Check if any product belongs to a medical shop
+    const sellerIds = [...new Set(products.map(p => p.seller?._id || p.seller).filter(id => id))];
+    const shops = await Shop.find({ seller: { $in: sellerIds } });
+    const medicalSellerIds = shops.filter(s => s.shopType === 'medical').map(s => s.seller.toString());
+
+    console.log('--- Order Prescription Check ---');
+    console.log('Items in order:', items);
+    console.log('Products found:', products.length);
+    console.log('Seller IDs from products:', sellerIds);
+    console.log('Shops found for those sellers:', shops.map(s => ({ id: s._id, seller: s.seller, type: s.shopType })));
+    console.log('Medical Seller IDs:', medicalSellerIds);
+
+    const involvesMedicalShop = products.some(p => {
+      const isDirectShopMedical = p.shop && p.shop.shopType === 'medical';
+      const sellerIdStr = (p.seller?._id || p.seller)?.toString();
+      const isSellerShopMedical = sellerIdStr && medicalSellerIds.includes(sellerIdStr);
+      console.log(`Product ${p._id}: directMedical=${isDirectShopMedical}, sellerMedical=${isSellerShopMedical} (Seller: ${sellerIdStr})`);
+      return isDirectShopMedical || isSellerShopMedical;
+    });
+
+    console.log('Involves medical shop (robust check):', involvesMedicalShop);
+    console.log('Received file:', req.file ? { fieldname: req.file.fieldname, originalname: req.file.originalname } : 'None');
+
+    if (involvesMedicalShop && (!req.file || req.file.fieldname !== 'prescriptionImage')) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        error: "Prescription image is required for products from medical shops"
+      });
+    }
+
+    let uploadedPrescription = null;
+    if (involvesMedicalShop && req.file) {
+      try {
+        const uploadResult = await imagekit.upload({
+          file: req.file.buffer.toString('base64'),
+          fileName: `prescription_${userId}_${Date.now()}.jpg`,
+          folder: '/orders/prescriptions',
+          useUniqueFileName: true
+        });
+        uploadedPrescription = {
+          url: uploadResult.url,
+          fileId: uploadResult.fileId
+        };
+      } catch (uploadError) {
+        await session.abortTransaction();
+        session.endSession();
+        console.error('Prescription upload error:', uploadError);
+        return res.status(500).json({
+          success: false,
+          error: "Failed to upload prescription image"
+        });
+      }
+    }
 
     if (products.length !== items.length) {
       await session.abortTransaction();
@@ -327,7 +402,8 @@ exports.createOrder = async (req, res) => {
         razorpayReceipt: razorpayOrder.receipt,
         razorpayAmount: razorpayOrder.amount,
         razorpayCurrency: razorpayOrder.currency
-      })
+      }),
+      ...(uploadedPrescription && { prescriptionImage: uploadedPrescription })
     });
 
     await order.save({ session });
