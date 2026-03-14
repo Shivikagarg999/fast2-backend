@@ -81,7 +81,9 @@ exports.getSellerOrders = async (req, res) => {
         email: order.user?.email,
         phone: order.user?.phone
       },
-      user: order.user
+      user: order.user,
+      prescriptionImage: order.prescriptionImage,
+      shopType: order.shopType
     }));
 
     res.status(200).json({
@@ -192,7 +194,10 @@ exports.getOrderDetails = async (req, res) => {
       gstOnPlatformFee: populatedOrder.payout?.platform?.gstCollection || 0,
       sellerPayable: populatedOrder.payout?.seller?.payableAmount || 0,
       tdsDeduction: populatedOrder.payout?.seller?.tdsDeduction || 0,
-      netAmount: populatedOrder.payout?.seller?.netAmount || 0
+      netAmount: populatedOrder.payout?.seller?.netAmount || 0,
+      prescriptionImage: populatedOrder.prescriptionImage,
+      shopType: populatedOrder.shopType,
+      instructions: populatedOrder.instructions
     };
 
     res.status(200).json({

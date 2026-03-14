@@ -1,5 +1,6 @@
 const Shop = require('../../models/shop');
 const Product = require('../../models/product');
+const Seller = require('../../models/seller');
 const mongoose = require('mongoose');
 const imagekit = require('../../utils/imagekit');
 
@@ -185,7 +186,6 @@ exports.updateShop = async (req, res) => {
             console.log(`Transferring shop from ${oldSellerId} to ${newSellerId}`);
             
             // 1. Verify new seller exists
-            const Seller = require('../../models/seller'); // Ensure Seller model is available
             const newSeller = await Seller.findById(newSellerId);
             if (!newSeller) {
                 return res.status(404).json({ success: false, message: 'New seller not found' });
@@ -199,6 +199,10 @@ exports.updateShop = async (req, res) => {
             if (oldSellerId) {
                 await Seller.findByIdAndUpdate(oldSellerId, { $unset: { shop: "" } });
             }
+
+            // 4. Propagate seller change to all products belonging to this shop
+            await Product.updateMany({ shop: shop._id }, { $set: { seller: newSellerId } });
+            console.log(`Updated all products for shop ${shop._id} to new seller ${newSellerId}`);
         }
         
         console.log('Shop object after update but before save:', {
