@@ -151,24 +151,18 @@ exports.updateShop = async (req, res) => {
         }
 
         const allowedFields = [
-            'shopName',
-            'description',
-            'tagline',
-            'contactEmail',
-            'contactPhone',
-            'address',
-            'returnPolicy',
-            'shippingPolicy',
-            'socialLinks',
-            'isOpen',
-            'isActive',
-            'isVerified',
-            'shopType'
+            'shopName', 'description', 'tagline', 'contactEmail', 'contactPhone',
+            'address', 'socialLinks', 'isVerified', 'isActive', 'isOpen',
+            'shopType', 'seller'
         ];
 
         console.log(`--- Admin Update Shop ${id} ---`);
         console.log('Incoming fields:', Object.keys(req.body));
         console.log('shopType in body:', req.body.shopType);
+        console.log('seller in body:', req.body.seller);
+
+        const oldSellerId = shop.seller?.toString();
+        const newSellerId = req.body.seller;
 
         for (const field of allowedFields) {
             if (req.body[field] !== undefined) {
@@ -185,11 +179,33 @@ exports.updateShop = async (req, res) => {
                 }
             }
         }
+
+        // --- Seller Transfer Logic ---
+        if (newSellerId && newSellerId !== oldSellerId) {
+            console.log(`Transferring shop from ${oldSellerId} to ${newSellerId}`);
+            
+            // 1. Verify new seller exists
+            const Seller = require('../../models/seller'); // Ensure Seller model is available
+            const newSeller = await Seller.findById(newSellerId);
+            if (!newSeller) {
+                return res.status(404).json({ success: false, message: 'New seller not found' });
+            }
+
+            // 2. Link shop to new seller
+            newSeller.shop = shop._id;
+            await newSeller.save();
+
+            // 3. Unlink shop from old seller (if exists)
+            if (oldSellerId) {
+                await Seller.findByIdAndUpdate(oldSellerId, { $unset: { shop: "" } });
+            }
+        }
         
         console.log('Shop object after update but before save:', {
             shopName: shop.shopName,
             shopType: shop.shopType,
-            isModified: shop.isModified('shopType')
+            seller: shop.seller,
+            isModifiedLabel: shop.isModified('shopType')
         });
 
         // Handle logo upload

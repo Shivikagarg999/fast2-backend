@@ -1807,6 +1807,8 @@ const downloadProductsByStatusCSV = async (req, res) => {
       'Seller',
       'Warehouse',
       'Price',
+      'Old Price',
+      'Discount Percentage',
       'Quantity',
       'Stock Status',
       'Active Status',
@@ -1814,6 +1816,19 @@ const downloadProductsByStatusCSV = async (req, res) => {
       'Min Order Quantity',
       'Max Order Quantity',
       'Weight',
+      'Weight Unit',
+      'Unit',
+      'Unit Value',
+      'HSN Code',
+      'GST Percent',
+      'Tax Type',
+      'Promotor ID',
+      'Commission Rate',
+      'Commission Type',
+      'Estimated Delivery Time',
+      'Delivery Charges',
+      'Free Delivery Threshold',
+      'Serviceable Pincodes',
       'Description',
       'Created Date',
       'Updated Date'
@@ -1827,6 +1842,8 @@ const downloadProductsByStatusCSV = async (req, res) => {
       product.seller?.name || product.seller?.businessName || 'N/A',
       product.warehouse?.id?.name || product.warehouse?.id?.code || 'N/A',
       product.price || 0,
+      product.oldPrice || 0,
+      product.discountPercentage || 0,
       product.quantity || 0,
       product.stockStatus || 'N/A',
       product.isActive ? 'Active' : 'Inactive',
@@ -1834,6 +1851,19 @@ const downloadProductsByStatusCSV = async (req, res) => {
       product.minOrderQuantity || 1,
       product.maxOrderQuantity || 10,
       product.weight || 0,
+      product.weightUnit || 'g',
+      product.unit || 'piece',
+      product.unitValue || 1,
+      product.hsnCode || 'N/A',
+      product.gstPercent || 0,
+      product.taxType || 'inclusive',
+      product.promotor?.id || 'N/A',
+      product.promotor?.commissionRate || 0,
+      product.promotor?.commissionType || 'percentage',
+      product.delivery?.estimatedDeliveryTime || 'N/A',
+      product.delivery?.deliveryCharges || 0,
+      product.delivery?.freeDeliveryThreshold || 0,
+      product.serviceablePincodes ? product.serviceablePincodes.join(';') : 'N/A',
       product.description ? `"${stripHtml(product.description).replace(/"/g, '""')}"` : 'N/A',
       product.createdAt ? product.createdAt.toISOString().split('T')[0] : 'N/A',
       product.updatedAt ? product.updatedAt.toISOString().split('T')[0] : 'N/A'
@@ -2160,15 +2190,33 @@ const uploadProductsCSV = async (req, res) => {
           weight: parseFloat(values[getHeaderIndex('Weight')]) || 0,
           weightUnit: values[getHeaderIndex('Weight Unit')] || 'g',
           sku: values[getHeaderIndex('SKU')] || '',
-          storageType: values[getHeaderIndex('Storage Type')] || '',
-          estimatedDeliveryTime: values[getHeaderIndex('Estimated Delivery Time')] || '',
-          deliveryCharges: parseFloat(values[getHeaderIndex('Delivery Charges')]) || 0,
-          freeDeliveryThreshold: parseFloat(values[getHeaderIndex('Free Delivery Threshold')]) || 0,
+          delivery: {
+            estimatedDeliveryTime: values[getHeaderIndex('Estimated Delivery Time')] || '',
+            deliveryCharges: parseFloat(values[getHeaderIndex('Delivery Charges')]) || 0,
+            freeDeliveryThreshold: parseFloat(values[getHeaderIndex('Free Delivery Threshold')]) || 0,
+          },
           serviceablePincodes: values[getHeaderIndex('Serviceable Pincodes')] ? 
             values[getHeaderIndex('Serviceable Pincodes')].split(';').filter(p => p.trim()) : [],
           images: images,
-          video: values[getHeaderIndex('Video')] || null
+          video: values[getHeaderIndex('Video')] ? {
+            url: values[getHeaderIndex('Video')],
+            thumbnail: '',
+            duration: 0,
+            fileSize: 0
+          } : undefined
         };
+
+        // Handle Weight Conversion to Grams
+        let weightInGrams = productData.weight;
+        if (productData.weightUnit === 'kg' || productData.weightUnit === 'l') {
+          weightInGrams = productData.weight * 1000;
+        }
+        productData.weight = weightInGrams;
+
+        // Calculate discount percentage if missing
+        if (!productData.discountPercentage && productData.oldPrice > 0) {
+          productData.discountPercentage = Math.round(((productData.oldPrice - productData.price) / productData.oldPrice) * 100);
+        }
 
         // Find or create category
         const categoryName = values[getHeaderIndex('Category')]?.trim();
@@ -2177,7 +2225,6 @@ const uploadProductsCSV = async (req, res) => {
             name: { $regex: categoryName, $options: 'i' } 
           });
           if (!category) {
-            // Create category if not found
             category = await Category.create({
               name: categoryName,
               description: `${categoryName} category`,
@@ -2197,7 +2244,6 @@ const uploadProductsCSV = async (req, res) => {
             name: { $regex: sellerName, $options: 'i' } 
           });
           if (!seller) {
-            // Get or create default promotor for seller
             let defaultPromotor = await Promotor.findOne({ email: 'default@promotor.com' });
             if (!defaultPromotor) {
               defaultPromotor = await Promotor.create({
@@ -2216,7 +2262,6 @@ const uploadProductsCSV = async (req, res) => {
               });
             }
             
-            // Create seller if not found
             seller = await Seller.create({
               name: sellerName,
               email: sellerName.toLowerCase().replace(/\s+/g, '.') + '@example.com',
@@ -2237,7 +2282,6 @@ const uploadProductsCSV = async (req, res) => {
             name: { $regex: warehouseName, $options: 'i' } 
           });
           if (!warehouse) {
-            // Create a default promotor first
             let defaultPromotor = await Promotor.findOne({ email: 'default@promotor.com' });
             if (!defaultPromotor) {
               defaultPromotor = await Promotor.create({
@@ -2256,7 +2300,6 @@ const uploadProductsCSV = async (req, res) => {
               });
             }
             
-            // Create warehouse if not found
             warehouse = await Warehouse.create({
               name: warehouseName,
               code: warehouseName.toUpperCase().replace(/\s+/g, '_'),
@@ -2265,10 +2308,7 @@ const uploadProductsCSV = async (req, res) => {
                 city: 'Default City',
                 state: 'Default State',
                 pincode: '000000',
-                coordinates: {
-                  lng: 0,
-                  lat: 0
-                }
+                coordinates: { lng: 0, lat: 0 }
               },
               promotor: defaultPromotor._id,
               isActive: true,
@@ -2276,34 +2316,34 @@ const uploadProductsCSV = async (req, res) => {
               currentStock: 0
             });
           }
-          productData.warehouseId = warehouse._id;
-          productData.warehouseCode = warehouse.code;
+          productData.warehouse = {
+            id: warehouse._id,
+            code: warehouse.code,
+            storageType: values[getHeaderIndex('Storage Type')] || 'ambient'
+          };
         }
 
-        // Set default values
-        productData.unit = 'piece';
-        productData.unitValue = '1';
-        productData.discountPercentage = 0;
-        productData.gstPercent = 0;
-        productData.taxType = 'inclusive';
-        productData.hsnCode = '';
-        productData.dimensions = {
-          length: '',
-          width: '',
-          height: '',
-          unit: 'cm'
-        };
-        productData.variants = [];
-        productData.video = {
-          url: productData.video || '',
-          thumbnail: '',
-          duration: '',
-          fileSize: ''
-        };
-        productData.promotor = {
-          id: null,
-          commission: 0
-        };
+        // Handle Promotor Information
+        const promotorId = values[getHeaderIndex('Promotor ID')]?.trim();
+        const promotorCommRate = parseFloat(values[getHeaderIndex('Promotor Commission Rate')]) || 0;
+        const promotorCommType = values[getHeaderIndex('Promotor Commission Type')] || 'percentage';
+        const promotorCommAmount = parseFloat(values[getHeaderIndex('Promotor Commission Amount')]) || 0;
+
+        if (promotorId || promotorCommRate || promotorCommAmount) {
+          productData.promotor = {
+            id: promotorId && mongoose.Types.ObjectId.isValid(promotorId) ? promotorId : undefined,
+            commissionRate: promotorCommRate,
+            commissionType: promotorCommType,
+            commissionAmount: promotorCommAmount
+          };
+          if (!productData.promotor.commissionAmount && productData.promotor.commissionRate) {
+            if (productData.promotor.commissionType === 'percentage') {
+              productData.promotor.commissionAmount = (productData.price * productData.promotor.commissionRate) / 100;
+            } else {
+              productData.promotor.commissionAmount = productData.promotor.commissionRate;
+            }
+          }
+        }
 
         results.push(productData);
 
