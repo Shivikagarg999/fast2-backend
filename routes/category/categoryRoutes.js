@@ -7,7 +7,7 @@ const router = express.Router();
 router.post('/create', upload.single('image'), createCategory);
 router.get('/getall', getCategories);
 router.get('/:id', getCategoryById);
-router.put('edit/:id', upload.single('image'), updateCategory);
-router.delete('delete/:id', deleteCategory);
+router.put('/update/:id', upload.single('image'), updateCategory);
+router.delete('/delete/:id', deleteCategory);
 
 module.exports = router;
