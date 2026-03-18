@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const adminAuth = require('../../middlewares/adminAuth');
+const { adminAuth } = require('../../middlewares/adminAuth');
 const {
     getActivePopup,
     createPopup,
@@ -18,18 +18,18 @@ router.get('/active', getActivePopup);
 // ─── Admin Routes (All require admin authentication) ─────────────────────
 
 // Create new popup
-router.post('/', adminAuth, createPopup);
+router.post('/', createPopup);
 
 // Get all popups with pagination
-router.get('/', adminAuth, getAllPopups);
+router.get('/', getAllPopups);
 
 // Update popup
-router.put('/:popupId', adminAuth, updatePopup);
+router.put('/:popupId', updatePopup);
 
 // Delete popup
-router.delete('/:popupId', adminAuth, deletePopup);
+router.delete('/:popupId', deletePopup);
 
 // Toggle popup active status
-router.patch('/:popupId/toggle', adminAuth, togglePopup);
+router.patch('/:popupId/toggle', togglePopup);
 
 module.exports = router;
