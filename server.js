@@ -40,6 +40,10 @@ const sellerShopRoutes = require('./routes/seller/shopRoutes');
 const publicShopRoutes = require('./routes/public/shopRoutes');
 const adminShopRoutes = require('./routes/admin/shopRoutes');
 const adminPopupRoutes = require('./routes/admin/popupRoutes');
+
+// Public popup route
+const publicPopupRouter = express.Router();
+publicPopupRouter.get('/', require('./controllers/admin/popupController').getActivePopup);
 const app = express();
 
 const allowedOrigins = [
@@ -105,6 +109,7 @@ app.use('/api/admin/terms', adminTermsRoutes);
 app.use('/api/admin/products', adminProductRoutes);
 app.use('/api/admin/shops', adminShopRoutes);
 app.use('/api/admin/popups', adminPopupRoutes);
+app.use('/api/popups', publicPopupRouter);
 app.use('/api/admin', adminUserRoutes);
 app.use('/api/admin', adminRoutes);
 
