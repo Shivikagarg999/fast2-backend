@@ -275,6 +275,7 @@ exports.updateMyShop = async (req, res) => {
             'socialLinks',
             'isOpen',
             'shopType',
+            'timings',
         ];
 
         for (const field of allowedFields) {

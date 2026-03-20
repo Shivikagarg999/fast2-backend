@@ -7,7 +7,8 @@ const imagekit = require('../../utils/imagekit');
 // ─── POST: Create a new shop ──────────────────────────────────────────────────
 exports.createShop = async (req, res) => {
     try {
-        const {
+        // Handle FormData parsing
+        let {
             seller,
             shopName,
             description,
@@ -20,8 +21,85 @@ exports.createShop = async (req, res) => {
             isActive,
             isVerified,
             socialLinks,
-            shopType
+            shopType,
+            timings
         } = req.body;
+
+        // Parse stringified JSON fields if sent via FormData
+        if (typeof address === 'string') {
+            try {
+                address = JSON.parse(address);
+            } catch (e) {
+                console.error("Failed to parse address:", e);
+            }
+        }
+        if (typeof categories === 'string') {
+            try {
+                categories = JSON.parse(categories);
+            } catch (e) {
+                console.error("Failed to parse categories:", e);
+            }
+        }
+        if (typeof socialLinks === 'string') {
+            try {
+                socialLinks = JSON.parse(socialLinks);
+            } catch (e) {
+                console.error("Failed to parse socialLinks:", e);
+            }
+        }
+        if (typeof timings === 'string') {
+            try {
+                // Handle case where FormData converts object to "[object Object]" string
+                if (timings === '[object Object]') {
+                    // Use default timings when object is not properly serialized
+                    timings = {
+                        monday: { open: '09:00', close: '18:00', closed: false },
+                        tuesday: { open: '09:00', close: '18:00', closed: false },
+                        wednesday: { open: '09:00', close: '18:00', closed: false },
+                        thursday: { open: '09:00', close: '18:00', closed: false },
+                        friday: { open: '09:00', close: '18:00', closed: false },
+                        saturday: { open: '09:00', close: '18:00', closed: false },
+                        sunday: { open: '09:00', close: '18:00', closed: false },
+                        timezone: 'Asia/Kolkata'
+                    };
+                    console.log('Using default timings due to [object Object] string');
+                } else {
+                    timings = JSON.parse(timings);
+                }
+            } catch (e) {
+                console.error("Failed to parse timings:", e);
+                // Use default timings on parse failure
+                timings = {
+                    monday: { open: '09:00', close: '18:00', closed: false },
+                    tuesday: { open: '09:00', close: '18:00', closed: false },
+                    wednesday: { open: '09:00', close: '18:00', closed: false },
+                    thursday: { open: '09:00', close: '18:00', closed: false },
+                    friday: { open: '09:00', close: '18:00', closed: false },
+                    saturday: { open: '09:00', close: '18:00', closed: false },
+                    sunday: { open: '09:00', close: '18:00', closed: false },
+                    timezone: 'Asia/Kolkata'
+                };
+            }
+        } else if (!timings) {
+            // Handle case where timings is not provided
+            timings = {
+                monday: { open: '09:00', close: '18:00', closed: false },
+                tuesday: { open: '09:00', close: '18:00', closed: false },
+                wednesday: { open: '09:00', close: '18:00', closed: false },
+                thursday: { open: '09:00', close: '18:00', closed: false },
+                friday: { open: '09:00', close: '18:00', closed: false },
+                saturday: { open: '09:00', close: '18:00', closed: false },
+                sunday: { open: '09:00', close: '18:00', closed: false },
+                timezone: 'Asia/Kolkata'
+            };
+        }
+
+        console.log('Final timings data:', timings);
+
+        // Parse boolean fields
+        isOpen = isOpen === 'true';
+        isActive = isActive === 'true';
+        isVerified = isVerified === 'true';
 
         if (!seller || !shopName) {
             return res.status(400).json({ success: false, message: 'Seller ID and Shop Name are required' });
@@ -31,6 +109,65 @@ exports.createShop = async (req, res) => {
         const existingShop = await Shop.findOne({ seller });
         if (existingShop) {
             return res.status(400).json({ success: false, message: 'This seller already has a shop registered' });
+        }
+
+        // Handle file uploads
+        let logoData = null;
+        let coverImageData = null;
+        let videoData = null;
+
+        if (req.files && req.files.logo && req.files.logo.length > 0) {
+            try {
+                const logoResult = await imagekit.upload({
+                    file: req.files.logo[0].buffer.toString('base64'),
+                    fileName: `shop_logo_${seller}_${Date.now()}.jpg`,
+                    folder: '/shops/logos',
+                    useUniqueFileName: true
+                });
+                logoData = {
+                    url: logoResult.url,
+                    fileId: logoResult.fileId
+                };
+            } catch (uploadError) {
+                console.error('Logo upload error:', uploadError);
+                return res.status(500).json({ success: false, message: 'Failed to upload logo', error: uploadError.message });
+            }
+        }
+
+        if (req.files && req.files.coverImage && req.files.coverImage.length > 0) {
+            try {
+                const coverResult = await imagekit.upload({
+                    file: req.files.coverImage[0].buffer.toString('base64'),
+                    fileName: `shop_cover_${seller}_${Date.now()}.jpg`,
+                    folder: '/shops/covers',
+                    useUniqueFileName: true
+                });
+                coverImageData = {
+                    url: coverResult.url,
+                    fileId: coverResult.fileId
+                };
+            } catch (uploadError) {
+                console.error('Cover image upload error:', uploadError);
+                return res.status(500).json({ success: false, message: 'Failed to upload cover image', error: uploadError.message });
+            }
+        }
+
+        if (req.files && req.files.video && req.files.video.length > 0) {
+            try {
+                const videoResult = await imagekit.upload({
+                    file: req.files.video[0].buffer.toString('base64'),
+                    fileName: `shop_video_${seller}_${Date.now()}.mp4`,
+                    folder: '/shops/videos',
+                    useUniqueFileName: true
+                });
+                videoData = {
+                    url: videoResult.url,
+                    fileId: videoResult.fileId
+                };
+            } catch (uploadError) {
+                console.error('Video upload error:', uploadError);
+                return res.status(500).json({ success: false, message: 'Failed to upload video', error: uploadError.message });
+            }
         }
 
         const newShop = new Shop({
@@ -46,7 +183,20 @@ exports.createShop = async (req, res) => {
             isActive,
             isVerified,
             socialLinks,
-            shopType
+            shopType,
+            logo: logoData,
+            coverImage: coverImageData,
+            video: videoData,
+            timings: timings || {
+                monday: { open: '09:00', close: '18:00', closed: false },
+                tuesday: { open: '09:00', close: '18:00', closed: false },
+                wednesday: { open: '09:00', close: '18:00', closed: false },
+                thursday: { open: '09:00', close: '18:00', closed: false },
+                friday: { open: '09:00', close: '18:00', closed: false },
+                saturday: { open: '09:00', close: '18:00', closed: false },
+                sunday: { open: '09:00', close: '18:00', closed: false },
+                timezone: 'Asia/Kolkata'
+            }
         });
 
         await newShop.save();
@@ -154,7 +304,7 @@ exports.updateShop = async (req, res) => {
         const allowedFields = [
             'shopName', 'description', 'tagline', 'contactEmail', 'contactPhone',
             'address', 'socialLinks', 'isVerified', 'isActive', 'isOpen',
-            'shopType', 'seller'
+            'shopType', 'seller', 'timings'
         ];
 
         console.log(`--- Admin Update Shop ${id} ---`);

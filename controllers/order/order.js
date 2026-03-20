@@ -27,7 +27,6 @@ exports.createOrder = async (req, res) => {
       coupon
     } = req.body;
 
-    // Parse stringified JSON if sent via FormData
     if (typeof items === 'string') {
       try {
         items = JSON.parse(items);
@@ -83,7 +82,6 @@ exports.createOrder = async (req, res) => {
       .populate('promotor.id')
       .session(session);
 
-    // Check if any product belongs to a medical shop
     const sellerIds = [...new Set(products.map(p => p.seller?._id || p.seller).filter(id => id))];
     const shops = await Shop.find({ seller: { $in: sellerIds } });
     const medicalSellerIds = shops.filter(s => s.shopType === 'medical').map(s => s.seller.toString());
@@ -188,6 +186,34 @@ exports.createOrder = async (req, res) => {
         error: "Some products are not serviceable to your pincode",
         nonServiceableProducts,
         shippingPincode
+      });
+    }
+
+    // Check shop timing validation
+    const shopMap = new Map(shops.map(shop => [shop.seller.toString(), shop]));
+    
+    const closedShops = [];
+    for (const sellerId of sellerIds) {
+      const shop = shopMap.get(sellerId);
+      if (shop && !shop.isCurrentlyOpen()) {
+        const shopStatus = shop.getShopStatus();
+        closedShops.push({
+          sellerId,
+          shopName: shop.shopName,
+          currentStatus: shopStatus,
+          nextOpenTime: shopStatus.nextOpenTime
+        });
+      }
+    }
+
+    if (closedShops.length > 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        error: "Some shops are currently closed",
+        closedShops,
+        message: "Cannot place order when shops are closed. Please try again during business hours."
       });
     }
 

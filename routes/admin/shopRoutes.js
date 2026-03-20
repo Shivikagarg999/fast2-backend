@@ -8,7 +8,15 @@ const upload = require('../../middlewares/upload');
 router.use(adminAuth);
 
 router.get('/', adminShopController.getAllShops);
-router.post('/', adminShopController.createShop);
+router.post(
+    '/',
+    upload.fields([
+        { name: 'logo', maxCount: 1 },
+        { name: 'coverImage', maxCount: 1 },
+        { name: 'video', maxCount: 1 },
+    ]),
+    adminShopController.createShop
+);
 router.get('/:id', adminShopController.getShopDetails);
 router.put(
     '/:id',

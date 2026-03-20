@@ -129,6 +129,18 @@ const shopSchema = new mongoose.Schema(
         isActive: { type: Boolean, default: true },      // Admin can deactivate
         isVerified: { type: Boolean, default: false },   // Verified badge
 
+        // ─── Shop Timings ─────────────────────────────────────────────────────────
+        timings: {
+            monday: { open: String, close: String, closed: { type: Boolean, default: false } },
+            tuesday: { open: String, close: String, closed: { type: Boolean, default: false } },
+            wednesday: { open: String, close: String, closed: { type: Boolean, default: false } },
+            thursday: { open: String, close: String, closed: { type: Boolean, default: false } },
+            friday: { open: String, close: String, closed: { type: Boolean, default: false } },
+            saturday: { open: String, close: String, closed: { type: Boolean, default: false } },
+            sunday: { open: String, close: String, closed: { type: Boolean, default: false } },
+            timezone: { type: String, default: 'Asia/Kolkata' }
+        },
+
         // ─── Social Links ─────────────────────────────────────────────────────────
         socialLinks: {
             instagram: { type: String, default: '' },
@@ -215,6 +227,75 @@ shopSchema.methods.recalculateRating = async function () {
     }
 
     return this.save();
+};
+
+// ── Method: Check if shop is currently open ───────────────────────────────────────
+shopSchema.methods.isCurrentlyOpen = function () {
+    if (!this.isOpen || !this.isActive) {
+        return false;
+    }
+
+    const now = new Date();
+    const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const currentDay = days[now.getDay()];
+    const currentTime = now.toTimeString().slice(0, 5); // HH:MM format
+
+    const todayTimings = this.timings[currentDay];
+    
+    if (!todayTimings || todayTimings.closed) {
+        return false;
+    }
+
+    if (!todayTimings.open || !todayTimings.close) {
+        return false;
+    }
+
+    return currentTime >= todayTimings.open && currentTime <= todayTimings.close;
+};
+
+// ── Method: Get current shop status ───────────────────────────────────────────────
+shopSchema.methods.getShopStatus = function () {
+    const isOpen = this.isCurrentlyOpen();
+    const now = new Date();
+    const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    const currentDay = days[now.getDay()];
+    const todayTimings = this.timings[currentDay];
+
+    return {
+        isOpen,
+        currentDay,
+        todayTimings: todayTimings || { closed: true },
+        nextOpenTime: this.getNextOpenTime(),
+        timezone: this.timings.timezone || 'Asia/Kolkata'
+    };
+};
+
+// ── Method: Get next opening time ───────────────────────────────────────────────────
+shopSchema.methods.getNextOpenTime = function () {
+    const now = new Date();
+    const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+    
+    for (let i = 0; i < 7; i++) {
+        const checkDate = new Date(now);
+        checkDate.setDate(now.getDate() + i);
+        const dayName = days[checkDate.getDay()];
+        const dayTimings = this.timings[dayName];
+        
+        if (dayTimings && !dayTimings.closed && dayTimings.open && dayTimings.close) {
+            if (i === 0) {
+                // Today
+                const currentTime = now.toTimeString().slice(0, 5);
+                if (currentTime < dayTimings.open) {
+                    return { day: dayName, time: dayTimings.open, isToday: true };
+                }
+            } else {
+                // Future day
+                return { day: dayName, time: dayTimings.open, isToday: false };
+            }
+        }
+    }
+    
+    return null;
 };
 
 const Shop = mongoose.model('Shop', shopSchema);

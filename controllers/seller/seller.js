@@ -65,6 +65,16 @@ exports.registerSeller = async (req, res) => {
         contactPhone: phone,
         description: '',
         address: address || {},
+        timings: {
+          monday: { open: '09:00', close: '18:00', closed: false },
+          tuesday: { open: '09:00', close: '18:00', closed: false },
+          wednesday: { open: '09:00', close: '18:00', closed: false },
+          thursday: { open: '09:00', close: '18:00', closed: false },
+          friday: { open: '09:00', close: '18:00', closed: false },
+          saturday: { open: '09:00', close: '18:00', closed: false },
+          sunday: { open: '09:00', close: '18:00', closed: false },
+          timezone: 'Asia/Kolkata'
+        }
       });
       await newShop.save();
       // Store shop ref on seller

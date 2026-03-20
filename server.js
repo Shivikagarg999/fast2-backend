@@ -41,9 +41,8 @@ const publicShopRoutes = require('./routes/public/shopRoutes');
 const adminShopRoutes = require('./routes/admin/shopRoutes');
 const adminPopupRoutes = require('./routes/admin/popupRoutes');
 
-// Public popup route
 const publicPopupRouter = express.Router();
-publicPopupRouter.get('/', require('./controllers/admin/popupController').getActivePopup);
+publicPopupRouter.get('/active', require('./controllers/admin/popupController').getActivePopup);
 const app = express();
 
 const allowedOrigins = [
