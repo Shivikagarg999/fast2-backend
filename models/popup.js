@@ -18,15 +18,6 @@ const popupSchema = new mongoose.Schema({
         type: Boolean,
         default: true
     },
-    createdBy: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Admin',
-        required: true
-    },
-    updatedBy: {
-        type: mongoose.Schema.Types.ObjectId,
-        ref: 'Admin'
-    }
 }, {
     timestamps: true
 });

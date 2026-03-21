@@ -80,9 +80,7 @@ exports.createPopup = async (req, res) => {
             imageUrl,
             startTime: start,
             endTime: end,
-            isActive,
-            createdBy: req.admin?.id || 'system',
-            updatedBy: req.admin?.id || 'system'
+            isActive
         });
 
         await popup.save();
@@ -180,9 +178,7 @@ exports.updatePopup = async (req, res) => {
         const updateData = {
             ...(startTime && { startTime: new Date(startTime) }),
             ...(endTime && { endTime: new Date(endTime) }),
-            ...(isActive !== undefined && { isActive }),
-            updatedBy: req.admin?.id || 'system',
-            updatedAt: new Date()
+            ...(isActive !== undefined && { isActive })
         };
 
         if (req.file) {
@@ -263,7 +259,6 @@ exports.togglePopup = async (req, res) => {
         }
 
         popup.isActive = !popup.isActive;
-        popup.updatedBy = req.admin?.id || 'system';
         await popup.save();
 
         res.status(200).json({
