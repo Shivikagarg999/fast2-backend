@@ -1,6 +1,6 @@
 const Popup = require('../../models/popup');
+const imagekit = require('../../utils/imagekit');
 
-// Get active popup
 exports.getActivePopup = async (req, res) => {
     try {
         const now = new Date();
@@ -24,34 +24,24 @@ exports.getActivePopup = async (req, res) => {
     }
 };
 
-// Create/update popup (Admin only)
 exports.createPopup = async (req, res) => {
     try {
-        const {
-            title,
-            message,
-            imageUrl,
-            startTime,
-            endTime,
-            isActive = true,
-            type = 'info', // info, warning, success, error
-            position = 'top-center', // top-left, top-center, top-right, bottom-left, bottom-center, bottom-right
-            showCloseButton = true,
-            autoCloseAfter = null, // seconds, null for manual close only
-            targetPages = [], // empty means all pages
-            targetUsers = [], // empty means all users
-            priority = 1 // higher number shows first if multiple popups
-        } = req.body;
+        const { startTime, endTime, isActive = true } = req.body;
 
-        // Validate required fields
-        if (!title || !message) {
+        if (!startTime || !endTime) {
             return res.status(400).json({
                 success: false,
-                message: 'Title and message are required'
+                message: 'startTime and endTime are required'
             });
         }
 
-        // Validate time format
+        if (!req.file) {
+            return res.status(400).json({
+                success: false,
+                message: 'Popup image is required'
+            });
+        }
+
         const start = new Date(startTime);
         const end = new Date(endTime);
 
@@ -69,40 +59,33 @@ exports.createPopup = async (req, res) => {
             });
         }
 
-        // Deactivate all existing popups with lower priority
-        await Popup.updateMany(
-            { 
-                isActive: true,
-                priority: { $lte: priority }
-            },
-            { isActive: false }
-        );
+        let imageUrl;
+        try {
+            const uploadResult = await imagekit.upload({
+                file: req.file.buffer,
+                fileName: `popup_${Date.now()}_${req.file.originalname}`,
+                folder: '/popups'
+            });
+            imageUrl = uploadResult.url;
+        } catch (uploadError) {
+            console.error('Image upload error:', uploadError);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to upload image',
+                error: uploadError.message
+            });
+        }
 
-        // Create or update popup
-        const popup = await Popup.findOneAndUpdate(
-            {},
-            {
-                title,
-                message,
-                imageUrl: imageUrl || null,
-                startTime: start,
-                endTime: end,
-                isActive,
-                type,
-                position,
-                showCloseButton,
-                autoCloseAfter,
-                targetPages,
-                targetUsers,
-                priority,
-                createdBy: req.admin?.id || 'system',
-                updatedBy: req.admin?.id || 'system'
-            },
-            {
-                new: true,
-                upsert: true
-            }
-        );
+        const popup = new Popup({
+            imageUrl,
+            startTime: start,
+            endTime: end,
+            isActive,
+            createdBy: req.admin?.id || 'system',
+            updatedBy: req.admin?.id || 'system'
+        });
+
+        await popup.save();
 
         res.status(201).json({
             success: true,
@@ -119,26 +102,21 @@ exports.createPopup = async (req, res) => {
     }
 };
 
-// Get all popups (Admin only)
 exports.getAllPopups = async (req, res) => {
     try {
         const {
             page = 1,
             limit = 10,
-            isActive,
-            type
+            isActive
         } = req.query;
 
         const filter = {};
         if (isActive !== undefined) {
             filter.isActive = isActive === 'true';
         }
-        if (type) {
-            filter.type = type;
-        }
 
         const popups = await Popup.find(filter)
-            .sort({ priority: -1, createdAt: -1 })
+            .sort({ createdAt: -1 })
             .limit(parseInt(limit))
             .skip((parseInt(page) - 1) * parseInt(limit))
             .lean();
@@ -167,13 +145,11 @@ exports.getAllPopups = async (req, res) => {
     }
 };
 
-// Update popup (Admin only)
 exports.updatePopup = async (req, res) => {
     try {
         const { popupId } = req.params;
-        const updateData = req.body;
+        const { startTime, endTime, isActive } = req.body;
 
-        // Validate popup exists
         const existingPopup = await Popup.findById(popupId);
         if (!existingPopup) {
             return res.status(404).json({
@@ -182,10 +158,9 @@ exports.updatePopup = async (req, res) => {
             });
         }
 
-        // Validate time format if provided
-        if (updateData.startTime || updateData.endTime) {
-            const start = new Date(updateData.startTime || existingPopup.startTime);
-            const end = new Date(updateData.endTime || existingPopup.endTime);
+        if (startTime || endTime) {
+            const start = new Date(startTime || existingPopup.startTime);
+            const end = new Date(endTime || existingPopup.endTime);
 
             if (isNaN(start.getTime()) || isNaN(end.getTime())) {
                 return res.status(400).json({
@@ -202,14 +177,35 @@ exports.updatePopup = async (req, res) => {
             }
         }
 
-        // Update popup
+        const updateData = {
+            ...(startTime && { startTime: new Date(startTime) }),
+            ...(endTime && { endTime: new Date(endTime) }),
+            ...(isActive !== undefined && { isActive }),
+            updatedBy: req.admin?.id || 'system',
+            updatedAt: new Date()
+        };
+
+        if (req.file) {
+            try {
+                const uploadResult = await imagekit.upload({
+                    file: req.file.buffer,
+                    fileName: `popup_${Date.now()}_${req.file.originalname}`,
+                    folder: '/popups'
+                });
+                updateData.imageUrl = uploadResult.url;
+            } catch (uploadError) {
+                console.error('Image upload error:', uploadError);
+                return res.status(500).json({
+                    success: false,
+                    message: 'Failed to upload image',
+                    error: uploadError.message
+                });
+            }
+        }
+
         const popup = await Popup.findByIdAndUpdate(
             popupId,
-            {
-                ...updateData,
-                updatedBy: req.admin?.id || 'system',
-                updatedAt: new Date()
-            },
+            updateData,
             { new: true, runValidators: true }
         );
 
@@ -228,7 +224,6 @@ exports.updatePopup = async (req, res) => {
     }
 };
 
-// Delete popup (Admin only)
 exports.deletePopup = async (req, res) => {
     try {
         const { popupId } = req.params;
@@ -255,7 +250,6 @@ exports.deletePopup = async (req, res) => {
     }
 };
 
-// Toggle popup active status (Admin only)
 exports.togglePopup = async (req, res) => {
     try {
         const { popupId } = req.params;

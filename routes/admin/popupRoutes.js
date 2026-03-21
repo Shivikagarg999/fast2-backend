@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { adminAuth } = require('../../middlewares/adminAuth');
+const upload = require('../../middlewares/upload');
 const {
     getActivePopup,
     createPopup,
@@ -12,11 +13,11 @@ const {
 
 router.get('/active', getActivePopup);
 
-router.post('/', createPopup);
+router.post('/', upload.single('image'), createPopup);
 
 router.get('/', getAllPopups);
 
-router.put('/:popupId', updatePopup);
+router.put('/:popupId', upload.single('image'), updatePopup);
 
 router.delete('/:popupId', deletePopup);
 
