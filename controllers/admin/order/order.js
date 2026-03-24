@@ -4,12 +4,8 @@ const downloadOrdersByStatusCSV = async (req, res) => {
   try {
     const { status } = req.query;
 
-    if (!status) {
-      return res.status(400).json({ message: "Status parameter is required" });
-    }
+    const filter = status ? { status } : {};
 
-    const filter = { status };
-    
     const orders = await Order.find(filter)
       .populate("user", "name email phone")
       .populate("driver", "name phone")
@@ -17,7 +13,7 @@ const downloadOrdersByStatusCSV = async (req, res) => {
       .sort({ createdAt: -1 });
 
     if (orders.length === 0) {
-      return res.status(404).json({ message: "No orders found with the specified status" });
+      return res.status(404).json({ message: "No orders found" });
     }
 
     const csvHeaders = [
@@ -64,7 +60,7 @@ const downloadOrdersByStatusCSV = async (req, res) => {
     const csvContent = [csvHeaders.join(','), ...csvRows].join('\n');
 
     res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename="orders_${status}_${Date.now()}.csv"`);
+    res.setHeader('Content-Disposition', `attachment; filename="orders_${status || 'all'}_${Date.now()}.csv"`);
     
     res.send(csvContent);
   } catch (error) {
