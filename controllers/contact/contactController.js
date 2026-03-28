@@ -239,7 +239,7 @@ const updateContactStatus = async (req, res) => {
 
     if (assignedTo) {
       contact.assignedTo = assignedTo;
-      contact.status = 'in-progress';
+      if (!status) contact.status = 'contacted';
     }
 
     if (tags && Array.isArray(tags)) {
@@ -302,8 +302,7 @@ const getContactStats = async (req, res) => {
   try {
     const total = await Contact.countDocuments();
     const pending = await Contact.countDocuments({ status: 'pending' });
-    const read = await Contact.countDocuments({ status: 'read' });
-    const inProgress = await Contact.countDocuments({ status: 'in-progress' });
+    const contacted = await Contact.countDocuments({ status: 'contacted' });
     const resolved = await Contact.countDocuments({ status: 'resolved' });
 
     const last7Days = await Contact.aggregate([
@@ -428,10 +427,9 @@ const getContactStats = async (req, res) => {
         counts: {
           total,
           pending,
-          read,
-          inProgress,
+          contacted,
           resolved,
-          unresolved: pending + read + inProgress
+          unresolved: pending + contacted
         },
         last7Days,
         bySubject,

@@ -8,21 +8,41 @@ const getCart = async (req, res) => {
       path: "items.product",
       populate: [
         { path: "shop" },
-        { path: "seller", populate: { path: "shop" } }
+        { path: "seller", populate: { path: "shop" } },
+        { path: "category" }
       ]
     });
-    
+
     if (!cart) {
-      return res.status(200).json({ items: [], total: 0 });
+      return res.status(200).json({ items: [], total: 0, totalGst: 0, finalAmount: 0 });
     }
-    
-    res.status(200).json(cart);
+
+    // Recompute GST from category on every fetch so old items (pre-schema-change) work correctly
+    let total = 0;
+    let totalGst = 0;
+    const cartObj = cart.toObject();
+
+    cartObj.items = cartObj.items.map(item => {
+      const gstPercent = item.gstPercent || item.product?.category?.gstPercent || 0;
+      const itemSubtotal = item.price * item.quantity;
+      const gstAmount = parseFloat(((itemSubtotal * gstPercent) / 100).toFixed(2));
+      total += itemSubtotal;
+      totalGst += gstAmount;
+      return { ...item, gstPercent, gstAmount };
+    });
+
+    cartObj.total = parseFloat(total.toFixed(2));
+    cartObj.totalGst = parseFloat(totalGst.toFixed(2));
+    cartObj.finalAmount = parseFloat((total + totalGst).toFixed(2));
+
     console.log('--- Cart Fetch for Checkout ---');
-    console.log('Cart Items with Population:', cart.items.map(item => ({
+    console.log('Cart Items with Population:', cartObj.items.map(item => ({
       product: item.product?._id,
       shopType: item.product?.shop?.shopType,
       sellerShopType: item.product?.seller?.shop?.shopType
     })));
+
+    res.status(200).json(cartObj);
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -38,11 +58,13 @@ const addToCart = async (req, res) => {
       return res.status(400).json({ message: "Invalid input" });
     }
     
-    // Check if product exists
-    const product = await Product.findById(productId);
+    // Check if product exists (populate category for GST)
+    const product = await Product.findById(productId).populate('category');
     if (!product) {
       return res.status(404).json({ message: "Product not found" });
     }
+
+    const gstPercent = product.category?.gstPercent || 0;
     
     // Check if product is in stock
     if (product.quantity < quantity) {
@@ -61,7 +83,8 @@ const addToCart = async (req, res) => {
         items: [{
           product: productId,
           quantity,
-          price: product.price
+          price: product.price,
+          gstPercent
         }]
       });
     } else {
@@ -87,7 +110,8 @@ const addToCart = async (req, res) => {
         cart.items.push({
           product: productId,
           quantity,
-          price: product.price
+          price: product.price,
+          gstPercent
         });
       }
     }

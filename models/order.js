@@ -14,6 +14,14 @@ const orderItemSchema = new mongoose.Schema({
   price: {
     type: Number,
     required: true
+  },
+  gstPercent: {
+    type: Number,
+    default: 0
+  },
+  gstAmount: {
+    type: Number,
+    default: 0
   }
 });
 
@@ -54,6 +62,10 @@ const orderSchema = new mongoose.Schema(
         type: Number,
         default: 0
       }
+    },
+    totalGst: {
+      type: Number,
+      default: 0
     },
     finalAmount: {
       type: Number,

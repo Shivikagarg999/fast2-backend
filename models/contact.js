@@ -45,7 +45,7 @@ const contactSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'read', 'in-progress', 'resolved', 'spam'],
+    enum: ['pending', 'contacted', 'resolved'],
     default: 'pending'
   },
   priority: {
@@ -92,14 +92,8 @@ contactSchema.pre('save', function(next) {
   next();
 });
 
-contactSchema.methods.markAsRead = function() {
-  this.status = 'read';
-  return this.save();
-};
-
-contactSchema.methods.assignTo = function(userId) {
-  this.assignedTo = userId;
-  this.status = 'in-progress';
+contactSchema.methods.markAsContacted = function() {
+  this.status = 'contacted';
   return this.save();
 };
 

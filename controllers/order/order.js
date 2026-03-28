@@ -80,6 +80,7 @@ exports.createOrder = async (req, res) => {
       .populate('seller')
       .populate('shop')
       .populate('promotor.id')
+      .populate('category')
       .session(session);
 
     const sellerIds = [...new Set(products.map(p => p.seller?._id || p.seller).filter(id => id))];
@@ -218,6 +219,7 @@ exports.createOrder = async (req, res) => {
     }
 
     let subtotal = 0;
+    let totalGst = 0;
     let deliveryCharges = 0;
     let isFreeDelivery = false;
 
@@ -227,6 +229,9 @@ exports.createOrder = async (req, res) => {
       const product = products.find(p => p._id.toString() === item.product.toString());
       const itemTotal = item.price * item.quantity;
       subtotal += itemTotal;
+
+      const itemGstPercent = product.category?.gstPercent || 0;
+      totalGst += parseFloat(((itemTotal * itemGstPercent) / 100).toFixed(2));
 
       const productDelivery = product.delivery || {};
       const productDeliveryCharges = productDelivery.deliveryCharges || 0;
@@ -289,13 +294,14 @@ exports.createOrder = async (req, res) => {
     }
 
     let total = subtotal + deliveryCharges;
+    totalGst = parseFloat(totalGst.toFixed(2));
 
     let discount = 0;
-    let finalAmount = total;
+    let finalAmount = parseFloat((total + totalGst).toFixed(2));
 
     if (coupon && coupon.discount) {
-      discount = Math.min(coupon.discount, total);
-      finalAmount = total - discount;
+      discount = Math.min(coupon.discount, finalAmount);
+      finalAmount = parseFloat((finalAmount - discount).toFixed(2));
     }
 
     let walletDeduction = 0;
@@ -391,11 +397,18 @@ exports.createOrder = async (req, res) => {
       }
     }
 
-    const orderItems = items.map(item => ({
-      product: item.product,
-      quantity: item.quantity,
-      price: item.price
-    }));
+    const orderItems = items.map(item => {
+      const product = products.find(p => p._id.toString() === item.product.toString());
+      const gstPercent = product?.category?.gstPercent || 0;
+      const gstAmount = parseFloat(((item.price * item.quantity * gstPercent) / 100).toFixed(2));
+      return {
+        product: item.product,
+        quantity: item.quantity,
+        price: item.price,
+        gstPercent,
+        gstAmount
+      };
+    });
     const firstSellerEntry = Array.from(sellerMap.values())[0];
     const primarySeller = firstSellerEntry ? firstSellerEntry.seller._id : null;
 
@@ -415,6 +428,7 @@ exports.createOrder = async (req, res) => {
       deliveryCharges: deliveryCharges,
       isFreeDelivery: isFreeDelivery,
       total: total,
+      totalGst: totalGst,
       coupon: coupon || {},
       finalAmount: finalAmount,
       shippingAddress: normalizedShippingAddress,
@@ -1509,7 +1523,7 @@ exports.downloadInvoice = async (req, res) => {
           {
             path: 'category',
             model: 'Category',
-            select: 'name'
+            select: 'name hsnCode gstPercent'
           }
         ]
       });
@@ -1546,44 +1560,44 @@ exports.downloadInvoice = async (req, res) => {
       }
     }
 
-    let orderSubtotal = 0;
-    let totalGST = 0;
+    // Use values already saved on the order — do NOT recalculate
+    const orderSubtotal = order.subtotal || order.items.reduce((s, i) => s + i.price * i.quantity, 0);
+    const deliveryFee = order.deliveryCharges || 0;
+    const savedTotalGST = order.totalGst || 0;
+
+    // For CGST/SGST split: if all within-state use half/half, else treat as IGST
+    const shippingState = order.shippingAddress.state;
     let totalCGST = 0;
     let totalSGST = 0;
     let totalIGST = 0;
-    let deliveryFee = 25;
 
     const itemsWithGST = order.items.map(item => {
       const itemTotal = item.price * item.quantity;
-      const gstRate = item.product?.gstPercent || 0;
+      // Use stored values; fall back to category if item was saved before gstPercent was added
+      const gstRate = item.gstPercent || item.product?.category?.gstPercent || 0;
+      const gstAmount = item.gstAmount != null ? item.gstAmount : parseFloat(((itemTotal * gstRate) / 100).toFixed(2));
+      const taxableValue = gstRate > 0 ? itemTotal - gstAmount : itemTotal;
 
       const sellerState = item.product?.seller?.address?.state;
-      const shippingState = order.shippingAddress.state;
       const isWithinState = sellerState && shippingState && sellerState === shippingState;
 
-      let gstAmount = 0;
       let cgstAmount = 0;
       let sgstAmount = 0;
       let igstAmount = 0;
-      let taxableValue = itemTotal;
-
-      if (item.product?.taxType === 'inclusive' && gstRate > 0) {
-        taxableValue = itemTotal / (1 + gstRate / 100);
-        gstAmount = itemTotal - taxableValue;
-      } else if (gstRate > 0) {
-        gstAmount = (taxableValue * gstRate) / 100;
-      }
-
       if (gstAmount > 0) {
         if (isWithinState) {
-          cgstAmount = gstAmount / 2;
-          sgstAmount = gstAmount / 2;
+          cgstAmount = parseFloat((gstAmount / 2).toFixed(2));
+          sgstAmount = parseFloat((gstAmount / 2).toFixed(2));
         } else {
           igstAmount = gstAmount;
         }
       }
 
-      const itemWithTax = {
+      totalCGST += cgstAmount;
+      totalSGST += sgstAmount;
+      totalIGST += igstAmount;
+
+      return {
         ...item.toObject(),
         itemTotal,
         taxableValue,
@@ -1592,19 +1606,12 @@ exports.downloadInvoice = async (req, res) => {
         cgstAmount,
         sgstAmount,
         igstAmount,
-        totalWithTax: taxableValue + gstAmount,
+        totalWithTax: itemTotal,
         isWithinState
       };
-
-      orderSubtotal += itemTotal;
-      totalGST += gstAmount;
-      totalCGST += cgstAmount;
-      totalSGST += sgstAmount;
-      totalIGST += igstAmount;
-
-      return itemWithTax;
     });
 
+    const totalGST = savedTotalGST;
     const grandTotalBeforeWallet = orderSubtotal + deliveryFee;
     const finalPayableAmount = order.cashOnDelivery > 0 ? order.cashOnDelivery : order.finalAmount;
 
@@ -1665,229 +1672,199 @@ exports.downloadInvoice = async (req, res) => {
 exports.generatePDFInvoice = async (invoiceData) => {
   const PDFDocument = require('pdfkit');
 
+  // 80mm thermal printer width = 226.77pt. Use 230pt with 8pt side margins.
+  const PAGE_WIDTH = 230;
+  const MARGIN = 8;
+  const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
+  const COL_RIGHT = PAGE_WIDTH - MARGIN; // right edge for right-aligned text
+
   return new Promise((resolve, reject) => {
     try {
-      const doc = new PDFDocument({ margin: 50, size: 'A4' });
+      const doc = new PDFDocument({
+        size: [PAGE_WIDTH, 2000], // tall enough; we'll trim via content
+        margin: MARGIN,
+        autoFirstPage: true
+      });
       const buffers = [];
 
       doc.on('data', buffers.push.bind(buffers));
-      doc.on('end', () => {
-        const pdfData = Buffer.concat(buffers);
-        resolve(pdfData);
+      doc.on('end', () => resolve(Buffer.concat(buffers)));
+
+      // Helper: dashed separator line
+      const dashedLine = (y) => {
+        doc.fontSize(7).font('Courier').fillColor('#000000')
+          .text('- '.repeat(28), MARGIN, y, { width: CONTENT_WIDTH, align: 'left', lineBreak: false });
+      };
+
+      // Helper: row with label on left, value on right
+      const row = (label, value, y, opts = {}) => {
+        doc.font(opts.bold ? 'Courier-Bold' : 'Courier')
+          .fontSize(opts.size || 7)
+          .fillColor('#000000')
+          .text(label, MARGIN, y, { width: CONTENT_WIDTH * 0.6 });
+        doc.font(opts.bold ? 'Courier-Bold' : 'Courier')
+          .fontSize(opts.size || 7)
+          .text(value, MARGIN, y, { width: CONTENT_WIDTH, align: 'right' });
+      };
+
+      // Helper: centered text
+      const center = (text, y, opts = {}) => {
+        doc.font(opts.bold ? 'Courier-Bold' : 'Courier')
+          .fontSize(opts.size || 7)
+          .fillColor('#000000')
+          .text(text, MARGIN, y, { width: CONTENT_WIDTH, align: 'center' });
+      };
+
+      let y = MARGIN;
+
+      // ── HEADER ──────────────────────────────────────────────
+      center('FAST 2', y, { bold: true, size: 14 });
+      y += 16;
+      center('TAX INVOICE', y, { bold: true, size: 8 });
+      y += 12;
+      center('GSTIN: 07AABCU9603R1ZM', y, { size: 6 });
+      y += 9;
+      center('123 Business Street, Delhi - 110001', y, { size: 6 });
+      y += 9;
+      center('PAN: AABCU9603R', y, { size: 6 });
+      y += 10;
+      dashedLine(y); y += 10;
+
+      // ── ORDER INFO ───────────────────────────────────────────
+      const orderDate = new Date(invoiceData.orderDate).toLocaleDateString('en-IN', {
+        day: '2-digit', month: 'short', year: 'numeric'
       });
+      row('Invoice No:', invoiceData.orderId, y, { size: 7 }); y += 10;
+      row('Date:', orderDate, y, { size: 7 }); y += 10;
+      row('Place of Supply:', invoiceData.shippingAddress.state, y, { size: 7 }); y += 10;
+      dashedLine(y); y += 10;
 
-      doc.fillColor('#1e40af')
-        .rect(0, 0, 600, 80)
-        .fill();
-
-      doc.fillColor('#ffffff')
-        .fontSize(20)
-        .font('Helvetica-Bold')
-        .text('Fast 2', 50, 30);
-
-      doc.fontSize(10)
-        .text('TAX INVOICE', 50, 55);
-
-      doc.font('Helvetica')
-        .fontSize(8)
-        .text('GSTIN: 07AABCU9603R1ZM', 400, 35, { align: 'right' })
-        .text('PAN: AABCU9603R', 400, 47, { align: 'right' })
-        .text('123 Business Street, Delhi - 110001', 400, 59, { align: 'right' });
-
-      let yPosition = 100;
-
-      doc.fillColor('#000000')
-        .fontSize(10)
-        .font('Helvetica-Bold')
-        .text('Invoice Details:', 50, yPosition);
-
-      doc.font('Helvetica')
-        .text(`Invoice Number: ${invoiceData.orderId}`, 150, yPosition)
-        .text(`Invoice Date: ${new Date(invoiceData.orderDate).toLocaleDateString('en-IN')}`, 350, yPosition);
-
-      yPosition += 15;
-      doc.text(`Order Number: ${invoiceData.orderId}`, 150, yPosition)
-        .text(`Place of Supply: ${invoiceData.shippingAddress.state}`, 350, yPosition);
-
-      yPosition += 25;
-
-      doc.font('Helvetica-Bold')
-        .text('Sold By:', 50, yPosition);
-
+      // ── SELLER ───────────────────────────────────────────────
       const sellerName = invoiceData.seller?.businessName || 'Store';
-      const sellerGST = invoiceData.seller?.gstNumber || 'Not Available';
+      const sellerGST = invoiceData.seller?.gstNumber || 'N/A';
+      const sellerAddress = invoiceData.seller?.address
+        ? `${invoiceData.seller.address.street || ''}, ${invoiceData.seller.address.city || ''}, ${invoiceData.seller.address.state || ''} - ${invoiceData.seller.address.pincode || ''}`
+        : 'Address not available';
 
-      doc.font('Helvetica')
-        .text(sellerName, 150, yPosition)
-        .text(`GSTIN: ${sellerGST}`, 350, yPosition);
+      doc.font('Courier-Bold').fontSize(7).fillColor('#000000').text('SOLD BY:', MARGIN, y); y += 10;
+      doc.font('Courier').fontSize(7).text(sellerName, MARGIN, y, { width: CONTENT_WIDTH }); y += 9;
+      doc.font('Courier').fontSize(6).text(`GSTIN: ${sellerGST}`, MARGIN, y, { width: CONTENT_WIDTH }); y += 8;
+      doc.font('Courier').fontSize(6).text(sellerAddress, MARGIN, y, { width: CONTENT_WIDTH }); y += 16;
+      dashedLine(y); y += 10;
 
-      yPosition += 12;
+      // ── CUSTOMER ─────────────────────────────────────────────
+      doc.font('Courier-Bold').fontSize(7).text('BILL TO:', MARGIN, y); y += 10;
+      doc.font('Courier').fontSize(7)
+        .text(`${invoiceData.customer.name}`, MARGIN, y, { width: CONTENT_WIDTH }); y += 9;
+      doc.font('Courier').fontSize(6)
+        .text(`Ph: ${invoiceData.customer.phone || 'N/A'}`, MARGIN, y, { width: CONTENT_WIDTH }); y += 8;
+      doc.font('Courier').fontSize(6)
+        .text(invoiceData.shippingAddress.addressLine || '', MARGIN, y, { width: CONTENT_WIDTH }); y += 8;
+      doc.font('Courier').fontSize(6)
+        .text(`${invoiceData.shippingAddress.city}, ${invoiceData.shippingAddress.state} - ${invoiceData.shippingAddress.pinCode}`, MARGIN, y, { width: CONTENT_WIDTH }); y += 8;
+      doc.font('Courier').fontSize(6)
+        .text(`Email: ${invoiceData.customer.email || 'N/A'}`, MARGIN, y, { width: CONTENT_WIDTH }); y += 12;
+      dashedLine(y); y += 10;
 
-      const sellerAddress = invoiceData.seller?.address ?
-        `${invoiceData.seller.address.street || ''}, ${invoiceData.seller.address.city || ''}, ${invoiceData.seller.address.state || ''} - ${invoiceData.seller.address.pincode || ''}` :
-        'Address not available';
+      // ── ITEMS TABLE ──────────────────────────────────────────
+      // Header
+      doc.font('Courier-Bold').fontSize(6.5);
+      doc.text('ITEM', MARGIN, y, { width: 90 });
+      doc.text('QTY', MARGIN + 90, y, { width: 20, align: 'right' });
+      doc.text('RATE', MARGIN + 112, y, { width: 28, align: 'right' });
+      doc.text('AMT', MARGIN + 142, y, { width: 28, align: 'right' });
+      doc.text('GST', MARGIN + 172, y, { width: 20, align: 'right' });
+      y += 9;
+      dashedLine(y); y += 10;
 
-      doc.text(sellerAddress, 150, yPosition, { width: 200 });
+      doc.font('Courier').fontSize(6.5);
 
-      yPosition += 25;
-
-      doc.font('Helvetica-Bold')
-        .text('Bill To:', 50, yPosition);
-
-      doc.font('Helvetica')
-        .text(invoiceData.customer.name, 150, yPosition)
-        .text(`Phone: ${invoiceData.customer.phone}`, 350, yPosition);
-
-      yPosition += 12;
-      doc.text(invoiceData.shippingAddress.addressLine, 150, yPosition, { width: 200 })
-        .text(`Email: ${invoiceData.customer.email}`, 350, yPosition);
-
-      yPosition += 12;
-      doc.text(`${invoiceData.shippingAddress.city}, ${invoiceData.shippingAddress.state} - ${invoiceData.shippingAddress.pinCode}`, 150, yPosition);
-
-      yPosition += 30;
-
-      doc.font('Helvetica-Bold')
-        .fontSize(9);
-
-      doc.text('Description', 50, yPosition);
-      doc.text('HSN', 200, yPosition);
-      doc.text('Qty', 250, yPosition);
-      doc.text('Rate', 280, yPosition);
-      doc.text('Amount', 320, yPosition);
-      doc.text('GST%', 370, yPosition);
-      doc.text('Taxable', 400, yPosition);
-      doc.text('GST', 450, yPosition);
-      doc.text('Total', 500, yPosition);
-
-      yPosition += 12;
-      doc.moveTo(50, yPosition).lineTo(550, yPosition).stroke();
-      yPosition += 5;
-
-      doc.font('Helvetica')
-        .fontSize(8);
-
-      invoiceData.items.forEach((item, index) => {
-        if (yPosition > 650) {
-          doc.addPage();
-          yPosition = 50;
-          doc.font('Helvetica-Bold').fontSize(9);
-          doc.text('Description', 50, yPosition);
-          doc.text('HSN', 200, yPosition);
-          doc.text('Qty', 250, yPosition);
-          doc.text('Rate', 280, yPosition);
-          doc.text('Amount', 320, yPosition);
-          doc.text('GST%', 370, yPosition);
-          doc.text('Taxable', 400, yPosition);
-          doc.text('GST', 450, yPosition);
-          doc.text('Total', 500, yPosition);
-          yPosition += 12;
-          doc.moveTo(50, yPosition).lineTo(550, yPosition).stroke();
-          yPosition += 5;
-          doc.font('Helvetica').fontSize(8);
-        }
-
+      invoiceData.items.forEach((item) => {
         const product = item.product;
-        doc.text(product?.name || 'Product', 50, yPosition, { width: 140 });
-        doc.text(product?.hsnCode || 'N/A', 200, yPosition);
-        doc.text(item.quantity.toString(), 250, yPosition);
-        doc.text(`₹${item.price.toFixed(2)}`, 280, yPosition);
-        doc.text(`₹${item.itemTotal.toFixed(2)}`, 320, yPosition);
-        doc.text(`${item.gstRate}%`, 370, yPosition);
-        doc.text(`₹${item.taxableValue.toFixed(2)}`, 400, yPosition);
-        doc.text(`₹${item.gstAmount.toFixed(2)}`, 450, yPosition);
-        doc.text(`₹${item.totalWithTax.toFixed(2)}`, 500, yPosition);
+        const name = (product?.name || 'Product').substring(0, 22);
+        const hsn = (product?.hsnCode || product?.category?.hsnCode) ? `HSN:${product?.hsnCode || product?.category?.hsnCode}` : '';
+        const gstLabel = item.gstRate > 0
+          ? (item.isWithinState
+              ? `CGST:${(item.gstRate / 2).toFixed(1)}%+SGST:${(item.gstRate / 2).toFixed(1)}%`
+              : `IGST:${item.gstRate}%`)
+          : 'GST: Nil';
 
-        yPosition += 20;
+        // Item name row
+        doc.font('Courier').fontSize(6.5).text(name, MARGIN, y, { width: 90 });
+        doc.text(String(item.quantity), MARGIN + 90, y, { width: 20, align: 'right' });
+        doc.text(`${item.price.toFixed(2)}`, MARGIN + 112, y, { width: 28, align: 'right' });
+        doc.text(`${item.itemTotal.toFixed(2)}`, MARGIN + 142, y, { width: 28, align: 'right' });
+        doc.text(`${item.gstAmount.toFixed(2)}`, MARGIN + 172, y, { width: 20, align: 'right' });
+        y += 9;
+
+        // HSN + GST detail row
+        doc.font('Courier').fontSize(5.5).fillColor('#000000');
+        const detailParts = [hsn, gstLabel, `Tax: ${item.taxableValue.toFixed(2)}`].filter(Boolean).join('  ');
+        doc.text(detailParts, MARGIN, y, { width: CONTENT_WIDTH });
+        y += 9;
       });
 
-      yPosition += 10;
-      doc.moveTo(350, yPosition).lineTo(550, yPosition).stroke();
-      yPosition += 5;
+      dashedLine(y); y += 10;
 
-      doc.fontSize(9);
-      doc.text('Subtotal:', 400, yPosition);
-      doc.text(`₹${invoiceData.summary.subtotal.toFixed(2)}`, 500, yPosition, { align: 'right' });
+      // ── TOTALS ───────────────────────────────────────────────
+      doc.font('Courier').fontSize(7);
+      row('Subtotal:', `Rs ${invoiceData.summary.subtotal.toFixed(2)}`, y); y += 10;
+      row('Delivery Charges:', `Rs ${invoiceData.summary.deliveryFee.toFixed(2)}`, y); y += 10;
 
-      yPosition += 12;
-      doc.text('Delivery Charges:', 400, yPosition);
-      doc.text(`₹${invoiceData.summary.deliveryFee.toFixed(2)}`, 500, yPosition, { align: 'right' });
+      // GST breakdown — always shown
+      dashedLine(y); y += 8;
+      doc.font('Courier-Bold').fontSize(7).text('GST BREAKDOWN:', MARGIN, y); y += 10;
+      doc.font('Courier').fontSize(7);
 
-      yPosition += 12;
-      doc.text('Total Before Tax:', 400, yPosition);
-      doc.text(`₹${invoiceData.summary.totalBeforeWallet.toFixed(2)}`, 500, yPosition, { align: 'right' });
-
-      if (invoiceData.summary.totalCGST > 0) {
-        yPosition += 12;
-        doc.text('CGST:', 400, yPosition);
-        doc.text(`₹${invoiceData.summary.totalCGST.toFixed(2)}`, 500, yPosition, { align: 'right' });
+      if (invoiceData.summary.totalCGST > 0 || invoiceData.summary.totalSGST > 0) {
+        row('CGST:', `Rs ${invoiceData.summary.totalCGST.toFixed(2)}`, y); y += 10;
+        row('SGST:', `Rs ${invoiceData.summary.totalSGST.toFixed(2)}`, y); y += 10;
       }
-
-      if (invoiceData.summary.totalSGST > 0) {
-        yPosition += 12;
-        doc.text('SGST:', 400, yPosition);
-        doc.text(`₹${invoiceData.summary.totalSGST.toFixed(2)}`, 500, yPosition, { align: 'right' });
-      }
-
       if (invoiceData.summary.totalIGST > 0) {
-        yPosition += 12;
-        doc.text('IGST:', 400, yPosition);
-        doc.text(`₹${invoiceData.summary.totalIGST.toFixed(2)}`, 500, yPosition, { align: 'right' });
+        row('IGST:', `Rs ${invoiceData.summary.totalIGST.toFixed(2)}`, y); y += 10;
       }
-
-      yPosition += 12;
-      doc.text('Total GST:', 400, yPosition);
-      doc.text(`₹${invoiceData.summary.totalGST.toFixed(2)}`, 500, yPosition, { align: 'right' });
+      if (invoiceData.summary.totalGST === 0) {
+        row('Total GST:', 'Rs 0.00 (Nil rated)', y); y += 10;
+      } else {
+        row('Total GST:', `Rs ${invoiceData.summary.totalGST.toFixed(2)}`, y); y += 10;
+      }
 
       if (invoiceData.payment.walletDeduction > 0) {
-        yPosition += 12;
-        doc.text('Wallet Deduction:', 400, yPosition);
-        doc.text(`-₹${invoiceData.payment.walletDeduction.toFixed(2)}`, 500, yPosition, { align: 'right' });
+        dashedLine(y); y += 8;
+        row('Wallet Deduction:', `-Rs ${invoiceData.payment.walletDeduction.toFixed(2)}`, y); y += 10;
       }
 
-      yPosition += 15;
-      doc.moveTo(400, yPosition).lineTo(550, yPosition).stroke();
-      yPosition += 5;
+      dashedLine(y); y += 8;
+      row('GRAND TOTAL:', `Rs ${invoiceData.summary.payableAmount.toFixed(2)}`, y, { bold: true, size: 8 }); y += 14;
+      dashedLine(y); y += 10;
 
-      doc.font('Helvetica-Bold')
-        .fontSize(11);
-      doc.text('Grand Total:', 400, yPosition);
-      doc.text(`₹${invoiceData.summary.payableAmount.toFixed(2)}`, 500, yPosition, { align: 'right' });
-
-      yPosition += 30;
-      doc.font('Helvetica')
-        .fontSize(9);
-      doc.text('Payment Details:', 50, yPosition);
-      yPosition += 12;
-      doc.text(`Method: ${invoiceData.payment.method.toUpperCase()}`, 50, yPosition);
-      doc.text(`Status: ${invoiceData.payment.status}`, 200, yPosition);
-
+      // ── PAYMENT ──────────────────────────────────────────────
+      doc.font('Courier-Bold').fontSize(7).text('PAYMENT:', MARGIN, y); y += 10;
+      doc.font('Courier').fontSize(7);
+      row('Method:', invoiceData.payment.method.toUpperCase(), y); y += 10;
+      row('Status:', invoiceData.payment.status.toUpperCase(), y); y += 10;
       if (invoiceData.secretCode) {
-        yPosition += 12;
-        doc.text(`Secret Code: ${invoiceData.secretCode}`, 50, yPosition);
+        row('Secret Code:', invoiceData.secretCode, y, { bold: true }); y += 10;
       }
 
-      yPosition += 25;
-      doc.font('Helvetica-Bold')
-        .text('GST Summary:', 50, yPosition);
-
-      yPosition += 15;
-      doc.font('Helvetica')
-        .fontSize(8);
-
-      if (invoiceData.gstSummary.withinState) {
-        doc.text(`Within State Supply (CGST + SGST): ₹${invoiceData.summary.totalCGST.toFixed(2)} + ₹${invoiceData.summary.totalSGST.toFixed(2)}`, 50, yPosition);
-        yPosition += 10;
+      // ── GST SUPPLY TYPE ─────────────────────────────────────
+      if (invoiceData.summary.totalGST > 0) {
+        dashedLine(y); y += 8;
+        doc.font('Courier').fontSize(6);
+        if (invoiceData.gstSummary.withinState) {
+          doc.text(`Within-state supply: CGST Rs ${invoiceData.summary.totalCGST.toFixed(2)} + SGST Rs ${invoiceData.summary.totalSGST.toFixed(2)}`, MARGIN, y, { width: CONTENT_WIDTH }); y += 9;
+        }
+        if (invoiceData.gstSummary.interState) {
+          doc.text(`Inter-state supply: IGST Rs ${invoiceData.summary.totalIGST.toFixed(2)}`, MARGIN, y, { width: CONTENT_WIDTH }); y += 9;
+        }
       }
 
-      if (invoiceData.gstSummary.interState) {
-        doc.text(`Inter-State Supply (IGST): ₹${invoiceData.summary.totalIGST.toFixed(2)}`, 50, yPosition);
-        yPosition += 10;
-      }
-
-      doc.fontSize(7)
-        .text('This is a computer-generated invoice and does not require a physical signature.', 50, 750, { align: 'center' })
-        .text('Thank you for your business!', 50, 760, { align: 'center' });
+      // ── FOOTER ───────────────────────────────────────────────
+      y += 4;
+      dashedLine(y); y += 10;
+      center('Computer generated invoice.', y, { size: 6 }); y += 9;
+      center('No signature required.', y, { size: 6 }); y += 9;
+      center('Thank you for shopping with Fast 2!', y, { size: 6 }); y += 12;
 
       doc.end();
     } catch (error) {
