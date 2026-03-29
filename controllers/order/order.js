@@ -409,6 +409,15 @@ exports.createOrder = async (req, res) => {
         gstAmount
       };
     });
+    const scratchGifts = products
+      .filter(p => p.scratchGift && p.scratchGift.isEnabled && p.price > 200)
+      .map(p => ({
+        product: p._id,
+        coinsAmount: p.scratchGift.coinsAmount,
+        isScratched: false,
+        scratchedAt: null
+      }));
+
     const firstSellerEntry = Array.from(sellerMap.values())[0];
     const primarySeller = firstSellerEntry ? firstSellerEntry.seller._id : null;
 
@@ -437,6 +446,7 @@ exports.createOrder = async (req, res) => {
       walletDeduction,
       cashOnDelivery,
       seller: primarySeller,
+      scratchGifts,
       ...(paymentMethod === "online" && razorpayOrder && {
         razorpayOrderId: razorpayOrder.id,
         razorpayReceipt: razorpayOrder.receipt,
@@ -1892,5 +1902,54 @@ exports.updateOrderStatus = async (req, res) => {
   } catch (err) {
     console.error("Update status error:", err);
     res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.scratchCard = async (req, res) => {
+  try {
+    const { orderId, scratchIndex } = req.params;
+    const userId = req.user._id;
+
+    const order = await Order.findOne({ orderId, user: userId });
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    if (order.status !== 'delivered') {
+      return res.status(400).json({
+        success: false,
+        message: 'Scratch card is only available after delivery'
+      });
+    }
+
+    const idx = parseInt(scratchIndex, 10);
+    const gift = order.scratchGifts[idx];
+    if (!gift) {
+      return res.status(404).json({ success: false, message: 'Scratch card not found' });
+    }
+
+    if (gift.isScratched) {
+      return res.status(400).json({ success: false, message: 'This scratch card has already been used' });
+    }
+
+    gift.isScratched = true;
+    gift.scratchedAt = new Date();
+    await order.save();
+
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { $inc: { wallet: gift.coinsAmount } },
+      { new: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: `Congratulations! ${gift.coinsAmount} coins credited to your wallet`,
+      coinsAwarded: gift.coinsAmount,
+      newWalletBalance: updatedUser.wallet
+    });
+  } catch (err) {
+    console.error('Scratch card error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
   }
 };

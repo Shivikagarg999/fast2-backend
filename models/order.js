@@ -163,7 +163,14 @@ const orderSchema = new mongoose.Schema(
     prescriptionImage: {
       url: { type: String, default: '' },
       fileId: { type: String, default: '' }
-    }
+    },
+
+    scratchGifts: [{
+      product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+      coinsAmount: { type: Number, default: 0 },
+      isScratched: { type: Boolean, default: false },
+      scratchedAt: { type: Date, default: null }
+    }]
   },
   { timestamps: true }
 );

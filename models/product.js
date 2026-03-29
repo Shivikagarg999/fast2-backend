@@ -88,9 +88,21 @@ const productSchema = new mongoose.Schema({
   ],
   
   serviceablePincodes: [{ type: String }],
-  
+
+  scratchGift: {
+    isEnabled: { type: Boolean, default: false },
+    coinsAmount: { type: Number, default: 0 }
+  },
+
   isActive: { type: Boolean, default: true }
 }, { timestamps: true });
+
+productSchema.pre('save', function (next) {
+  if (this.scratchGift && this.scratchGift.isEnabled && this.price <= 200) {
+    return next(new Error('Scratch gift can only be attached to products with price above 200'));
+  }
+  next();
+});
 
 productSchema.path('images').validate(function(images) {
   return images.length <= 5;
