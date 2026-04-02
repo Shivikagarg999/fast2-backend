@@ -1958,3 +1958,53 @@ exports.scratchOrderCard = async (req, res) => {
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 };
+
+exports.redeemScratchCoupon = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { couponCode, orderAmount } = req.body;
+
+    if (!couponCode || !orderAmount) {
+      return res.status(400).json({ success: false, message: 'couponCode and orderAmount are required' });
+    }
+
+    const scratchOrder = await Order.findOne({
+      user: userId,
+      'orderScratchCard.couponCode': couponCode.toUpperCase(),
+      'orderScratchCard.isScratched': true
+    });
+
+    if (!scratchOrder) {
+      return res.status(404).json({ success: false, message: 'No scratch card found for this coupon code' });
+    }
+
+    if (scratchOrder.orderScratchCard.isRedeemed) {
+      return res.status(400).json({ success: false, message: 'This scratch card coupon has already been redeemed' });
+    }
+
+    const coupon = await Coupon.validateCoupon(couponCode, userId, orderAmount);
+    const discount = coupon.calculateDiscount(orderAmount);
+    const finalAmount = orderAmount - discount;
+
+    scratchOrder.orderScratchCard.isRedeemed = true;
+    scratchOrder.orderScratchCard.redeemedAt = new Date();
+    await scratchOrder.save();
+
+    return res.status(200).json({
+      success: true,
+      message: 'Scratch card coupon applied successfully',
+      coupon: {
+        code: coupon.code,
+        description: coupon.description,
+        discountType: coupon.discountType,
+        discountValue: coupon.discountValue,
+        discountAmount: discount
+      },
+      orderAmount,
+      discount,
+      finalAmount
+    });
+  } catch (err) {
+    return res.status(400).json({ success: false, message: err.message });
+  }
+};

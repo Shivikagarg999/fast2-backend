@@ -169,7 +169,9 @@ const orderSchema = new mongoose.Schema(
       isEligible: { type: Boolean, default: false },
       couponCode: { type: String, default: null },
       isScratched: { type: Boolean, default: false },
-      scratchedAt: { type: Date, default: null }
+      scratchedAt: { type: Date, default: null },
+      isRedeemed: { type: Boolean, default: false },
+      redeemedAt: { type: Date, default: null }
     }
   },
   { timestamps: true }
