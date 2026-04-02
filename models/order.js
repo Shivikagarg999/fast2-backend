@@ -165,12 +165,12 @@ const orderSchema = new mongoose.Schema(
       fileId: { type: String, default: '' }
     },
 
-    scratchGifts: [{
-      product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
-      coinsAmount: { type: Number, default: 0 },
+    orderScratchCard: {
+      isEligible: { type: Boolean, default: false },
+      couponCode: { type: String, default: null },
       isScratched: { type: Boolean, default: false },
       scratchedAt: { type: Date, default: null }
-    }]
+    }
   },
   { timestamps: true }
 );

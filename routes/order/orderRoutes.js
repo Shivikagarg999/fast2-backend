@@ -12,7 +12,7 @@ router.post("/:orderId/refund", auth, orderController.refundPayment);
 router.post("/webhooks/razorpay", orderController.razorpayWebhook);
 router.get("/my-orders", auth, orderController.getMyOrders);
 router.put("/:orderId/status", auth, orderController.updateOrderStatus);
-router.post("/:orderId/scratch/:scratchIndex", auth, orderController.scratchCard);
+router.post("/:orderId/scratch-coupon", auth, orderController.scratchOrderCard);
 router.get('/:orderId/invoice', auth, orderController.downloadInvoice);
 router.get("/:orderId/payout-details", auth, orderController.getOrderPayoutDetails);
 router.post("/:orderId/seller-payout", auth, orderController.processSellerPayout);

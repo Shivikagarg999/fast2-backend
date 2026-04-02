@@ -9,7 +9,7 @@ const fs = require('fs');
 const upload = multer({ 
   dest: 'uploads/csv/',
   limits: {
-    fileSize: 5 * 1024 * 1024 // 5MB limit
+    fileSize: 5 * 1024 * 1024
   }
 });
 

@@ -10,8 +10,6 @@ const {
   downloadProductUploadTemplate,
   uploadProductsCSV
 } = require('../../../controllers/product/productController');
-const scratchGiftController = require('../../../controllers/admin/product/scratchGiftController');
-
 // Configure multer for CSV upload
 const upload = multer({ 
   dest: 'uploads/csv/',
@@ -35,10 +33,5 @@ router.get('/out-of-stock', getOutOfStockProducts);
 router.get('/download/csv', downloadProductsByStatusCSV);
 router.get('/download/template', downloadProductUploadTemplate);
 router.post('/upload/csv', upload.single('csvFile'), uploadProductsCSV);
-
-// Scratch gift routes
-router.get('/:productId/scratch-gift', scratchGiftController.getScratchGift);
-router.post('/:productId/scratch-gift', scratchGiftController.attachScratchGift);
-router.delete('/:productId/scratch-gift', scratchGiftController.removeScratchGift);
 
 module.exports = router;

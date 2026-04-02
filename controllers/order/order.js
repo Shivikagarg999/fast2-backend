@@ -4,6 +4,7 @@ const User = require('../../models/user');
 const Seller = require('../../models/seller');
 const Promotor = require('../../models/promotor');
 const Payout = require('../../models/payout');
+const Coupon = require('../../models/coupon');
 const mongoose = require('mongoose');
 const Razorpay = require('razorpay');
 const imagekit = require('../../utils/imagekit');
@@ -409,14 +410,21 @@ exports.createOrder = async (req, res) => {
         gstAmount
       };
     });
-    const scratchGifts = products
-      .filter(p => p.scratchGift && p.scratchGift.isEnabled && p.price > 200)
-      .map(p => ({
-        product: p._id,
-        coinsAmount: p.scratchGift.coinsAmount,
-        isScratched: false,
-        scratchedAt: null
-      }));
+    let orderScratchCard = { isEligible: false, couponCode: null, isScratched: false, scratchedAt: null };
+    if (subtotal > 199) {
+      const now = new Date();
+      const availableCoupons = await Coupon.find({
+        isActive: true,
+        startDate: { $lte: now },
+        endDate: { $gte: now },
+        $or: [{ usageLimit: null }, { $expr: { $lt: ['$usedCount', '$usageLimit'] } }]
+      }).lean();
+
+      if (availableCoupons.length > 0) {
+        const picked = availableCoupons[Math.floor(Math.random() * availableCoupons.length)];
+        orderScratchCard = { isEligible: true, couponCode: picked.code, isScratched: false, scratchedAt: null };
+      }
+    }
 
     const firstSellerEntry = Array.from(sellerMap.values())[0];
     const primarySeller = firstSellerEntry ? firstSellerEntry.seller._id : null;
@@ -446,7 +454,7 @@ exports.createOrder = async (req, res) => {
       walletDeduction,
       cashOnDelivery,
       seller: primarySeller,
-      scratchGifts,
+      orderScratchCard,
       ...(paymentMethod === "online" && razorpayOrder && {
         razorpayOrderId: razorpayOrder.id,
         razorpayReceipt: razorpayOrder.receipt,
@@ -524,6 +532,9 @@ exports.createOrder = async (req, res) => {
           percentage: 30,
           status: 'pending'
         })),
+        orderScratchCard: orderScratchCard.isEligible
+          ? { isEligible: true, isScratched: false, message: 'You have a scratch card! Scratch after delivery to reveal your coupon.' }
+          : { isEligible: false },
         createdAt: order.createdAt
       }
     };
@@ -1702,8 +1713,14 @@ exports.generatePDFInvoice = async (invoiceData) => {
 
       // Helper: dashed separator line
       const dashedLine = (y) => {
-        doc.fontSize(7).font('Courier').fillColor('#000000')
-          .text('- '.repeat(28), MARGIN, y, { width: CONTENT_WIDTH, align: 'left', lineBreak: false });
+        doc.save()
+          .moveTo(MARGIN, y)
+          .lineTo(PAGE_WIDTH - MARGIN, y)
+          .dash(2, { space: 2 })
+          .lineWidth(0.5)
+          .stroke('#000000')
+          .undash()
+          .restore();
       };
 
       // Helper: row with label on left, value on right
@@ -1905,9 +1922,9 @@ exports.updateOrderStatus = async (req, res) => {
   }
 };
 
-exports.scratchCard = async (req, res) => {
+exports.scratchOrderCard = async (req, res) => {
   try {
-    const { orderId, scratchIndex } = req.params;
+    const { orderId } = req.params;
     const userId = req.user._id;
 
     const order = await Order.findOne({ orderId, user: userId });
@@ -1922,34 +1939,29 @@ exports.scratchCard = async (req, res) => {
       });
     }
 
-    const idx = parseInt(scratchIndex, 10);
-    const gift = order.scratchGifts[idx];
-    if (!gift) {
-      return res.status(404).json({ success: false, message: 'Scratch card not found' });
+    if (!order.orderScratchCard || !order.orderScratchCard.isEligible) {
+      return res.status(400).json({ success: false, message: 'No scratch card available for this order' });
     }
 
-    if (gift.isScratched) {
-      return res.status(400).json({ success: false, message: 'This scratch card has already been used' });
+    if (order.orderScratchCard.isScratched) {
+      return res.status(400).json({
+        success: false,
+        message: 'Scratch card already used',
+        couponCode: order.orderScratchCard.couponCode
+      });
     }
 
-    gift.isScratched = true;
-    gift.scratchedAt = new Date();
+    order.orderScratchCard.isScratched = true;
+    order.orderScratchCard.scratchedAt = new Date();
     await order.save();
-
-    const updatedUser = await User.findByIdAndUpdate(
-      userId,
-      { $inc: { wallet: gift.coinsAmount } },
-      { new: true }
-    );
 
     return res.status(200).json({
       success: true,
-      message: `Congratulations! ${gift.coinsAmount} coins credited to your wallet`,
-      coinsAwarded: gift.coinsAmount,
-      newWalletBalance: updatedUser.wallet
+      message: 'Congratulations! Here is your coupon code.',
+      couponCode: order.orderScratchCard.couponCode
     });
   } catch (err) {
-    console.error('Scratch card error:', err);
+    console.error('Scratch order card error:', err);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 };
