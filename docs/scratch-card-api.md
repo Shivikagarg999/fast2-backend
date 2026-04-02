@@ -107,7 +107,6 @@ If no active coupons exist at the time of order, no scratch card is assigned (`i
 
 **Validations**
 - Order must belong to the logged-in user
-- Order status must be `delivered`
 - `orderScratchCard.isEligible` must be `true`
 - Card must not already be scratched
 
@@ -122,12 +121,11 @@ If no active coupons exist at the time of order, no scratch card is assigned (`i
 
 **Error Responses**
 
-| Status | Message                                         | Reason                        |
-|--------|-------------------------------------------------|-------------------------------|
-| `404`  | `Order not found`                               | Invalid order or wrong user   |
-| `400`  | `Scratch card is only available after delivery` | Order not delivered yet       |
-| `400`  | `No scratch card available for this order`      | Order total was ≤ ₹200        |
-| `400`  | `Scratch card already used`                     | Already scratched (shows code)|
+| Status | Message                                    | Reason                        |
+|--------|--------------------------------------------|-------------------------------|
+| `404`  | `Order not found`                          | Invalid order or wrong user   |
+| `400`  | `No scratch card available for this order` | Order total was ≤ ₹200        |
+| `400`  | `Scratch card already used`                | Already scratched (shows code)|
 
 ---
 
@@ -146,7 +144,7 @@ If no active coupons exist at the time of order, no scratch card is assigned (`i
 
 - Scratch card is assigned when **order subtotal > ₹200**
 - The coupon is randomly picked from **all active, in-date coupons**
-- Scratch is only allowed **after delivery**
+- Scratch is available **immediately after placing the order**
 - Each order has **one scratch card**
 - Each card can be scratched **only once**
 - The coupon code is **hidden** in the order response until scratched

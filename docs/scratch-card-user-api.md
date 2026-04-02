@@ -2,7 +2,7 @@
 
 ## Overview
 
-When your order total exceeds **₹200**, you automatically receive a scratch card. After your order is delivered, scratch the card to reveal a **coupon code** that you can redeem on your next order.
+When your order total exceeds **₹200**, you automatically receive a scratch card. You can scratch it **immediately after placing the order** to reveal a **coupon code** that you can redeem on your next order.
 
 ---
 
@@ -45,12 +45,11 @@ Authorization: Bearer <token>
 
 **Error Responses**
 
-| Status | Message                                         | Reason                                       |
-|--------|-------------------------------------------------|----------------------------------------------|
-| `404`  | `Order not found`                               | Order doesn't exist or doesn't belong to you |
-| `400`  | `Scratch card is only available after delivery` | Order not yet delivered                       |
-| `400`  | `No scratch card available for this order`      | Order total was ₹200 or below                |
-| `400`  | `Scratch card already used`                     | Card was already scratched (coupon shown)    |
+| Status | Message                                    | Reason                                       |
+|--------|--------------------------------------------|----------------------------------------------|
+| `404`  | `Order not found`                          | Order doesn't exist or doesn't belong to you |
+| `400`  | `No scratch card available for this order` | Order total was ₹200 or below                |
+| `400`  | `Scratch card already used`                | Card was already scratched (coupon shown)    |
 
 ---
 
@@ -58,7 +57,7 @@ Authorization: Bearer <token>
 
 1. Place an order with a total amount **above ₹200**
 2. A scratch card with a coupon code is automatically assigned to your order
-3. Once your order status becomes **delivered**, scratch the card
+3. Scratch the card **immediately** from the order confirmation screen
 4. The coupon code is revealed — use it on your next order at checkout
 
 ---
@@ -86,7 +85,7 @@ Authorization: Bearer <token>
 ## Rules
 
 - Scratch card is assigned only when **order total > ₹200**
-- Card can only be scratched **after delivery**
+- Card can be scratched **immediately after placing the order**
 - Each scratch card can be scratched **only once**
 - One scratch card per order
 - The revealed coupon code can be applied at checkout on your next order

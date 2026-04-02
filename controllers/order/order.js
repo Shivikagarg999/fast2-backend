@@ -1932,13 +1932,6 @@ exports.scratchOrderCard = async (req, res) => {
       return res.status(404).json({ success: false, message: 'Order not found' });
     }
 
-    if (order.status !== 'delivered') {
-      return res.status(400).json({
-        success: false,
-        message: 'Scratch card is only available after delivery'
-      });
-    }
-
     if (!order.orderScratchCard || !order.orderScratchCard.isEligible) {
       return res.status(400).json({ success: false, message: 'No scratch card available for this order' });
     }
