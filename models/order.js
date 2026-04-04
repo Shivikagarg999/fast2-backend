@@ -56,6 +56,10 @@ const orderSchema = new mongoose.Schema(
       type: Number,
       required: true
     },
+    handlingCharge: {
+      type: Number,
+      default: 0
+    },
     coupon: {
       code: String,
       discount: {

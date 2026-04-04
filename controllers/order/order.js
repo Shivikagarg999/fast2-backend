@@ -25,7 +25,8 @@ exports.createOrder = async (req, res) => {
       shippingAddress,
       paymentMethod = "cod",
       useWallet = false,
-      coupon
+      coupon,
+      scratchCouponCode
     } = req.body;
 
     if (typeof items === 'string') {
@@ -294,7 +295,11 @@ exports.createOrder = async (req, res) => {
       isFreeDelivery = true;
     }
 
-    let total = subtotal + deliveryCharges;
+    const HANDLING_CHARGE_PER_SHOP = 2;
+    const numberOfShops = sellerDeliveryMap.size;
+    const handlingCharge = numberOfShops * HANDLING_CHARGE_PER_SHOP;
+
+    let total = subtotal + deliveryCharges + handlingCharge;
     totalGst = parseFloat(totalGst.toFixed(2));
 
     let discount = 0;
@@ -303,6 +308,44 @@ exports.createOrder = async (req, res) => {
     if (coupon && coupon.discount) {
       discount = Math.min(coupon.discount, finalAmount);
       finalAmount = parseFloat((finalAmount - discount).toFixed(2));
+    }
+
+    let scratchCouponDiscount = 0;
+    let scratchCouponOrder = null;
+    let scratchCouponDetails = null;
+
+    if (scratchCouponCode) {
+      scratchCouponOrder = await Order.findOne({
+        user: userId,
+        'orderScratchCard.couponCode': scratchCouponCode.toUpperCase(),
+        'orderScratchCard.isScratched': true,
+        'orderScratchCard.isRedeemed': false
+      });
+
+      if (!scratchCouponOrder) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          error: 'Invalid or already redeemed scratch card coupon'
+        });
+      }
+
+      try {
+        const scratchCoupon = await Coupon.validateCoupon(scratchCouponCode, userId, finalAmount);
+        scratchCouponDiscount = scratchCoupon.calculateDiscount(finalAmount);
+        finalAmount = parseFloat((finalAmount - scratchCouponDiscount).toFixed(2));
+        scratchCouponDetails = {
+          code: scratchCoupon.code,
+          discountType: scratchCoupon.discountType,
+          discountValue: scratchCoupon.discountValue,
+          discountAmount: scratchCouponDiscount
+        };
+      } catch (err) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ success: false, error: err.message });
+      }
     }
 
     let walletDeduction = 0;
@@ -444,6 +487,7 @@ exports.createOrder = async (req, res) => {
       subtotal: subtotal,
       deliveryCharges: deliveryCharges,
       isFreeDelivery: isFreeDelivery,
+      handlingCharge: handlingCharge,
       total: total,
       totalGst: totalGst,
       coupon: coupon || {},
@@ -501,6 +545,12 @@ exports.createOrder = async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
+    if (scratchCouponOrder) {
+      scratchCouponOrder.orderScratchCard.isRedeemed = true;
+      scratchCouponOrder.orderScratchCard.redeemedAt = new Date();
+      await scratchCouponOrder.save();
+    }
+
     const response = {
       success: true,
       message: "Order created successfully",
@@ -510,6 +560,8 @@ exports.createOrder = async (req, res) => {
         subtotal: subtotal,
         deliveryCharges: deliveryCharges,
         isFreeDelivery: isFreeDelivery,
+        handlingCharge: handlingCharge,
+        numberOfShops: numberOfShops,
         total: total,
         finalAmount: finalAmount,
         walletDeduction: walletDeduction,
@@ -535,6 +587,7 @@ exports.createOrder = async (req, res) => {
         orderScratchCard: orderScratchCard.isEligible
           ? { isEligible: true, isScratched: false, message: 'You have a scratch card! Scratch after delivery to reveal your coupon.' }
           : { isEligible: false },
+        ...(scratchCouponDetails && { scratchCouponApplied: scratchCouponDetails }),
         createdAt: order.createdAt
       }
     };
@@ -1530,7 +1583,7 @@ exports.downloadInvoice = async (req, res) => {
     const { orderId } = req.params;
     const userId = req.user._id;
 
-    const order = await Order.findById(orderId)
+    const order = await Order.findOne({ orderId })
       .populate('user', 'name email phone')
       .populate('seller', 'name businessName gstNumber panNumber address bankDetails')
       .populate({
@@ -1584,7 +1637,10 @@ exports.downloadInvoice = async (req, res) => {
     // Use values already saved on the order — do NOT recalculate
     const orderSubtotal = order.subtotal || order.items.reduce((s, i) => s + i.price * i.quantity, 0);
     const deliveryFee = order.deliveryCharges || 0;
+    const handlingFee = order.handlingCharge || 0;
     const savedTotalGST = order.totalGst || 0;
+    const couponDiscount = order.coupon?.discount || 0;
+    const couponCode = order.coupon?.code || null;
 
     // For CGST/SGST split: if all within-state use half/half, else treat as IGST
     const shippingState = order.shippingAddress.state;
@@ -1633,7 +1689,7 @@ exports.downloadInvoice = async (req, res) => {
     });
 
     const totalGST = savedTotalGST;
-    const grandTotalBeforeWallet = orderSubtotal + deliveryFee;
+    const grandTotalBeforeWallet = orderSubtotal + deliveryFee + handlingFee;
     const finalPayableAmount = order.cashOnDelivery > 0 ? order.cashOnDelivery : order.finalAmount;
 
     const invoiceData = {
@@ -1658,6 +1714,9 @@ exports.downloadInvoice = async (req, res) => {
       summary: {
         subtotal: orderSubtotal,
         deliveryFee: deliveryFee,
+        handlingFee: handlingFee,
+        couponDiscount: couponDiscount,
+        couponCode: couponCode,
         totalBeforeWallet: grandTotalBeforeWallet,
         totalGST: totalGST,
         totalCGST: totalCGST,
@@ -1749,11 +1808,11 @@ exports.generatePDFInvoice = async (invoiceData) => {
       y += 16;
       center('TAX INVOICE', y, { bold: true, size: 8 });
       y += 12;
-      center('GSTIN: 07AABCU9603R1ZM', y, { size: 6 });
+      center('GSTIN: ', y, { size: 6 });
       y += 9;
-      center('123 Business Street, Delhi - 110001', y, { size: 6 });
+      center('Gwalior, Madhya Pradesh', y, { size: 6 });
       y += 9;
-      center('PAN: AABCU9603R', y, { size: 6 });
+      center('PAN: ', y, { size: 6 });
       y += 10;
       dashedLine(y); y += 10;
 
@@ -1837,6 +1896,15 @@ exports.generatePDFInvoice = async (invoiceData) => {
       doc.font('Courier').fontSize(7);
       row('Subtotal:', `Rs ${invoiceData.summary.subtotal.toFixed(2)}`, y); y += 10;
       row('Delivery Charges:', `Rs ${invoiceData.summary.deliveryFee.toFixed(2)}`, y); y += 10;
+      if (invoiceData.summary.handlingFee > 0) {
+        row('Handling Charge:', `Rs ${invoiceData.summary.handlingFee.toFixed(2)}`, y); y += 10;
+      }
+      if (invoiceData.summary.couponDiscount > 0) {
+        const couponLabel = invoiceData.summary.couponCode
+          ? `Coupon (${invoiceData.summary.couponCode}):`
+          : 'Coupon Discount:';
+        row(couponLabel, `-Rs ${invoiceData.summary.couponDiscount.toFixed(2)}`, y); y += 10;
+      }
 
       // GST breakdown — always shown
       dashedLine(y); y += 8;
@@ -1955,6 +2023,44 @@ exports.scratchOrderCard = async (req, res) => {
     });
   } catch (err) {
     console.error('Scratch order card error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+exports.getScratchCouponHistory = async (req, res) => {
+  try {
+    const userId = req.user._id;
+
+    const orders = await Order.find({
+      user: userId,
+      'orderScratchCard.isEligible': true
+    })
+      .select('orderId orderScratchCard createdAt total finalAmount')
+      .sort({ createdAt: -1 });
+
+    const history = orders.map(order => ({
+      orderId: order.orderId,
+      orderDate: order.createdAt,
+      orderTotal: order.finalAmount,
+      couponCode: order.orderScratchCard.isScratched ? order.orderScratchCard.couponCode : null,
+      isScratched: order.orderScratchCard.isScratched,
+      scratchedAt: order.orderScratchCard.scratchedAt,
+      isRedeemed: order.orderScratchCard.isRedeemed,
+      redeemedAt: order.orderScratchCard.redeemedAt,
+      status: order.orderScratchCard.isRedeemed
+        ? 'redeemed'
+        : order.orderScratchCard.isScratched
+          ? 'scratched'
+          : 'unscratched'
+    }));
+
+    return res.status(200).json({
+      success: true,
+      total: history.length,
+      scratchCoupons: history
+    });
+  } catch (err) {
+    console.error('Get scratch coupon history error:', err);
     return res.status(500).json({ success: false, message: 'Server error' });
   }
 };
