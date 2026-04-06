@@ -1,4 +1,4 @@
-const admin = require('../config/firebase');
+const driverApp = require('../config/firebaseDriver');
 const Driver = require('../models/driver');
 
 /**
@@ -10,7 +10,7 @@ const Driver = require('../models/driver');
  * @param {object} data  - extra key/value pairs (all values must be strings)
  */
 exports.sendDriverFcm = async (fcmToken, title, body, channelType = 'general', data = {}) => {
-    if (!admin || admin.apps.length === 0) return;
+    if (!driverApp) return;
     if (!fcmToken) return;
 
     const channelId = channelType === 'order' ? 'order_channel' : 'general_channel';
@@ -54,7 +54,7 @@ exports.sendDriverFcm = async (fcmToken, title, body, channelType = 'general', d
     };
 
     try {
-        await admin.messaging().send(message);
+        await driverApp.messaging().send(message);
     } catch (error) {
         console.error(`FCM send error (token: ...${fcmToken.slice(-6)}):`, error.message);
     }
