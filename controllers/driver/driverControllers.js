@@ -781,6 +781,22 @@ exports.sendConfirmationOtp = async (req, res) => {
 };
 
 
+exports.updateFcmToken = async (req, res) => {
+  try {
+    const { fcmToken } = req.body;
+    if (!fcmToken) {
+      return res.status(400).json({ success: false, message: 'fcmToken is required' });
+    }
+
+    await Driver.findByIdAndUpdate(req.driver.driverId, { 'auth.fcmToken': fcmToken });
+
+    res.status(200).json({ success: true, message: 'FCM token updated' });
+  } catch (error) {
+    console.error('Error updating FCM token:', error);
+    res.status(500).json({ success: false, message: 'Internal Server Error' });
+  }
+};
+
 exports.getMyPayouts = async (req, res) => {
   try {
     const driverId = req.driver.driverId;

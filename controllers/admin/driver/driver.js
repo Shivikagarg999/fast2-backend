@@ -1,6 +1,7 @@
 const Driver = require('../../../models/driver');
 const Order = require('../../../models/order');
 const mongoose = require('mongoose');
+const { sendDriverNotification } = require('../../../services/driverNotificationService');
 
 exports.getAllDrivers = async (req, res) => {
   try {
@@ -543,6 +544,24 @@ exports.assignOrderToDriver = async (req, res) => {
     const updatedOrder = await Order.findById(orderId)
       .populate('user', 'name email phone')
       .populate('driver', 'personalInfo.name personalInfo.phone vehicle');
+
+    // Notify the assigned driver with custom ringtone
+    try {
+      await sendDriverNotification(
+        driverId,
+        'New Order Assigned!',
+        `Order #${order.orderId} has been assigned to you. Tap to view details.`,
+        'order',
+        {
+          orderId: String(order._id),
+          orderCustomId: String(order.orderId),
+          type: 'order_assigned',
+          screen: 'OrderDetails',
+        }
+      );
+    } catch (notifErr) {
+      console.error('Driver FCM notification error:', notifErr.message);
+    }
 
     res.json({
       success: true,

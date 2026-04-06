@@ -9,6 +9,7 @@ const mongoose = require('mongoose');
 const Razorpay = require('razorpay');
 const imagekit = require('../../utils/imagekit');
 const Shop = require('../../models/shop');
+const Warehouse = require('../../models/warehouse');
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -592,7 +593,7 @@ exports.createOrder = async (req, res) => {
       }
     };
 
-    // Send Notification
+    // Send notification to customer
     try {
       const notificationService = require('../../services/notificationService');
       await notificationService.sendNotification(
@@ -605,6 +606,23 @@ exports.createOrder = async (req, res) => {
       );
     } catch (notifError) {
       console.error('Notification error:', notifError);
+    }
+
+    // Notify all online drivers near the warehouse with the custom ringtone
+    try {
+      const { notifyNearbyDrivers } = require('../../services/driverNotificationService');
+      const warehouse = await Warehouse.findOne({ sellers: primarySeller }).select('location.coordinates');
+      if (warehouse?.location?.coordinates?.lat && warehouse?.location?.coordinates?.lng) {
+        // Fire-and-forget — don't await so it never delays the response
+        notifyNearbyDrivers(
+          warehouse.location.coordinates.lat,
+          warehouse.location.coordinates.lng,
+          order._id,
+          order.orderId
+        ).catch(e => console.error('Nearby driver notify error:', e.message));
+      }
+    } catch (driverNotifError) {
+      console.error('Driver notification setup error:', driverNotifError.message);
     }
 
     return res.status(201).json(response);

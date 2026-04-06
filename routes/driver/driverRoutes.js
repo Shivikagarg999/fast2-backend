@@ -11,8 +11,9 @@ const {
   getOngoingOrders,
   verifySecretCodeAndPayment,
   checkOrderPlaced,
-  sendConfirmationOtp,  
-  getMyPayouts
+  sendConfirmationOtp,
+  getMyPayouts,
+  updateFcmToken,
 } = require("../../controllers/driver/driverControllers");
 const { authenticateToken } = require("../../middlewares/driverAuth");
 
@@ -49,5 +50,8 @@ router.post(
   authenticateToken,
   sendConfirmationOtp
 );
+
+// Save/refresh FCM token for push notifications
+router.post("/fcm-token", authenticateToken, updateFcmToken);
 
 module.exports = router;
