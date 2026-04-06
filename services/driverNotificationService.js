@@ -83,25 +83,16 @@ exports.sendDriverNotification = async (driverId, title, body, channelType = 'ge
  * @param {string} orderCustomId  - Human-readable order ID (e.g. FST042)
  * @param {number} maxDistance    - metres, default 5 km
  */
-exports.notifyNearbyDrivers = async (warehouseLat, warehouseLng, orderId, orderCustomId, maxDistance = 5000) => {
+exports.notifyNearbyDrivers = async (warehouseLat, warehouseLng, orderId, orderCustomId) => {
     try {
         const drivers = await Driver.find({
             'workInfo.status': 'approved',
             'workInfo.availability': 'online',
             'auth.fcmToken': { $ne: null },
-            'workInfo.currentLocation.coordinates': {
-                $near: {
-                    $geometry: {
-                        type: 'Point',
-                        coordinates: [warehouseLng, warehouseLat], // GeoJSON: [lng, lat]
-                    },
-                    $maxDistance: maxDistance,
-                },
-            },
         }).select('auth.fcmToken');
 
         if (!drivers.length) {
-            console.log(`No online drivers within ${maxDistance}m of warehouse for order ${orderCustomId}`);
+            console.log(`No online drivers found for order ${orderCustomId}`);
             return;
         }
 
