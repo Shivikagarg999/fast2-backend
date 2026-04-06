@@ -31,22 +31,15 @@ exports.sendDriverFcm = async (fcmToken, title, body, channelType = 'general', d
             notification: {
                 title,
                 body,
-                channelId,
-                priority: 'HIGH',
-                defaultSound: channelType !== 'order',
-                sound: channelType === 'order' ? 'universfield_ringtone_035_480585' : null,
+                channelId,  // routes Android to the correct channel + its sound
             },
         },
         apns: {
-            headers: {
-                'apns-priority': '10',
-            },
+            headers: { 'apns-priority': '10' },
             payload: {
                 aps: {
                     alert: { title, body },
                     sound: iosSound,
-                    badge: 1,
-                    contentAvailable: true,
                 },
             },
         },
