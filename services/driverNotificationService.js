@@ -83,7 +83,7 @@ exports.sendDriverNotification = async (driverId, title, body, channelType = 'ge
  * @param {string} orderCustomId  - Human-readable order ID (e.g. FST042)
  * @param {number} maxDistance    - metres, default 5 km
  */
-exports.notifyNearbyDrivers = async (warehouseLat, warehouseLng, orderId, orderCustomId) => {
+exports.notifyNearbyDrivers = async (_lat, _lng, orderId, orderCustomId) => {
     try {
         const drivers = await Driver.find({
             'workInfo.status': 'approved',
