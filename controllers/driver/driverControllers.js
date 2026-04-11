@@ -2,11 +2,13 @@ const Order = require("../../models/order");
 const Driver = require("../../models/driver");
 const DriverEarning = require('../../models/driverEarnings');
 const { sendNotification } = require("../../services/notificationService");
+const { notifyOrderTaken } = require("../../services/driverNotificationService");
+const { emitOrderTaken, serverLog } = require("../../socketManager");
 
 exports.getPendingOrders = async (req, res) => {
   try {
     const pendingOrders = await Order.find({
-      status: "pending",
+      status: { $in: ["pending", "confirmed"] },
       driver: null
     })
       .populate("user", "name email")
@@ -64,6 +66,15 @@ exports.acceptOrder = async (req, res) => {
     driver.workInfo.currentOrder = order._id;
     driver.workInfo.availability = "on-delivery";
     await driver.save();
+
+    serverLog(`Driver ${driver._id} accepted order ${order.orderId}`, 'success');
+
+    // FCM: notify other drivers (works when app is backgrounded/killed)
+    notifyOrderTaken(driver._id, order._id, order.orderId)
+      .catch(e => console.error('notifyOrderTaken error:', e.message));
+
+    // Socket: stop ringing on all other connected driver apps instantly
+    emitOrderTaken(driver._id, order._id, order.orderId);
 
     res.status(200).json({
       success: true,

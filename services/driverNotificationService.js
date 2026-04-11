@@ -26,12 +26,16 @@ exports.sendDriverFcm = async (fcmToken, title, body, channelType = 'general', d
 
     const message = {
         token: fcmToken,
+        // Top-level notification ensures RemoteMessage.notification is always
+        // populated in Flutter (foreground + background + terminated states)
+        notification: { title, body },
         android: {
             priority: 'high',
             notification: {
-                title,
-                body,
-                channelId,  // routes Android to the correct channel + its sound
+                channelId,          // routes to order_channel (custom ringtone) or general_channel
+                sound: channelType === 'order'
+                    ? 'universfield_ringtone_035_480585'
+                    : 'default',
             },
         },
         apns: {
@@ -40,6 +44,7 @@ exports.sendDriverFcm = async (fcmToken, title, body, channelType = 'general', d
                 aps: {
                     alert: { title, body },
                     sound: iosSound,
+                    'content-available': 1,     // wake device for background processing
                 },
             },
         },

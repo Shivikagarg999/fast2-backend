@@ -607,13 +607,22 @@ exports.createOrder = async (req, res) => {
       console.error('Notification error:', notifError);
     }
 
-    // Notify all online drivers with the custom ringtone
+    // FCM wake-up push to all online drivers (works even if app is killed)
     try {
       const { notifyNearbyDrivers } = require('../../services/driverNotificationService');
       notifyNearbyDrivers(null, null, order._id, order.orderId)
         .catch(e => console.error('Driver notify error:', e.message));
     } catch (driverNotifError) {
       console.error('Driver notification setup error:', driverNotifError.message);
+    }
+
+    // Socket: start ringing on all connected driver apps
+    try {
+      const { emitNewOrder, serverLog } = require('../../socketManager');
+      serverLog(`Order ${order.orderId} placed by user ${userId} — triggering driver notifications`, 'event');
+      emitNewOrder(order._id, order.orderId);
+    } catch (socketError) {
+      console.error('Socket emit error:', socketError.message);
     }
 
     return res.status(201).json(response);

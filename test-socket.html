@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Driver Socket Tester</title>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: monospace; background: #111; color: #eee; padding: 20px; }
+    h2 { color: #4fc3f7; margin-bottom: 16px; }
+
+    .row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
+    input {
+      background: #222; border: 1px solid #444; color: #eee;
+      padding: 8px 12px; border-radius: 6px; width: 240px; font-family: monospace;
+    }
+    button {
+      padding: 8px 14px; border: none; border-radius: 6px;
+      cursor: pointer; font-weight: bold; font-size: 12px;
+    }
+    .btn-green  { background: #2e7d32; color: #fff; }
+    .btn-red    { background: #c62828; color: #fff; }
+    .btn-blue   { background: #1565c0; color: #fff; }
+    .btn-orange { background: #e65100; color: #fff; }
+    .btn-teal   { background: #00695c; color: #fff; }
+
+    .badge {
+      padding: 4px 12px; border-radius: 20px; font-size: 12px; display: inline-block;
+    }
+    .connected    { background: #2e7d32; }
+    .disconnected { background: #c62828; }
+
+    .divider { border-top: 1px solid #2a2a2a; margin: 12px 0; }
+    label { font-size: 12px; color: #aaa; margin-right: 2px; }
+
+    /* 3-column grid */
+    .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-top: 16px; }
+    .panel-title {
+      display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;
+    }
+    .panel-title h3 { font-size: 13px; color: #90caf9; }
+
+    .logbox {
+      background: #1a1a1a; border: 1px solid #333; border-radius: 8px;
+      padding: 12px; height: 360px; overflow-y: auto; font-size: 12px; line-height: 1.8;
+    }
+    .log-info    { color: #90caf9; }
+    .log-success { color: #81c784; }
+    .log-warn    { color: #ffb74d; }
+    .log-error   { color: #ef9a9a; }
+    .log-event   { color: #ce93d8; }
+
+    /* Driver list table */
+    #driverTable { width: 100%; border-collapse: collapse; font-size: 11px; }
+    #driverTable th {
+      text-align: left; padding: 5px 8px;
+      border-bottom: 1px solid #333; color: #90caf9;
+    }
+    #driverTable td { padding: 5px 8px; border-bottom: 1px solid #222; }
+    .dot-green  { color: #81c784; }
+    .dot-red    { color: #ef9a9a; }
+    .dot-yellow { color: #ffb74d; }
+  </style>
+</head>
+<body>
+
+<h2>🚗 Driver Socket Tester</h2>
+
+<!-- Connection -->
+<div class="row">
+  <input id="serverUrl" value="http://localhost:5000" placeholder="Server URL" />
+  <button class="btn-green" onclick="connectSocket()">Connect</button>
+  <button class="btn-red"   onclick="disconnectSocket()">Disconnect</button>
+  <span id="statusBadge" class="badge disconnected">● Disconnected</span>
+</div>
+
+<div class="divider"></div>
+
+<!-- Driver online / decline -->
+<div class="row">
+  <label>Driver ID:</label>
+  <input id="driverId" placeholder="MongoDB _id of driver" />
+  <button class="btn-blue"   onclick="goOnline()">Go Online</button>
+</div>
+<div class="row">
+  <label>Order ID:</label>
+  <input id="declineOrderId" placeholder="Order _id to decline" />
+  <button class="btn-orange" onclick="declineOrder()">Decline Order</button>
+</div>
+
+<!-- Debug row -->
+<div class="row">
+  <label style="color:#ef9a9a">🔧 Debug:</label>
+  <button style="background:#4a148c;color:#fff;padding:8px 14px;border:none;border-radius:6px;font-weight:bold;font-size:12px;cursor:pointer" onclick="testTrigger()">Fire Fake Order (bypass DB)</button>
+  <button class="btn-teal" onclick="pingServer()">Ping Server</button>
+  <span id="pingResult" style="font-size:12px;color:#aaa"></span>
+</div>
+
+<div class="divider"></div>
+
+<!-- 3 panels -->
+<div class="grid3">
+
+  <!-- Panel 1: Client events -->
+  <div>
+    <div class="panel-title">
+      <h3>📱 Client Events (this tab)</h3>
+      <button class="btn-red" style="padding:3px 8px;font-size:11px" onclick="clearLog('clientLog')">Clear</button>
+    </div>
+    <div id="clientLog" class="logbox"></div>
+  </div>
+
+  <!-- Panel 2: Server log stream -->
+  <div>
+    <div class="panel-title">
+      <h3>🖥️ Server Logs</h3>
+      <button class="btn-red" style="padding:3px 8px;font-size:11px" onclick="clearLog('serverLog')">Clear</button>
+    </div>
+    <div id="serverLog" class="logbox"></div>
+  </div>
+
+  <!-- Panel 3: DB online drivers -->
+  <div>
+    <div class="panel-title">
+      <h3>🗄️ DB Online Drivers</h3>
+      <button class="btn-teal" style="padding:3px 8px;font-size:11px" onclick="refreshDrivers()">Refresh</button>
+    </div>
+    <div class="logbox" style="padding:8px; overflow-x:auto;">
+      <table id="driverTable">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Socket</th>
+            <th>FCM</th>
+            <th>ID</th>
+          </tr>
+        </thead>
+        <tbody id="driverTableBody">
+          <tr><td colspan="4" style="color:#555">— click Refresh —</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  let socket = null;
+
+  function log(boxId, msg, level = 'info') {
+    const el = document.getElementById(boxId);
+    const time = new Date().toLocaleTimeString();
+    el.innerHTML += `<div class="log-${level}">[${time}] ${msg}</div>`;
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function clearLog(boxId) { document.getElementById(boxId).innerHTML = ''; }
+
+  function setStatus(connected) {
+    const el = document.getElementById('statusBadge');
+    el.textContent = connected ? '● Connected' : '● Disconnected';
+    el.className = 'badge ' + (connected ? 'connected' : 'disconnected');
+  }
+
+  function connectSocket() {
+    if (socket) socket.disconnect();
+    const url = document.getElementById('serverUrl').value.trim();
+    log('clientLog', `Connecting to ${url} ...`, 'info');
+
+    socket = io(url, { transports: ['websocket', 'polling'] });
+
+    socket.on('connect', () => {
+      setStatus(true);
+      log('clientLog', `Connected — socket id: ${socket.id}`, 'success');
+
+      // Auto-join server log stream
+      socket.emit('join_testers');
+
+      // Auto go-online if driver ID is already filled
+      const driverId = document.getElementById('driverId').value.trim();
+      if (driverId) {
+        socket.emit('driver_online', driverId);
+        log('clientLog', `Auto emitted driver_online  driverId: ${driverId}`, 'success');
+      } else {
+        log('clientLog', `⚠️  No Driver ID entered — fill it and click Go Online to receive real-time orders`, 'warn');
+      }
+
+      // Auto-fetch DB drivers
+      refreshDrivers();
+    });
+
+    socket.on('disconnect', (reason) => {
+      setStatus(false);
+      log('clientLog', `Disconnected: ${reason}`, 'error');
+    });
+
+    socket.on('connect_error', (err) => {
+      log('clientLog', `Connection error: ${err.message}`, 'error');
+    });
+
+    // ── Driver events ───────────────────────────────────
+
+    socket.on('new_order', (data) => {
+      log('clientLog', `🔔 NEW ORDER   orderId: ${data.orderId}  |  #${data.orderCustomId}`, 'event');
+      playBeep(880, 0.4);
+      refreshDrivers();
+    });
+
+    socket.on('order_taken', (data) => {
+      log('clientLog', `🚫 ORDER TAKEN  orderId: ${data.orderId}  |  #${data.orderCustomId}`, 'warn');
+      refreshDrivers();
+    });
+
+    socket.on('stop_ringing', (data) => {
+      log('clientLog', `🔕 STOP RINGING  orderId: ${data.orderId}`, 'warn');
+    });
+
+    // ── Server log stream ───────────────────────────────
+
+    socket.on('server_log', (data) => {
+      log('serverLog', data.msg, data.level);
+    });
+
+    // ── DB driver list ──────────────────────────────────
+
+    socket.on('online_drivers_list', (drivers) => {
+      const tbody = document.getElementById('driverTableBody');
+      if (!drivers.length) {
+        tbody.innerHTML = '<tr><td colspan="4" style="color:#555">No approved+online drivers in DB</td></tr>';
+        return;
+      }
+      tbody.innerHTML = drivers.map(d => `
+        <tr>
+          <td>${d.name}</td>
+          <td class="${d.socketConnected ? 'dot-green' : 'dot-red'}">
+            ${d.socketConnected ? '● socket' : '○ no socket'}
+          </td>
+          <td class="${d.hasFcmToken ? 'dot-green' : 'dot-yellow'}">
+            ${d.hasFcmToken ? '● FCM' : '○ no FCM'}
+          </td>
+          <td style="color:#555;font-size:10px">${d.id.slice(-6)}</td>
+        </tr>
+      `).join('');
+    });
+  }
+
+  function disconnectSocket() {
+    if (socket) { socket.disconnect(); socket = null; }
+  }
+
+  function goOnline() {
+    if (!socket?.connected) return log('clientLog', 'Not connected to server', 'error');
+    const driverId = document.getElementById('driverId').value.trim();
+    if (!driverId) return log('clientLog', 'Enter a Driver ID first', 'error');
+    socket.emit('driver_online', driverId);
+    log('clientLog', `Emitted driver_online  driverId: ${driverId}`, 'success');
+    setTimeout(refreshDrivers, 500);
+  }
+
+  function declineOrder() {
+    if (!socket?.connected) return log('clientLog', 'Not connected to server', 'error');
+    const orderId  = document.getElementById('declineOrderId').value.trim();
+    const driverId = document.getElementById('driverId').value.trim();
+    if (!orderId) return log('clientLog', 'Enter an Order ID to decline', 'error');
+    socket.emit('decline_order', { orderId, driverId });
+    log('clientLog', `Emitted decline_order  orderId: ${orderId}`, 'warn');
+  }
+
+  function refreshDrivers() {
+    if (!socket?.connected) return;
+    socket.emit('get_online_drivers');
+  }
+
+  async function testTrigger() {
+    const url = document.getElementById('serverUrl').value.trim();
+    log('clientLog', 'Firing fake order via POST /test/trigger-order ...', 'warn');
+    try {
+      const res  = await fetch(`${url}/test/trigger-order`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      const data = await res.json();
+      if (data.success) {
+        log('clientLog', `Test trigger sent — customId: ${data.customId}`, 'success');
+      } else {
+        log('clientLog', `Test trigger failed: ${data.error}`, 'error');
+      }
+    } catch (err) {
+      log('clientLog', `Test trigger error: ${err.message}`, 'error');
+    }
+  }
+
+  async function pingServer() {
+    const url = document.getElementById('serverUrl').value.trim();
+    const t   = Date.now();
+    try {
+      const res  = await fetch(`${url}/`);
+      const text = await res.text();
+      document.getElementById('pingResult').textContent = `✅ ${Date.now() - t}ms — ${text}`;
+    } catch (err) {
+      document.getElementById('pingResult').textContent = `❌ ${err.message}`;
+    }
+  }
+
+  function playBeep(freq = 880, duration = 0.3) {
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      osc.connect(ctx.destination);
+      osc.frequency.value = freq;
+      osc.start();
+      osc.stop(ctx.currentTime + duration);
+    } catch (_) {}
+  }
+</script>
+</body>
+</html>

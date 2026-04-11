@@ -266,7 +266,6 @@ const driverSchema = new mongoose.Schema({
 driverSchema.index({ 'workInfo.availability': 1 });
 driverSchema.index({ 'workInfo.currentLocation.coordinates': '2dsphere' });
 driverSchema.index({ 'workInfo.status': 1 });
-
 driverSchema.index({ 'earnings.pendingPayout': 1 });
 driverSchema.index({ 'payoutDetails.preferredMethod': 1 });
 
@@ -341,7 +340,6 @@ driverSchema.methods.assignOrder = function (orderId) {
 driverSchema.methods.completeDelivery = function (earnings, deliveryTime, distance = 0, rating = null) {
   this.workInfo.currentOrder = null;
   this.workInfo.availability = 'online';
-
   this.deliveryStats.totalOrders += 1;
   this.deliveryStats.completedOrders += 1;
 
