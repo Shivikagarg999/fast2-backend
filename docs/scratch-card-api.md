@@ -1,4 +1,4 @@
-# Scratch Card API Documentation
+# Scratch Card API Documentationn
 
 ## Overview
 
