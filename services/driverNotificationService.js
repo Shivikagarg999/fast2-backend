@@ -13,7 +13,9 @@ exports.sendDriverFcm = async (fcmToken, title, body, channelType = 'general', d
     if (!driverApp) return;
     if (!fcmToken) return;
 
-    const channelId = channelType === 'order' ? 'order_channel' : 'general_channel';
+    // order_channel_v2: forces a fresh Android channel with correct sound settings.
+    // (Android channels are immutable — old order_channel may lack custom sound.)
+    const channelId = channelType === 'order' ? 'order_channel_v2' : 'general_channel';
     const iosSound = channelType === 'order'
         ? 'universfield-ringtone-035-480585.mp3'
         : 'default';
