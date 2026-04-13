@@ -424,6 +424,33 @@ exports.serveResetPasswordPage = (req, res) => {
     res.send(htmlPage);
 };
 
+exports.deleteAccount = async (req, res) => {
+    try {
+        const { password } = req.body;
+
+        if (!password) {
+            return res.status(400).json({ error: "Password is required to delete your account" });
+        }
+
+        const user = await User.findById(req.user._id);
+        if (!user) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        const isPasswordValid = await bcrypt.compare(password, user.password);
+        if (!isPasswordValid) {
+            return res.status(401).json({ error: "Incorrect password" });
+        }
+
+        await User.findByIdAndDelete(req.user._id);
+
+        return res.status(200).json({ message: "Account deleted successfully" });
+    } catch (err) {
+        console.error("Delete account error:", err);
+        return res.status(500).json({ error: err.message });
+    }
+};
+
 function generateReferralCode() {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     let result = '';

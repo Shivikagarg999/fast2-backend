@@ -42,6 +42,7 @@ const sellerShopRoutes = require('./routes/seller/shopRoutes');
 const publicShopRoutes = require('./routes/public/shopRoutes');
 const adminShopRoutes = require('./routes/admin/shopRoutes');
 const adminPopupRoutes = require('./routes/admin/popupRoutes');
+const promotorRoutes = require('./routes/promotor/promotorRoutes');
 
 const publicPopupRouter = express.Router();
 publicPopupRouter.get('/active', require('./controllers/admin/popupController').getActivePopup);
@@ -86,6 +87,7 @@ app.use('/api/contact', contactRoutes);
 app.use('/api/order', orderRoutes);
 app.use('/api/payout', payoutRoutes);
 app.use('/api/seller', sellerRoutes);
+app.use('/api/promotor', promotorRoutes);
 app.use('/api/seller/shop', sellerShopRoutes);
 app.use('/api/shops', publicShopRoutes);
 app.use('/api/referral', referralRoutes);

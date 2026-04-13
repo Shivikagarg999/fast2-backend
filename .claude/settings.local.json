@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//c/Users/Shivika/Desktop/**)",
+      "Bash(npm create:*)"
+    ]
+  }
+}

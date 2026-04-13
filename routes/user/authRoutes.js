@@ -1,10 +1,11 @@
 const express = require("express");
-const { 
-    register, 
-    login, 
-    forgotPassword, 
+const {
+    register,
+    login,
+    forgotPassword,
     resetPassword,
-    serveResetPasswordPage
+    serveResetPasswordPage,
+    deleteAccount
 } = require("../../controllers/user/authController");
 const authMiddleware = require("../../middlewares/userauth");
 const { getMe } = require("../../controllers/auth/me");
@@ -19,5 +20,6 @@ router.get("/reset-password-page", serveResetPasswordPage);
 
 router.get("/me", authMiddleware, getMe);
 router.get("/wallet", authMiddleware, getWalletBalance);
+router.delete("/delete-account", authMiddleware, deleteAccount);
 
 module.exports = router;
