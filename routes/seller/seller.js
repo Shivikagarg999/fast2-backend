@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   registerSeller,
   loginSeller,
+  getProfile,
   updateProfile
 } = require('../../controllers/seller/seller');
 const {
@@ -25,6 +26,7 @@ router.post('/register', registerSeller);
 router.post('/login', loginSeller);
 
 // Seller Profile
+router.get('/profile', sellerAuth, getProfile);
 router.patch('/profile', sellerAuth, updateProfile);
 
 // Seller Orders

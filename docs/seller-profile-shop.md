@@ -2,7 +2,41 @@
 
 ---
 
-## 1. Update Seller Profile
+## 1. Get Seller Profile
+
+Fetch the authenticated seller's profile, including linked promotor and shop basics.
+
+### Endpoint
+
+```
+GET /api/seller/profile
+```
+
+### Headers
+
+| Key           | Value                | Required |
+|---------------|----------------------|----------|
+| Authorization | `Bearer <JWT token>` | Yes      |
+
+### Success Response
+
+```json
+{
+  "success": true,
+  "seller": {
+    "_id": "661b8f5c6f2c2d0012345678",
+    "name": "Rajesh Kumar",
+    "email": "rajesh@example.com",
+    "phone": "9876543210",
+    "businessName": "Rajesh Stores",
+    "approvalStatus": "approved"
+  }
+}
+```
+
+---
+
+## 2. Update Seller Profile
 
 Update personal and business details like email, phone, bank details, FSSAI, etc.
 

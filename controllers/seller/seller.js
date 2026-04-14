@@ -172,6 +172,34 @@ exports.updateProfile = async (req, res) => {
   }
 };
 
+exports.getProfile = async (req, res) => {
+  try {
+    const seller = await Seller.findById(req.seller._id)
+      .select('-password')
+      .populate('promotor', 'name email phone address commissionRate commissionType')
+      .populate('shop', 'shopName slug logo coverImage shopType isActive status');
+
+    if (!seller) {
+      return res.status(404).json({
+        success: false,
+        message: 'Seller not found'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      seller
+    });
+  } catch (error) {
+    console.error('Get seller profile error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching profile',
+      error: error.message
+    });
+  }
+};
+
 exports.loginSeller = async (req, res) => {
   try {
     const { email, password } = req.body;
