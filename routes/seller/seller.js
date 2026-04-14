@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const {
   registerSeller,
-  loginSeller
+  loginSeller,
+  updateProfile
 } = require('../../controllers/seller/seller');
 const {
   getSellerOrders,
@@ -22,6 +23,9 @@ const upload = require('../../middlewares/upload');
 // Seller Auth
 router.post('/register', registerSeller);
 router.post('/login', loginSeller);
+
+// Seller Profile
+router.patch('/profile', sellerAuth, updateProfile);
 
 // Seller Orders
 router.get('/orders', sellerAuth, getSellerOrders);

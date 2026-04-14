@@ -8,6 +8,7 @@ const sellerSchema = new mongoose.Schema(
     businessName: { type: String, required: true },
     gstNumber: { type: String },
     panNumber: { type: String },
+    fssaiNumber: { type: String },
     address: {
       street: String,
       city: String,

@@ -119,6 +119,59 @@ exports.registerSeller = async (req, res) => {
   }
 };
 
+exports.updateProfile = async (req, res) => {
+  try {
+    const allowed = [
+      'name',
+      'email',
+      'phone',
+      'businessName',
+      'gstNumber',
+      'panNumber',
+      'fssaiNumber',
+      'address',
+      'bankDetails',
+    ];
+
+    const updates = {};
+    for (const key of allowed) {
+      if (req.body[key] !== undefined) updates[key] = req.body[key];
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ success: false, message: 'No valid fields provided' });
+    }
+
+    // If email or phone is being changed, check it isn't taken by another seller
+    if (updates.email || updates.phone) {
+      const conflict = await Seller.findOne({
+        _id: { $ne: req.seller._id },
+        $or: [
+          ...(updates.email ? [{ email: updates.email }] : []),
+          ...(updates.phone ? [{ phone: updates.phone }] : []),
+        ],
+      });
+      if (conflict) {
+        return res.status(400).json({
+          success: false,
+          message: 'Email or phone already in use by another seller',
+        });
+      }
+    }
+
+    const seller = await Seller.findByIdAndUpdate(
+      req.seller._id,
+      { $set: updates },
+      { new: true, runValidators: true }
+    ).select('-password');
+
+    res.status(200).json({ success: true, message: 'Profile updated successfully', seller });
+  } catch (error) {
+    console.error('Update profile error:', error);
+    res.status(500).json({ success: false, message: 'Error updating profile', error: error.message });
+  }
+};
+
 exports.loginSeller = async (req, res) => {
   try {
     const { email, password } = req.body;
