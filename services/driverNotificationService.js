@@ -80,6 +80,39 @@ exports.sendDriverNotification = async (driverId, title, body, channelType = 'ge
  * @param {string} orderCustomId  - Human-readable order ID (e.g. FST042)
  * @param {number} maxDistance    - metres, default 5 km
  */
+/**
+ * FCM fallback: tell all other online drivers that the order was taken.
+ * Called from acceptOrder alongside emitOrderTaken (socket).
+ */
+exports.notifyOrderTaken = async (acceptedByDriverId, orderId, orderCustomId) => {
+    try {
+        const drivers = await Driver.find({
+            'workInfo.status': 'approved',
+            'workInfo.availability': { $in: ['online', 'on-delivery'] },
+            _id: { $ne: acceptedByDriverId },
+            'auth.fcmToken': { $ne: null },
+        }).select('auth.fcmToken');
+
+        if (!drivers.length) return;
+
+        const title = 'Order Taken';
+        const body = `Order #${orderCustomId} has been accepted by another driver.`;
+        const data = {
+            orderId: String(orderId),
+            orderCustomId: String(orderCustomId),
+            type: 'order_taken',
+        };
+
+        await Promise.allSettled(
+            drivers.map(d => exports.sendDriverFcm(d.auth.fcmToken, title, body, 'general', data))
+        );
+
+        console.log(`notifyOrderTaken: FCM sent to ${drivers.length} other driver(s) for order ${orderCustomId}`);
+    } catch (error) {
+        console.error('Error in notifyOrderTaken:', error.message);
+    }
+};
+
 exports.notifyNearbyDrivers = async (_lat, _lng, orderId, orderCustomId) => {
     try {
         const drivers = await Driver.find({

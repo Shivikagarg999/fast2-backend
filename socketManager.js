@@ -6,7 +6,9 @@
  */
 
 let io = null;
-const driverSockets = new Map(); // driverId → socketId
+const driverSockets = new Map();        // driverId → socketId
+const orderNotifiedDrivers = new Map(); // orderId  → Set<driverId>  (who was rung)
+const orderDeclines = new Map();        // orderId  → Set<driverId>  (who declined)
 
 /**
  * Log to terminal + stream to any test clients watching '_testers' room.
@@ -109,10 +111,11 @@ exports.init = (httpServer) => {
             }
         });
 
-        // Driver declines an order → stop ringing only on their phone
+        // Driver declines an order → stop ringing on their phone; track all-declined fallback
         socket.on('decline_order', ({ orderId, driverId }) => {
             socket.emit('stop_ringing', { orderId });
-            serverLog(`Driver ${driverId} DECLINED order ${orderId} — stop_ringing sent to them only`, 'warn');
+            serverLog(`Driver ${driverId} DECLINED order ${orderId}`, 'warn');
+            exports.recordDecline(String(orderId), String(driverId));
         });
 
         socket.on('disconnect', (reason) => {
@@ -172,6 +175,11 @@ exports.emitNewOrder = async (orderId, orderCustomId) => {
             }
         }
 
+        // Track which drivers were notified so we can detect all-declined
+        const notified = new Set(onlineDriverIds.map(d => String(d._id)));
+        orderNotifiedDrivers.set(String(orderId), notified);
+        orderDeclines.set(String(orderId), new Set());
+
         serverLog(`new_order done — socket: ${socketSent}, FCM-only: ${noSocket}`, 'info');
     } catch (err) {
         serverLog(`emitNewOrder error: ${err.message}`, 'error');
@@ -182,11 +190,48 @@ exports.emitNewOrder = async (orderId, orderCustomId) => {
 };
 
 /**
+ * Record a driver's decline for an order.
+ * If every notified driver has declined, fire the all_drivers_declined fallback.
+ * Also exported so the HTTP decline endpoint can call it.
+ */
+exports.recordDecline = (orderId, driverId) => {
+    const notified = orderNotifiedDrivers.get(orderId);
+    const declines = orderDeclines.get(orderId);
+
+    if (!notified || !declines) return; // order already assigned or unknown
+
+    declines.add(driverId);
+
+    serverLog(`Order ${orderId}: ${declines.size}/${notified.size} driver(s) declined`, 'warn');
+
+    if (declines.size >= notified.size) {
+        serverLog(`Order ${orderId}: ALL drivers declined — triggering fallback`, 'error');
+
+        if (io) {
+            // Notify admin room and test clients
+            io.to('_admin').emit('all_drivers_declined', { orderId });
+            io.to('_testers').emit('all_drivers_declined', { orderId });
+        }
+
+        // Clean up tracking maps
+        orderNotifiedDrivers.delete(orderId);
+        orderDeclines.delete(orderId);
+
+        // Optional: FCM to admin (wire up if you have an admin FCM token)
+        // notifyAdmin('No drivers available', `Order ${orderId} was declined by all drivers.`);
+    }
+};
+
+/**
  * Emit order_taken to all drivers EXCEPT the one who accepted.
  * Their phones should stop ringing.
  */
 exports.emitOrderTaken = async (acceptedByDriverId, orderId, orderCustomId) => {
     if (!io) return;
+
+    // Clear decline tracking — order is now assigned
+    orderNotifiedDrivers.delete(String(orderId));
+    orderDeclines.delete(String(orderId));
 
     const takenPayload = { orderId: String(orderId), orderCustomId: String(orderCustomId) };
     const stopPayload  = { orderId: String(orderId) };

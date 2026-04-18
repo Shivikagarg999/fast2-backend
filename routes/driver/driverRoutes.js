@@ -3,6 +3,7 @@ const router = express.Router();
 const {
   getPendingOrders,
   acceptOrder,
+  declineOrder,
   toggleAvailability,
   markOrderDelivered,
   markOrderPickedUp,
@@ -22,6 +23,7 @@ router.get("/orders/pending", authenticateToken, getPendingOrders);
 router.get("/orders/ongoing", authenticateToken, getOngoingOrders);
 
 router.patch("/orders/:orderId/accept", authenticateToken, acceptOrder);
+router.patch("/orders/:orderId/decline", authenticateToken, declineOrder);
 
 router.patch("/availability", authenticateToken, toggleAvailability);
 

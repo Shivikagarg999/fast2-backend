@@ -792,6 +792,22 @@ exports.sendConfirmationOtp = async (req, res) => {
 };
 
 
+exports.declineOrder = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const driverId = String(req.driver.driverId);
+
+    const { recordDecline, serverLog } = require('../../socketManager');
+    recordDecline(orderId, driverId);
+    serverLog(`Driver ${driverId} DECLINED order ${orderId} via HTTP`, 'warn');
+
+    res.status(200).json({ success: true, message: 'Order declined' });
+  } catch (error) {
+    console.error('Error declining order:', error);
+    res.status(500).json({ success: false, message: 'Internal Server Error' });
+  }
+};
+
 exports.updateFcmToken = async (req, res) => {
   try {
     const { fcmToken } = req.body;

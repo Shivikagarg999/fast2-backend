@@ -53,6 +53,7 @@ const allowedOrigins = [
   "https://www.fast2.in",
   "http://localhost:5173",
   "http://localhost:3000",
+  "http://localhost:5000",
   "https://fast2-admin.vercel.app",
   "https://api.fast2.in",
   "https://admin.fast2.in",
@@ -92,8 +93,8 @@ app.use('/api/seller/shop', sellerShopRoutes);
 app.use('/api/shops', publicShopRoutes);
 app.use('/api/referral', referralRoutes);
 app.use('/api/driver', driverRoutes);
+app.use('/api/driver', driverOrderRoutes);
 app.use('/api/driver-earnings', driverEarningRoutes);
-app.use('/api/driverOrder', driverOrderRoutes);
 app.use('/api/driver/withdraw', driverWithdrawRoutes);
 app.use('/api/driver/payout', driverPayoutRoutes);
 app.use('/api/policy', policyRoutes);
@@ -136,6 +137,12 @@ app.post('/test/trigger-order', async (req, res) => {
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+// Serve test UI at http://localhost:5000/test
+const path = require('path');
+app.get('/test', (req, res) => {
+  res.sendFile(path.join(__dirname, 'test-socket.html'));
 });
 
 const PORT = process.env.PORT || 5000;
