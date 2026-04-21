@@ -9,6 +9,7 @@ const downloadOrdersByStatusCSV = async (req, res) => {
     const orders = await Order.find(filter)
       .populate("user", "name email phone")
       .populate("driver", "name phone")
+      .populate("seller", "name")
       .populate("items.product", "name")
       .sort({ createdAt: -1 });
 
@@ -17,51 +18,149 @@ const downloadOrdersByStatusCSV = async (req, res) => {
     }
 
     const csvHeaders = [
+      // Order identifiers
       'Order ID',
+      'Order Date',
+      'Status',
+
+      // Customer
       'Customer Name',
       'Customer Email',
       'Customer Phone',
-      'Status',
-      'Payment Status',
-      'Payment Method',
-      'Total Amount',
       'Delivery Address',
+
+      // Seller
+      'Seller Name',
+
+      // Driver
       'Driver Name',
       'Driver Phone',
-      'Order Date',
+
+      // Items
       'Items Count',
-      'Product Names'
+      'Product Names',
+      'Product Quantities',
+
+      // Financials
+      'Subtotal (total)',
+      'Handling Charge',
+      'Total GST',
+      'Coupon Code',
+      'Coupon Discount',
+      'Final Amount',
+      'Wallet Deduction',
+      'Cash on Delivery',
+
+      // Payment
+      'Payment Method',
+      'Payment Status',
+
+      // Seller Payout
+      'Seller Payable Amount',
+      'Seller GST Deduction',
+      'Seller TDS Deduction',
+      'Seller Net Amount',
+      'Seller Payout Status',
+      'Seller Paid At',
+
+      // Promotor Commission
+      'Promotor Commission Type',
+      'Promotor Commission Rate (%)',
+      'Promotor Commission Amount',
+      'Promotor Payout Status',
+      'Promotor Paid At',
+
+      // Platform
+      'Platform Service Fee',
+      'Platform GST Collection',
+
+      // Refund
+      'Refund Amount',
+      'Refund Status',
+      'Refunded At'
     ];
 
     const csvRows = orders.map(order => {
-      const items = order.items.map(item => item.product?.name || 'N/A').join('; ');
-      const address = order.shippingAddress ? 
-        `${order.shippingAddress.addressLine}, ${order.shippingAddress.city}, ${order.shippingAddress.state} - ${order.shippingAddress.pinCode}` : 
-        'N/A';
-      
+      const productNames = order.items.map(item => item.product?.name || 'N/A').join('; ');
+      const productQtys = order.items.map(item => `${item.product?.name || 'N/A'} x${item.quantity}`).join('; ');
+      const address = order.shippingAddress
+        ? `${order.shippingAddress.addressLine}, ${order.shippingAddress.city}, ${order.shippingAddress.state} - ${order.shippingAddress.pinCode}`
+        : 'N/A';
+
+      const p = order.payout || {};
+      const sellerPayout = p.seller || {};
+      const promotorPayout = p.promotor || {};
+      const platformPayout = p.platform || {};
+
       return [
+        // Order identifiers
         order.orderId || 'N/A',
+        order.createdAt ? order.createdAt.toISOString().split('T')[0] : 'N/A',
+        order.status || 'N/A',
+
+        // Customer
         order.user?.name || 'N/A',
         order.user?.email || 'N/A',
         order.user?.phone || 'N/A',
-        order.status || 'N/A',
-        order.paymentStatus || 'N/A',
-        order.paymentMethod || 'N/A',
-        order.total || 0,
         address,
+
+        // Seller
+        order.seller?.name || 'N/A',
+
+        // Driver
         order.driver?.name || 'N/A',
         order.driver?.phone || 'N/A',
-        order.createdAt ? order.createdAt.toISOString().split('T')[0] : 'N/A',
+
+        // Items
         order.items.length,
-        items
-      ].map(field => `"${field}"`).join(',');
+        productNames,
+        productQtys,
+
+        // Financials
+        order.total || 0,
+        order.handlingCharge || 0,
+        order.totalGst || 0,
+        order.coupon?.code || 'N/A',
+        order.coupon?.discount || 0,
+        order.finalAmount || 0,
+        order.walletDeduction || 0,
+        order.cashOnDelivery || 0,
+
+        // Payment
+        order.paymentMethod || 'N/A',
+        order.paymentStatus || 'N/A',
+
+        // Seller Payout
+        sellerPayout.payableAmount ?? 0,
+        sellerPayout.gstDeduction ?? 0,
+        sellerPayout.tdsDeduction ?? 0,
+        sellerPayout.netAmount ?? 0,
+        sellerPayout.payoutStatus || 'N/A',
+        sellerPayout.paidAt ? sellerPayout.paidAt.toISOString().split('T')[0] : 'N/A',
+
+        // Promotor Commission
+        promotorPayout.commissionType || 'N/A',
+        promotorPayout.commissionRate ?? 0,
+        promotorPayout.commissionAmount ?? 0,
+        promotorPayout.payoutStatus || 'N/A',
+        promotorPayout.paidAt ? promotorPayout.paidAt.toISOString().split('T')[0] : 'N/A',
+
+        // Platform
+        platformPayout.serviceFee ?? 0,
+        platformPayout.gstCollection ?? 0,
+
+        // Refund
+        order.refundAmount || 0,
+        order.refundStatus || 'N/A',
+        order.refundedAt ? order.refundedAt.toISOString().split('T')[0] : 'N/A'
+      ].map(field => `"${String(field).replace(/"/g, '""')}"`).join(',');
     });
 
     const csvContent = [csvHeaders.join(','), ...csvRows].join('\n');
 
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="orders_${status || 'all'}_${Date.now()}.csv"`);
-    
+
     res.send(csvContent);
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
