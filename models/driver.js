@@ -92,6 +92,10 @@ const driverSchema = new mongoose.Schema({
       number: { type: String },
       frontImage: { type: String },
       backImage: { type: String }
+    },
+    panCard: {
+      number: { type: String },
+      image: { type: String }
     }
   },
   bankDetails: {
@@ -287,8 +291,17 @@ driverSchema.methods.comparePassword = async function (candidatePassword) {
 
 driverSchema.pre('save', async function (next) {
   if (this.isNew && !this.workInfo.driverId) {
-    const count = await this.constructor.countDocuments();
-    this.workInfo.driverId = `DRV${String(count + 1).padStart(6, '0')}`;
+    const lastDriver = await this.constructor.findOne(
+      { 'workInfo.driverId': { $exists: true, $ne: null } },
+      { 'workInfo.driverId': 1 },
+      { sort: { 'workInfo.driverId': -1 } }
+    );
+    let nextNum = 1;
+    if (lastDriver?.workInfo?.driverId) {
+      const lastNum = parseInt(lastDriver.workInfo.driverId.replace('DRV', ''), 10);
+      if (!isNaN(lastNum)) nextNum = lastNum + 1;
+    }
+    this.workInfo.driverId = `DRV${String(nextNum).padStart(6, '0')}`;
   }
   next();
 });

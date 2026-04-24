@@ -10,11 +10,9 @@ const {
   updateBannerOrder
 } = require('../../../controllers/admin/banner/bannerController');
 
-// Public routes
 router.get('/getall', getBanners);
 router.get('/get/:id', getBanner);
 
-// auth middleware to be added
 router.post('/create', upload.fields([
   { name: 'image', maxCount: 1 },
   { name: 'fallbackImage', maxCount: 1 }
