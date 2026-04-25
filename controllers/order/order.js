@@ -1660,7 +1660,6 @@ exports.downloadInvoice = async (req, res) => {
     const couponDiscount = order.coupon?.discount || 0;
     const couponCode = order.coupon?.code || null;
 
-    // For CGST/SGST split: if all within-state use half/half, else treat as IGST
     const shippingState = order.shippingAddress.state;
     let totalCGST = 0;
     let totalSGST = 0;
@@ -1668,13 +1667,19 @@ exports.downloadInvoice = async (req, res) => {
 
     const itemsWithGST = order.items.map(item => {
       const itemTotal = item.price * item.quantity;
-      // Use stored values; fall back to category if item was saved before gstPercent was added
       const gstRate = item.gstPercent || item.product?.category?.gstPercent || 0;
       const gstAmount = item.gstAmount != null ? item.gstAmount : parseFloat(((itemTotal * gstRate) / 100).toFixed(2));
       const taxableValue = gstRate > 0 ? itemTotal - gstAmount : itemTotal;
 
-      const sellerState = item.product?.seller?.address?.state;
-      const isWithinState = sellerState && shippingState && sellerState === shippingState;
+      // MRP from product.oldPrice; if not set, MRP equals selling price
+      const mrp = item.product?.oldPrice || item.price;
+      const discountPerUnit = parseFloat(Math.max(0, mrp - item.price).toFixed(2));
+      const mrpTotal = parseFloat((mrp * item.quantity).toFixed(2));
+      const discountTotal = parseFloat((discountPerUnit * item.quantity).toFixed(2));
+
+      const sellerState = (item.product?.seller?.address?.state || '').trim().toLowerCase();
+      const buyerState = (shippingState || '').trim().toLowerCase();
+      const isWithinState = sellerState && buyerState && sellerState === buyerState;
 
       let cgstAmount = 0;
       let sgstAmount = 0;
@@ -1701,13 +1706,17 @@ exports.downloadInvoice = async (req, res) => {
         cgstAmount,
         sgstAmount,
         igstAmount,
-        totalWithTax: itemTotal,
-        isWithinState
+        isWithinState,
+        mrp,
+        discountPerUnit,
+        mrpTotal,
+        discountTotal
       };
     });
 
+    const totalMRP = parseFloat(itemsWithGST.reduce((s, i) => s + i.mrpTotal, 0).toFixed(2));
+    const totalDiscount = parseFloat(itemsWithGST.reduce((s, i) => s + i.discountTotal, 0).toFixed(2));
     const totalGST = savedTotalGST;
-    const grandTotalBeforeWallet = orderSubtotal + deliveryFee + handlingFee;
     const finalPayableAmount = order.cashOnDelivery > 0 ? order.cashOnDelivery : order.finalAmount;
 
     const invoiceData = {
@@ -1730,17 +1739,17 @@ exports.downloadInvoice = async (req, res) => {
         finalAmount: order.finalAmount
       },
       summary: {
+        totalMRP,
+        totalDiscount,
         subtotal: orderSubtotal,
-        deliveryFee: deliveryFee,
-        handlingFee: handlingFee,
-        couponDiscount: couponDiscount,
-        couponCode: couponCode,
-        totalBeforeWallet: grandTotalBeforeWallet,
-        totalGST: totalGST,
-        totalCGST: totalCGST,
-        totalSGST: totalSGST,
-        totalIGST: totalIGST,
-        grandTotal: finalPayableAmount,
+        deliveryFee,
+        handlingFee,
+        couponDiscount,
+        couponCode,
+        totalGST,
+        totalCGST,
+        totalSGST,
+        totalIGST,
         walletDeduction: order.walletDeduction,
         payableAmount: finalPayableAmount
       },
@@ -1769,211 +1778,293 @@ exports.downloadInvoice = async (req, res) => {
 
 exports.generatePDFInvoice = async (invoiceData) => {
   const PDFDocument = require('pdfkit');
+  const path = require('path');
+  const fs = require('fs');
 
-  // 80mm thermal printer width = 226.77pt. Use 230pt with 8pt side margins.
+  // 80mm thermal printer: 230pt wide, 8pt side margins → 214pt content
   const PAGE_WIDTH = 230;
   const MARGIN = 8;
-  const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
-  const COL_RIGHT = PAGE_WIDTH - MARGIN; // right edge for right-aligned text
+  const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2; // 214pt
+
+  // Indian GST state codes
+  const STATE_CODES = {
+    'jammu and kashmir': '01', 'himachal pradesh': '02', 'punjab': '03',
+    'chandigarh': '04', 'uttarakhand': '05', 'haryana': '06', 'delhi': '07',
+    'rajasthan': '08', 'uttar pradesh': '09', 'bihar': '10', 'sikkim': '11',
+    'arunachal pradesh': '12', 'nagaland': '13', 'manipur': '14', 'mizoram': '15',
+    'tripura': '16', 'meghalaya': '17', 'assam': '18', 'west bengal': '19',
+    'jharkhand': '20', 'odisha': '21', 'chhattisgarh': '22', 'madhya pradesh': '23',
+    'gujarat': '24', 'daman and diu': '25', 'dadra and nagar haveli': '26',
+    'maharashtra': '27', 'karnataka': '29', 'goa': '30', 'lakshadweep': '31',
+    'kerala': '32', 'tamil nadu': '33', 'puducherry': '34',
+    'andaman and nicobar': '35', 'telangana': '36', 'andhra pradesh': '37',
+    'ladakh': '38'
+  };
+  const getStateCode = (state) =>
+    STATE_CODES[(state || '').toLowerCase().trim()] || '--';
 
   return new Promise((resolve, reject) => {
     try {
       const doc = new PDFDocument({
-        size: [PAGE_WIDTH, 2000], // tall enough; we'll trim via content
+        size: [PAGE_WIDTH, 2400],
         margin: MARGIN,
         autoFirstPage: true
       });
       const buffers = [];
-
       doc.on('data', buffers.push.bind(buffers));
       doc.on('end', () => resolve(Buffer.concat(buffers)));
 
-      // Helper: dashed separator line
+      // ── HELPERS ──────────────────────────────────────────────
       const dashedLine = (y) => {
         doc.save()
-          .moveTo(MARGIN, y)
-          .lineTo(PAGE_WIDTH - MARGIN, y)
-          .dash(2, { space: 2 })
-          .lineWidth(0.5)
-          .stroke('#000000')
-          .undash()
-          .restore();
+          .moveTo(MARGIN, y).lineTo(PAGE_WIDTH - MARGIN, y)
+          .dash(2, { space: 2 }).lineWidth(0.5).stroke('#000000')
+          .undash().restore();
       };
 
-      // Helper: row with label on left, value on right
+      // Label left, value right-aligned — both on same y
       const row = (label, value, y, opts = {}) => {
-        doc.font(opts.bold ? 'Courier-Bold' : 'Courier')
-          .fontSize(opts.size || 7)
-          .fillColor('#000000')
-          .text(label, MARGIN, y, { width: CONTENT_WIDTH * 0.6 });
-        doc.font(opts.bold ? 'Courier-Bold' : 'Courier')
-          .fontSize(opts.size || 7)
-          .text(value, MARGIN, y, { width: CONTENT_WIDTH, align: 'right' });
+        const f = opts.bold ? 'Courier-Bold' : 'Courier';
+        const sz = opts.size || 7;
+        doc.font(f).fontSize(sz).fillColor('#000000')
+          .text(label, MARGIN, y, { width: CONTENT_WIDTH * 0.62, lineBreak: false });
+        doc.font(f).fontSize(sz)
+          .text(value, MARGIN, y, { width: CONTENT_WIDTH, align: 'right', lineBreak: false });
       };
 
-      // Helper: centered text
+      // Two label-value pairs on the same line (left half | right half)
+      const twoColRow = (lbl1, val1, lbl2, val2, y, sz = 7) => {
+        const half = Math.floor(CONTENT_WIDTH / 2); // 107
+        doc.font('Courier-Bold').fontSize(sz).fillColor('#000000')
+          .text(lbl1, MARGIN, y, { width: 48, lineBreak: false });
+        doc.font('Courier').fontSize(sz)
+          .text(val1, MARGIN, y, { width: half, align: 'right', lineBreak: false });
+        doc.font('Courier-Bold').fontSize(sz)
+          .text(lbl2, MARGIN + half + 4, y, { width: 30, lineBreak: false });
+        doc.font('Courier').fontSize(sz)
+          .text(val2, MARGIN + half + 4, y, { width: half - 4, align: 'right', lineBreak: false });
+      };
+
       const center = (text, y, opts = {}) => {
         doc.font(opts.bold ? 'Courier-Bold' : 'Courier')
-          .fontSize(opts.size || 7)
-          .fillColor('#000000')
+          .fontSize(opts.size || 7).fillColor('#000000')
           .text(text, MARGIN, y, { width: CONTENT_WIDTH, align: 'center' });
       };
 
-      let y = MARGIN;
+      let y = MARGIN + 12; // extra top padding before logo
 
-      // ── HEADER ──────────────────────────────────────────────
-      center('FAST 2', y, { bold: true, size: 14 });
-      y += 16;
-      center('TAX INVOICE', y, { bold: true, size: 8 });
-      y += 12;
-      center('GSTIN: ', y, { size: 6 });
-      y += 9;
-      center('Gwalior, Madhya Pradesh', y, { size: 6 });
-      y += 9;
-      center('PAN: ', y, { size: 6 });
-      y += 10;
+      // ── LOGO ─────────────────────────────────────────────────
+      try {
+        const logoPath = path.join(__dirname, '../../images/logo.jpeg');
+        if (fs.existsSync(logoPath)) {
+          const logoWidth = Math.min(60, CONTENT_WIDTH);
+          const logoX = MARGIN + (CONTENT_WIDTH - logoWidth) / 2;
+          doc.image(logoPath, logoX, y, { width: logoWidth });
+          y += Math.round(logoWidth * 0.9) + 10;
+        }
+      } catch (e) { /* ignore */ }
+
+      // ── HEADER ───────────────────────────────────────────────
+      center('TAX INVOICE', y, { bold: true, size: 8 }); y += 12;
+      center('GSTIN: ', y, { size: 6 }); y += 9;
+      center('Gwalior, Madhya Pradesh', y, { size: 6 }); y += 9;
+      center('PAN: ', y, { size: 6 }); y += 10;
       dashedLine(y); y += 10;
 
       // ── ORDER INFO ───────────────────────────────────────────
       const orderDate = new Date(invoiceData.orderDate).toLocaleDateString('en-IN', {
         day: '2-digit', month: 'short', year: 'numeric'
       });
-      row('Invoice No:', invoiceData.orderId, y, { size: 7 }); y += 10;
-      row('Date:', orderDate, y, { size: 7 }); y += 10;
-      row('Place of Supply:', invoiceData.shippingAddress.state, y, { size: 7 }); y += 10;
+      // Invoice No and Date on same line
+      twoColRow('Invoice No:', invoiceData.orderId, 'Date:', orderDate, y, 7); y += 10;
+      row('Order ID:', invoiceData.orderId, y); y += 10;
+
+      const buyerState = invoiceData.shippingAddress.state || '';
+      const buyerStateCode = getStateCode(buyerState);
+      row('Place of Supply:', `${buyerState} (Code: ${buyerStateCode})`, y); y += 10;
       dashedLine(y); y += 10;
 
       // ── SELLER ───────────────────────────────────────────────
-      const sellerName = invoiceData.seller?.businessName || 'Store';
-      const sellerGST = invoiceData.seller?.gstNumber || 'N/A';
-      const sellerAddress = invoiceData.seller?.address
-        ? `${invoiceData.seller.address.street || ''}, ${invoiceData.seller.address.city || ''}, ${invoiceData.seller.address.state || ''} - ${invoiceData.seller.address.pincode || ''}`
+      const sellerFromItem = invoiceData.items?.[0]?.product?.seller ?? null;
+      const sellerName = sellerFromItem?.businessName || invoiceData.seller?.businessName || 'Store';
+      const sellerGST = sellerFromItem?.gstNumber || invoiceData.seller?.gstNumber || 'N/A';
+      const sellerAddrObj = sellerFromItem?.address || invoiceData.seller?.address;
+      const sellerState = sellerAddrObj?.state || '';
+      const sellerStateCode = getStateCode(sellerState);
+      const sellerAddress = sellerAddrObj
+        ? `${sellerAddrObj.street || ''}, ${sellerAddrObj.city || ''}, ${sellerState} - ${sellerAddrObj.pincode || ''}`
         : 'Address not available';
 
       doc.font('Courier-Bold').fontSize(7).fillColor('#000000').text('SOLD BY:', MARGIN, y); y += 10;
       doc.font('Courier').fontSize(7).text(sellerName, MARGIN, y, { width: CONTENT_WIDTH }); y += 9;
       doc.font('Courier').fontSize(6).text(`GSTIN: ${sellerGST}`, MARGIN, y, { width: CONTENT_WIDTH }); y += 8;
+      doc.font('Courier').fontSize(6)
+        .text(`State: ${sellerState}  |  State Code: ${sellerStateCode}`, MARGIN, y, { width: CONTENT_WIDTH }); y += 8;
       doc.font('Courier').fontSize(6).text(sellerAddress, MARGIN, y, { width: CONTENT_WIDTH }); y += 16;
       dashedLine(y); y += 10;
 
-      // ── CUSTOMER ─────────────────────────────────────────────
+      // ── BUYER ────────────────────────────────────────────────
+      const addr = invoiceData.shippingAddress;
       doc.font('Courier-Bold').fontSize(7).text('BILL TO:', MARGIN, y); y += 10;
-      doc.font('Courier').fontSize(7)
-        .text(`${invoiceData.customer.name}`, MARGIN, y, { width: CONTENT_WIDTH }); y += 9;
+      doc.font('Courier').fontSize(7).text(invoiceData.customer.name, MARGIN, y, { width: CONTENT_WIDTH }); y += 9;
+      doc.font('Courier').fontSize(6).text(`Ph: ${invoiceData.customer.phone || 'N/A'}`, MARGIN, y, { width: CONTENT_WIDTH }); y += 8;
+      if (addr.addressLine) {
+        doc.font('Courier').fontSize(6).text(addr.addressLine, MARGIN, y, { width: CONTENT_WIDTH }); y += 8;
+      }
       doc.font('Courier').fontSize(6)
-        .text(`Ph: ${invoiceData.customer.phone || 'N/A'}`, MARGIN, y, { width: CONTENT_WIDTH }); y += 8;
+        .text(`${addr.city}, ${buyerState} - ${addr.pinCode || addr.pincode || ''}`, MARGIN, y, { width: CONTENT_WIDTH }); y += 8;
       doc.font('Courier').fontSize(6)
-        .text(invoiceData.shippingAddress.addressLine || '', MARGIN, y, { width: CONTENT_WIDTH }); y += 8;
-      doc.font('Courier').fontSize(6)
-        .text(`${invoiceData.shippingAddress.city}, ${invoiceData.shippingAddress.state} - ${invoiceData.shippingAddress.pinCode}`, MARGIN, y, { width: CONTENT_WIDTH }); y += 8;
+        .text(`State Code: ${buyerStateCode}`, MARGIN, y, { width: CONTENT_WIDTH }); y += 8;
       doc.font('Courier').fontSize(6)
         .text(`Email: ${invoiceData.customer.email || 'N/A'}`, MARGIN, y, { width: CONTENT_WIDTH }); y += 12;
       dashedLine(y); y += 10;
 
       // ── ITEMS TABLE ──────────────────────────────────────────
-      // Header
-      doc.font('Courier-Bold').fontSize(6.5);
-      doc.text('ITEM', MARGIN, y, { width: 90 });
-      doc.text('QTY', MARGIN + 90, y, { width: 20, align: 'right' });
-      doc.text('RATE', MARGIN + 112, y, { width: 28, align: 'right' });
-      doc.text('AMT', MARGIN + 142, y, { width: 28, align: 'right' });
-      doc.text('GST', MARGIN + 172, y, { width: 20, align: 'right' });
-      y += 9;
-      dashedLine(y); y += 10;
+      // Columns (all offsets from page left = MARGIN + col offset):
+      //   ITEM: x=8,  w=70
+      //   QTY:  x=78, w=18  (right-aligned)
+      //   MRP:  x=96, w=30  (right-aligned)
+      //   DISC: x=126,w=28  (right-aligned)
+      //   PRICE:x=154,w=60  (right-aligned, to right edge 214)
+      const CI = MARGIN;           // Item
+      const CQ = MARGIN + 70;      // Qty
+      const CM = MARGIN + 88;      // MRP
+      const CD = MARGIN + 118;     // Disc
+      const CP = MARGIN + 146;     // Price (after disc, pre-GST)
+      const WI = 70, WQ = 18, WM = 30, WD = 28;
+      const WP = CONTENT_WIDTH - 146; // 68
 
-      doc.font('Courier').fontSize(6.5);
+      doc.font('Courier-Bold').fontSize(6).fillColor('#000000');
+      doc.text('ITEM',  CI, y, { width: WI });
+      doc.text('QTY',   CQ, y, { width: WQ, align: 'right' });
+      doc.text('MRP',   CM, y, { width: WM, align: 'right' });
+      doc.text('DISC',  CD, y, { width: WD, align: 'right' });
+      doc.text('PRICE', CP, y, { width: WP, align: 'right' });
+      y += 9;
+      dashedLine(y); y += 8;
 
       invoiceData.items.forEach((item) => {
         const product = item.product;
-        const name = (product?.name || 'Product').substring(0, 22);
-        const hsn = (product?.hsnCode || product?.category?.hsnCode) ? `HSN:${product?.hsnCode || product?.category?.hsnCode}` : '';
-        const gstLabel = item.gstRate > 0
-          ? (item.isWithinState
-              ? `CGST:${(item.gstRate / 2).toFixed(1)}%+SGST:${(item.gstRate / 2).toFixed(1)}%`
-              : `IGST:${item.gstRate}%`)
-          : 'GST: Nil';
+        const name = (product?.name || 'Product').substring(0, 20);
+        const mrpUnit   = item.mrp || item.price;
+        const discUnit  = item.discountPerUnit || 0;
+        const mrpLine   = (mrpUnit * item.quantity).toFixed(2);
+        const discLine  = discUnit > 0 ? (discUnit * item.quantity).toFixed(2) : '-';
+        const priceLine = item.itemTotal.toFixed(2);
 
-        // Item name row
-        doc.font('Courier').fontSize(6.5).text(name, MARGIN, y, { width: 90 });
-        doc.text(String(item.quantity), MARGIN + 90, y, { width: 20, align: 'right' });
-        doc.text(`${item.price.toFixed(2)}`, MARGIN + 112, y, { width: 28, align: 'right' });
-        doc.text(`${item.itemTotal.toFixed(2)}`, MARGIN + 142, y, { width: 28, align: 'right' });
-        doc.text(`${item.gstAmount.toFixed(2)}`, MARGIN + 172, y, { width: 20, align: 'right' });
+        // Row 1: Item cols
+        doc.font('Courier').fontSize(6).fillColor('#000000');
+        doc.text(name,              CI, y, { width: WI });
+        doc.text(String(item.quantity), CQ, y, { width: WQ, align: 'right' });
+        doc.text(mrpLine,           CM, y, { width: WM, align: 'right' });
+        doc.text(discLine,          CD, y, { width: WD, align: 'right' });
+        doc.text(priceLine,         CP, y, { width: WP, align: 'right' });
         y += 9;
 
-        // HSN + GST detail row
-        doc.font('Courier').fontSize(5.5).fillColor('#000000');
-        const detailParts = [hsn, gstLabel, `Tax: ${item.taxableValue.toFixed(2)}`].filter(Boolean).join('  ');
-        doc.text(detailParts, MARGIN, y, { width: CONTENT_WIDTH });
+        // Row 2: GST detail
+        const hsn = product?.hsnCode || product?.category?.hsnCode || '';
+        const gstLabel = item.gstRate > 0
+          ? (item.isWithinState
+              ? `CGST ${(item.gstRate / 2).toFixed(1)}%+SGST ${(item.gstRate / 2).toFixed(1)}% =Rs${item.gstAmount.toFixed(2)}`
+              : `IGST ${item.gstRate}% =Rs${item.gstAmount.toFixed(2)}`)
+          : 'GST: Nil';
+        const detail = [hsn ? `HSN:${hsn}` : '', gstLabel].filter(Boolean).join('  ');
+        doc.font('Courier').fontSize(5.5).fillColor('#555555')
+          .text(detail, MARGIN, y, { width: CONTENT_WIDTH });
         y += 9;
       });
 
-      dashedLine(y); y += 10;
+      dashedLine(y); y += 8;
 
-      // ── TOTALS ───────────────────────────────────────────────
+      // ── TOTALS (checkout sequence) ────────────────────────────
+      doc.font('Courier').fontSize(7).fillColor('#000000');
+
+      // 1. MRP → Discount → Discounted subtotal
+      const totalDiscount = invoiceData.summary.totalDiscount || 0;
+      const totalMRP = invoiceData.summary.totalMRP || invoiceData.summary.subtotal;
+      if (totalDiscount > 0) {
+        row('MRP Total:', `Rs ${totalMRP.toFixed(2)}`, y); y += 10;
+        row('Product Discount:', `-Rs ${totalDiscount.toFixed(2)}`, y); y += 10;
+      }
+      row('Subtotal (after disc):', `Rs ${invoiceData.summary.subtotal.toFixed(2)}`, y); y += 10;
+
+      // 2. GST breakdown
+      dashedLine(y); y += 6;
+      doc.font('Courier-Bold').fontSize(6.5).text('GST BREAKDOWN:', MARGIN, y); y += 9;
       doc.font('Courier').fontSize(7);
-      row('Subtotal:', `Rs ${invoiceData.summary.subtotal.toFixed(2)}`, y); y += 10;
-      row('Delivery Charges:', `Rs ${invoiceData.summary.deliveryFee.toFixed(2)}`, y); y += 10;
-      if (invoiceData.summary.handlingFee > 0) {
+      if ((invoiceData.summary.totalCGST || 0) > 0 || (invoiceData.summary.totalSGST || 0) > 0) {
+        row('CGST:', `Rs ${(invoiceData.summary.totalCGST || 0).toFixed(2)}`, y); y += 10;
+        row('SGST:', `Rs ${(invoiceData.summary.totalSGST || 0).toFixed(2)}`, y); y += 10;
+      }
+      if ((invoiceData.summary.totalIGST || 0) > 0) {
+        row('IGST:', `Rs ${(invoiceData.summary.totalIGST || 0).toFixed(2)}`, y); y += 10;
+      }
+      if ((invoiceData.summary.totalGST || 0) === 0) {
+        row('Total GST:', 'Rs 0.00 (Nil)', y); y += 10;
+      } else {
+        row('Total GST:', `Rs ${(invoiceData.summary.totalGST || 0).toFixed(2)}`, y); y += 10;
+      }
+
+      // 3. Handling charges
+      dashedLine(y); y += 6;
+      if ((invoiceData.summary.handlingFee || 0) > 0) {
         row('Handling Charge:', `Rs ${invoiceData.summary.handlingFee.toFixed(2)}`, y); y += 10;
       }
-      if (invoiceData.summary.couponDiscount > 0) {
-        const couponLabel = invoiceData.summary.couponCode
+
+      // 4. Delivery charges
+      row('Delivery Charges:', `Rs ${(invoiceData.summary.deliveryFee || 0).toFixed(2)}`, y); y += 10;
+
+      // 5. Coupon discount
+      if ((invoiceData.summary.couponDiscount || 0) > 0) {
+        const couponLbl = invoiceData.summary.couponCode
           ? `Coupon (${invoiceData.summary.couponCode}):`
           : 'Coupon Discount:';
-        row(couponLabel, `-Rs ${invoiceData.summary.couponDiscount.toFixed(2)}`, y); y += 10;
+        row(couponLbl, `-Rs ${invoiceData.summary.couponDiscount.toFixed(2)}`, y); y += 10;
       }
 
-      // GST breakdown — always shown
-      dashedLine(y); y += 8;
-      doc.font('Courier-Bold').fontSize(7).text('GST BREAKDOWN:', MARGIN, y); y += 10;
-      doc.font('Courier').fontSize(7);
-
-      if (invoiceData.summary.totalCGST > 0 || invoiceData.summary.totalSGST > 0) {
-        row('CGST:', `Rs ${invoiceData.summary.totalCGST.toFixed(2)}`, y); y += 10;
-        row('SGST:', `Rs ${invoiceData.summary.totalSGST.toFixed(2)}`, y); y += 10;
-      }
-      if (invoiceData.summary.totalIGST > 0) {
-        row('IGST:', `Rs ${invoiceData.summary.totalIGST.toFixed(2)}`, y); y += 10;
-      }
-      if (invoiceData.summary.totalGST === 0) {
-        row('Total GST:', 'Rs 0.00 (Nil rated)', y); y += 10;
-      } else {
-        row('Total GST:', `Rs ${invoiceData.summary.totalGST.toFixed(2)}`, y); y += 10;
-      }
-
-      if (invoiceData.payment.walletDeduction > 0) {
-        dashedLine(y); y += 8;
-        row('Wallet Deduction:', `-Rs ${invoiceData.payment.walletDeduction.toFixed(2)}`, y); y += 10;
-      }
-
-      dashedLine(y); y += 8;
+      // 6. Grand Total
+      dashedLine(y); y += 6;
       row('GRAND TOTAL:', `Rs ${invoiceData.summary.payableAmount.toFixed(2)}`, y, { bold: true, size: 8 }); y += 14;
+
+      // 7. Wallet deduction → amount paid
+      if ((invoiceData.payment.walletDeduction || 0) > 0) {
+        row('Wallet Deduction:', `-Rs ${invoiceData.payment.walletDeduction.toFixed(2)}`, y); y += 10;
+        dashedLine(y); y += 6;
+        const paid = invoiceData.summary.payableAmount - invoiceData.payment.walletDeduction;
+        row('AMOUNT PAID:', `Rs ${paid.toFixed(2)}`, y, { bold: true, size: 8 }); y += 14;
+      }
+
       dashedLine(y); y += 10;
 
       // ── PAYMENT ──────────────────────────────────────────────
       doc.font('Courier-Bold').fontSize(7).text('PAYMENT:', MARGIN, y); y += 10;
       doc.font('Courier').fontSize(7);
-      row('Method:', invoiceData.payment.method.toUpperCase(), y); y += 10;
-      row('Status:', invoiceData.payment.status.toUpperCase(), y); y += 10;
+      row('Method:', (invoiceData.payment.method || '').toUpperCase(), y); y += 10;
+      row('Status:', (invoiceData.payment.status || '').toUpperCase(), y); y += 10;
       if (invoiceData.secretCode) {
         row('Secret Code:', invoiceData.secretCode, y, { bold: true }); y += 10;
       }
 
-      // ── GST SUPPLY TYPE ─────────────────────────────────────
-      if (invoiceData.summary.totalGST > 0) {
+      // ── GST SUPPLY NOTE ──────────────────────────────────────
+      if ((invoiceData.summary.totalGST || 0) > 0) {
         dashedLine(y); y += 8;
-        doc.font('Courier').fontSize(6);
+        doc.font('Courier').fontSize(6).fillColor('#000000');
         if (invoiceData.gstSummary.withinState) {
-          doc.text(`Within-state supply: CGST Rs ${invoiceData.summary.totalCGST.toFixed(2)} + SGST Rs ${invoiceData.summary.totalSGST.toFixed(2)}`, MARGIN, y, { width: CONTENT_WIDTH }); y += 9;
+          doc.text(
+            `Within-state supply: CGST Rs ${(invoiceData.summary.totalCGST || 0).toFixed(2)} + SGST Rs ${(invoiceData.summary.totalSGST || 0).toFixed(2)}`,
+            MARGIN, y, { width: CONTENT_WIDTH }
+          ); y += 9;
         }
         if (invoiceData.gstSummary.interState) {
-          doc.text(`Inter-state supply: IGST Rs ${invoiceData.summary.totalIGST.toFixed(2)}`, MARGIN, y, { width: CONTENT_WIDTH }); y += 9;
+          doc.text(
+            `Inter-state supply: IGST Rs ${(invoiceData.summary.totalIGST || 0).toFixed(2)}`,
+            MARGIN, y, { width: CONTENT_WIDTH }
+          ); y += 9;
         }
       }
 
       // ── FOOTER ───────────────────────────────────────────────
-      y += 4;
+      y += 6;
       dashedLine(y); y += 10;
       center('Computer generated invoice.', y, { size: 6 }); y += 9;
       center('No signature required.', y, { size: 6 }); y += 9;

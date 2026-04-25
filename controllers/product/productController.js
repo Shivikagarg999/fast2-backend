@@ -1,6 +1,8 @@
+const mongoose = require('mongoose');
 const Category = require('../../models/category');
 const Promotor = require('../../models/promotor');
 const Product = require('../../models/product');
+const Order = require('../../models/order');
 const Seller = require('../../models/seller');
 const Warehouse = require('../../models/warehouse');
 const imagekit = require('../../utils/imagekit');
@@ -916,6 +918,7 @@ const getProductsAdmin = async (req, res) => {
 
     const products = await Product.find(filter)
       .populate('category')
+      .populate('seller', 'name businessName')
       .populate('promotor.id')
       .populate('warehouse.id')
       .sort(sort)
@@ -1056,9 +1059,9 @@ const getProductOrders = async (req, res) => {
     const totalOrders = await Order.countDocuments(filter);
 
     const productStats = await Order.aggregate([
-      { $match: { 'items.product': mongoose.Types.ObjectId(productId) } },
+      { $match: { 'items.product': new mongoose.Types.ObjectId(productId) } },
       { $unwind: '$items' },
-      { $match: { 'items.product': mongoose.Types.ObjectId(productId) } },
+      { $match: { 'items.product': new mongoose.Types.ObjectId(productId) } },
       {
         $group: {
           _id: null,

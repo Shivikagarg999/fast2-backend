@@ -5,7 +5,8 @@
       "Bash(npm create:*)",
       "Bash(curl -s -X POST http://localhost:5000/api/driver/login -H \"Content-Type: application/json\" -d '{\"email\":\"dhruvgargg8@gmail.com\",\"password\":\"kyubatau\"}')",
       "Bash(curl -s http://localhost:5000/)",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(xargs grep *)"
     ]
   }
 }
