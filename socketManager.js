@@ -118,6 +118,67 @@ exports.init = (httpServer) => {
             exports.recordDecline(String(orderId), String(driverId));
         });
 
+        // Driver sends real-time location update while on delivery
+        socket.on('update_driver_location', async ({ driverId, orderId, lat, lng }) => {
+            if (!driverId || !lat || !lng) return;
+
+            // Persist to DB so users can fetch current location via REST
+            try {
+                const Driver = require('./models/driver');
+                await Driver.findByIdAndUpdate(driverId, {
+                    'workInfo.currentLocation.coordinates.lat': lat,
+                    'workInfo.currentLocation.coordinates.lng': lng,
+                    'workInfo.currentLocation.lastUpdated': new Date(),
+                });
+            } catch (err) {
+                serverLog(`update_driver_location DB error: ${err.message}`, 'error');
+            }
+
+            // Broadcast to all customers tracking this order
+            if (orderId) {
+                const payload = { driverId: String(driverId), orderId: String(orderId), lat, lng, timestamp: Date.now() };
+                io.to(`order_${orderId}`).emit('driver_location', payload);
+                serverLog(`Location update for order ${orderId}: lat=${lat} lng=${lng}`, 'event');
+            }
+        });
+
+        // Customer joins an order-tracking room to receive driver location updates
+        socket.on('track_order', async ({ orderId, userId }) => {
+            if (!orderId) return;
+            socket.join(`order_${orderId}`);
+            serverLog(`Socket ${socket.id} (user ${userId || 'unknown'}) tracking order ${orderId}`, 'info');
+
+            // Immediately send current driver location from DB if available
+            try {
+                const Order = require('./models/order');
+                const Driver = require('./models/driver');
+                const order = await Order.findById(orderId).select('driver status user').lean();
+                if (order && order.driver) {
+                    const driver = await Driver.findById(order.driver)
+                        .select('workInfo.currentLocation').lean();
+                    const loc = driver?.workInfo?.currentLocation;
+                    if (loc?.coordinates?.lat) {
+                        socket.emit('driver_location', {
+                            driverId: String(order.driver),
+                            orderId: String(orderId),
+                            lat: loc.coordinates.lat,
+                            lng: loc.coordinates.lng,
+                            timestamp: loc.lastUpdated ? new Date(loc.lastUpdated).getTime() : Date.now(),
+                        });
+                    }
+                }
+            } catch (err) {
+                serverLog(`track_order DB lookup error: ${err.message}`, 'error');
+            }
+        });
+
+        // Customer stops tracking
+        socket.on('stop_tracking', ({ orderId }) => {
+            if (!orderId) return;
+            socket.leave(`order_${orderId}`);
+            serverLog(`Socket ${socket.id} stopped tracking order ${orderId}`, 'info');
+        });
+
         socket.on('disconnect', (reason) => {
             for (const [driverId, sid] of driverSockets.entries()) {
                 if (sid === socket.id) {

@@ -23,4 +23,7 @@ router.get("/seller/:sellerId/payouts", auth, orderController.getSellerPayouts);
 router.get("/promotor/:promotorId/payouts", auth, orderController.getPromotorPayouts);
 router.get("/payouts/summary", auth, orderController.getPayoutSummary);
 
+// Live driver location for a user's order
+router.get("/:orderId/tracking", auth, orderController.getOrderTracking);
+
 module.exports = router;

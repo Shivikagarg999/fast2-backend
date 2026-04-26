@@ -2223,3 +2223,62 @@ exports.redeemScratchCoupon = async (req, res) => {
     return res.status(400).json({ success: false, message: err.message });
   }
 };
+exports.getOrderTracking = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const userId = req.user._id;
+
+    const order = await Order.findById(orderId).select("driver status user").lean();
+    if (!order) {
+      return res.status(404).json({ success: false, message: "Order not found" });
+    }
+
+    if (order.user.toString() !== userId.toString()) {
+      return res.status(403).json({ success: false, message: "Not your order" });
+    }
+
+    const trackableStatuses = ["accepted", "picked-up"];
+    if (!trackableStatuses.includes(order.status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Order is not currently trackable",
+        data: { status: order.status },
+      });
+    }
+
+    if (!order.driver) {
+      return res.status(404).json({ success: false, message: "No driver assigned yet" });
+    }
+
+    const Driver = require("../../models/driver");
+    const driver = await Driver.findById(order.driver)
+      .select("personalInfo.name workInfo.currentLocation workInfo.availability").lean();
+
+    if (!driver) {
+      return res.status(404).json({ success: false, message: "Driver not found" });
+    }
+
+    const loc = driver.workInfo?.currentLocation;
+    return res.status(200).json({
+      success: true,
+      data: {
+        orderId: String(order._id),
+        orderStatus: order.status,
+        driver: {
+          id: String(order.driver),
+          name: driver.personalInfo?.name || "Driver",
+        },
+        location: loc?.coordinates?.lat
+          ? {
+              lat: loc.coordinates.lat,
+              lng: loc.coordinates.lng,
+              lastUpdated: loc.lastUpdated,
+            }
+          : null,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching order tracking:", error);
+    res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};

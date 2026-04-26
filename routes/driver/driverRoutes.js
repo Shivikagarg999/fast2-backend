@@ -15,6 +15,7 @@ const {
   sendConfirmationOtp,
   getMyPayouts,
   updateFcmToken,
+  updateDriverLocation,
 } = require("../../controllers/driver/driverControllers");
 const { authenticateToken } = require("../../middlewares/driverAuth");
 
@@ -55,5 +56,8 @@ router.post(
 
 // Save/refresh FCM token for push notifications
 router.post("/fcm-token", authenticateToken, updateFcmToken);
+
+// Live location update (REST fallback — prefer socket update_driver_location)
+router.patch("/location", authenticateToken, updateDriverLocation);
 
 module.exports = router;

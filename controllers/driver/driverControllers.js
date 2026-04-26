@@ -3,7 +3,7 @@ const Driver = require("../../models/driver");
 const DriverEarning = require('../../models/driverEarnings');
 const { sendNotification } = require("../../services/notificationService");
 const { notifyOrderTaken } = require("../../services/driverNotificationService");
-const { emitOrderTaken, serverLog } = require("../../socketManager");
+const { emitOrderTaken, serverLog, getIo } = require("../../socketManager");
 
 exports.getPendingOrders = async (req, res) => {
   try {
@@ -852,5 +852,49 @@ exports.getMyPayouts = async (req, res) => {
       success: false,
       message: "Internal Server Error"
     });
+  }
+};
+
+exports.updateDriverLocation = async (req, res) => {
+  try {
+    const { lat, lng } = req.body;
+
+    if (!lat || !lng) {
+      return res.status(400).json({ success: false, message: "lat and lng are required" });
+    }
+
+    const driver = await Driver.findById(req.driver.driverId);
+    if (!driver) {
+      return res.status(404).json({ success: false, message: "Driver not found" });
+    }
+
+    driver.workInfo.currentLocation.coordinates.lat = lat;
+    driver.workInfo.currentLocation.coordinates.lng = lng;
+    driver.workInfo.currentLocation.lastUpdated = new Date();
+    await driver.save();
+
+    // Broadcast to customers tracking the driver's current order
+    const orderId = driver.workInfo.currentOrder;
+    if (orderId) {
+      const io = getIo();
+      if (io) {
+        io.to(`order_${orderId}`).emit('driver_location', {
+          driverId: String(driver._id),
+          orderId: String(orderId),
+          lat,
+          lng,
+          timestamp: Date.now(),
+        });
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Location updated",
+      data: { lat, lng, orderId: orderId || null },
+    });
+  } catch (error) {
+    console.error("Error updating driver location:", error);
+    res.status(500).json({ success: false, message: "Internal Server Error" });
   }
 };
