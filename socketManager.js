@@ -152,7 +152,7 @@ exports.init = (httpServer) => {
             try {
                 const Order = require('./models/order');
                 const Driver = require('./models/driver');
-                const order = await Order.findById(orderId).select('driver status user').lean();
+                const order = await Order.findOne({ orderId }).select('driver status user').lean();
                 if (order && order.driver) {
                     const driver = await Driver.findById(order.driver)
                         .select('workInfo.currentLocation').lean();

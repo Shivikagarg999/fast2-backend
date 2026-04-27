@@ -2228,7 +2228,7 @@ exports.getOrderTracking = async (req, res) => {
     const { orderId } = req.params;
     const userId = req.user._id;
 
-    const order = await Order.findById(orderId).select("driver status user").lean();
+    const order = await Order.findOne({ orderId }).select("driver status user").lean();
     if (!order) {
       return res.status(404).json({ success: false, message: "Order not found" });
     }

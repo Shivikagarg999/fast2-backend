@@ -41,7 +41,7 @@ exports.acceptOrder = async (req, res) => {
       return res.status(400).json({ success: false, message: "Driver must be online to accept an order" });
     }
 
-    const order = await Order.findById(orderId);
+    const order = await Order.findOne({ orderId });
     if (!order) {
       return res.status(404).json({ success: false, message: "Order not found" });
     }
@@ -135,7 +135,7 @@ exports.markOrderPickedUp = async (req, res) => {
       return res.status(404).json({ success: false, message: "Driver not found" });
     }
 
-    const order = await Order.findById(orderId);
+    const order = await Order.findOne({ orderId });
     if (!order) {
       return res.status(404).json({ success: false, message: "Order not found" });
     }
@@ -172,7 +172,7 @@ exports.verifySecretCodeAndPayment = async (req, res) => {
       return res.status(404).json({ success: false, message: "Driver not found" });
     }
 
-    const order = await Order.findById(orderId);
+    const order = await Order.findOne({ orderId });
     if (!order) {
       return res.status(404).json({ success: false, message: "Order not found" });
     }
@@ -263,7 +263,7 @@ exports.markOrderDelivered = async (req, res) => {
       return res.status(404).json({ success: false, message: "Driver not found" });
     }
 
-    const order = await Order.findById(orderId);
+    const order = await Order.findOne({ orderId });
     if (!order) {
       return res.status(404).json({ success: false, message: "Order not found" });
     }
@@ -423,7 +423,7 @@ exports.verifySecretCodeAndPayment = async (req, res) => {
       return res.status(404).json({ success: false, message: "Driver not found" });
     }
 
-    const order = await Order.findById(orderId);
+    const order = await Order.findOne({ orderId });
     if (!order) {
       return res.status(404).json({ success: false, message: "Order not found" });
     }
@@ -874,17 +874,21 @@ exports.updateDriverLocation = async (req, res) => {
     await driver.save();
 
     // Broadcast to customers tracking the driver's current order
-    const orderId = driver.workInfo.currentOrder;
-    if (orderId) {
+    const currentOrderObjectId = driver.workInfo.currentOrder;
+    if (currentOrderObjectId) {
       const io = getIo();
       if (io) {
-        io.to(`order_${orderId}`).emit('driver_location', {
-          driverId: String(driver._id),
-          orderId: String(orderId),
-          lat,
-          lng,
-          timestamp: Date.now(),
-        });
+        // Look up human-readable orderId so the room key matches what Flutter uses
+        const currentOrder = await Order.findById(currentOrderObjectId).select('orderId').lean();
+        if (currentOrder?.orderId) {
+          io.to(`order_${currentOrder.orderId}`).emit('driver_location', {
+            driverId: String(driver._id),
+            orderId: currentOrder.orderId,
+            lat,
+            lng,
+            timestamp: Date.now(),
+          });
+        }
       }
     }
 
