@@ -11,7 +11,12 @@ exports.getPendingOrders = async (req, res) => {
       status: { $in: ["pending", "confirmed"] },
       driver: null
     })
-      .populate("user", "name email")
+      .populate("user", "name email phone")
+      .populate({
+        path: "seller",
+        select: "name businessName phone shop",
+        populate: { path: "shop", select: "shopName address contactPhone" }
+      })
       .sort({ createdAt: -1 });
 
     res.status(200).json({
@@ -366,9 +371,14 @@ exports.getOngoingOrders = async (req, res) => {
 
     const ongoingOrders = await Order.find({
       driver: driver._id,
-      status: { $in: ["confirmed", "picked-up"] }
+      status: { $in: ["accepted", "picked-up"] }
     })
-      .populate("user", "name email")
+      .populate("user", "name email phone")
+      .populate({
+        path: "seller",
+        select: "name businessName phone shop",
+        populate: { path: "shop", select: "shopName address contactPhone" }
+      })
       .sort({ createdAt: -1 });
 
     res.status(200).json({

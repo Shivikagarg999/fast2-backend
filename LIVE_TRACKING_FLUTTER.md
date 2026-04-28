@@ -1,7 +1,7 @@
 # Live Order Tracking — Flutter Integration Guide
 
 Real-time delivery tracking using Socket.io. The driver app streams GPS coordinates; the customer app receives them and updates the map live.
-  
+
 ---
 
 ## How It Works
