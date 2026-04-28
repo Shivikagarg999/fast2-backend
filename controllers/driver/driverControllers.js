@@ -17,6 +17,11 @@ exports.getPendingOrders = async (req, res) => {
         select: "name businessName phone shop",
         populate: { path: "shop", select: "shopName address contactPhone" }
       })
+      .populate({
+        path: "items.product",
+        select: "name shop",
+        populate: { path: "shop", select: "shopName address contactPhone" }
+      })
       .sort({ createdAt: -1 });
 
     res.status(200).json({
@@ -377,6 +382,11 @@ exports.getOngoingOrders = async (req, res) => {
       .populate({
         path: "seller",
         select: "name businessName phone shop",
+        populate: { path: "shop", select: "shopName address contactPhone" }
+      })
+      .populate({
+        path: "items.product",
+        select: "name shop",
         populate: { path: "shop", select: "shopName address contactPhone" }
       })
       .sort({ createdAt: -1 });
