@@ -60,7 +60,9 @@ const allowedOrigins = [
   "https://www.admin.fast2.in",
   "https://seller.fast2.in",
   "https://www.seller.fast2.in",
-  "http://localhost:5174"
+  "http://localhost:5174",
+  "https://promotor.fast2.in",
+  "https://www.promotor.fast2.in"
 ];
 
 app.use(
