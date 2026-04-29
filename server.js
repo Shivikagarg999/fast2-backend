@@ -127,7 +127,6 @@ app.get('/', (req, res) => {
   res.send('New Backend is running...');
 });
 
-// ── Test-only endpoint to manually fire socket events ──────────────────────
 app.post('/test/trigger-order', async (req, res) => {
   try {
     const { emitNewOrder, serverLog } = require('./socketManager');
@@ -141,7 +140,6 @@ app.post('/test/trigger-order', async (req, res) => {
   }
 });
 
-// Serve test UI at http://localhost:5000/test
 const path = require('path');
 app.get('/test', (req, res) => {
   res.sendFile(path.join(__dirname, 'test-socket.html'));

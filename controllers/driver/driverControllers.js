@@ -498,13 +498,14 @@ exports.verifySecretCodeAndPayment = async (req, res) => {
 exports.checkOrderPlaced = async (req, res) => {
   try {
     const { orderId } = req.params;
+    const mongoose = require('mongoose');
 
-    const order = await Order.findOne({
-      $or: [
-        { _id: orderId },
-        { orderId: orderId }
-      ]
-    }).select("orderId status user finalAmount paymentStatus createdAt");
+    const query = mongoose.Types.ObjectId.isValid(orderId)
+      ? { $or: [{ _id: orderId }, { orderId: orderId }] }
+      : { orderId: orderId };
+
+    const order = await Order.findOne(query)
+      .select("orderId status user finalAmount paymentStatus createdAt");
 
     if (!order) {
       return res.status(404).json({
