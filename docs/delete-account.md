@@ -90,7 +90,7 @@ DELETE /api/user/delete-account
 ## Example — cURL
 
 ```bash
-curl -X DELETE https://api.fast2.in/api/user/delete-account \
+curl -X DELETE http://localhost:5000/api/user/delete-account \
   -H "Authorization: Bearer <your_token>" \
   -H "Content-Type: application/json" \
   -d '{"password": "mypassword123"}'
@@ -99,7 +99,7 @@ curl -X DELETE https://api.fast2.in/api/user/delete-account \
 ## Example — JavaScript (fetch)
 
 ```js
-const res = await fetch('https://api.fast2.in/api/user/delete-account', {
+const res = await fetch('http://localhost:5000/api/user/delete-account', {
   method: 'DELETE',
   headers: {
     'Authorization': `Bearer ${token}`,

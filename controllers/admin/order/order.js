@@ -198,11 +198,26 @@ const getAllOrders = async (req, res) => {
 
     const orders = await Order.find(filter)
       .populate("user", "name email phone")
-      .populate("driver", "name phone")
-      .populate("items.product", "name images")
+      .populate({
+        path: "driver",
+        model: "Driver",
+        select: "personalInfo address vehicle documents bankDetails workInfo earnings deliveryStats activity payoutDetails createdAt updatedAt"
+      })
+      .populate({
+        path: "seller",
+        model: "Seller",
+        select: "name email phone businessName gstNumber panNumber fssaiNumber address bankDetails promotor approvalStatus isActive rating totalOrders totalEarnings shop createdAt updatedAt",
+        populate: {
+          path: "promotor",
+          model: "Promotor",
+          select: "name email phone address commissionRate commissionType totalCommissionEarned active aadharNumber panNumber bankDetails createdAt updatedAt"
+        }
+      })
+      .populate("items.product", "name images price gstPercent description")
       .sort(sort)
       .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .skip((page - 1) * limit)
+      .lean();
 
     const total = await Order.countDocuments(filter);
 
@@ -213,6 +228,7 @@ const getAllOrders = async (req, res) => {
       total
     });
   } catch (error) {
+    console.error("Error in getAllOrders:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };

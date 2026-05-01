@@ -53,7 +53,7 @@ class NotificationService {
 
   /// Called once from main() — after Firebase.initializeApp()
   Future<void> init({
-    required String backendBaseUrl, // e.g. "https://api.fast2.in"
+    required String backendBaseUrl, // e.g. "http://localhost:5000"
     required Future<String?> Function() getDriverToken, // JWT getter
     void Function(String? orderId, String? screen)? onNotificationTap,
   }) async {

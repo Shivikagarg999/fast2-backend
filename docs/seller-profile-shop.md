@@ -307,7 +307,7 @@ formData.append('timings', JSON.stringify({
   timezone:  'Asia/Kolkata'
 }));
 
-const res = await fetch('https://api.fast2.in/api/seller/shop/', {
+const res = await fetch('http://localhost:5000/api/seller/shop/', {
   method: 'PUT',
   headers: { Authorization: `Bearer ${token}` },
   body: formData,

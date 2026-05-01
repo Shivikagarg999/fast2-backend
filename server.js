@@ -43,6 +43,7 @@ const publicShopRoutes = require('./routes/public/shopRoutes');
 const adminShopRoutes = require('./routes/admin/shopRoutes');
 const adminPopupRoutes = require('./routes/admin/popupRoutes');
 const promotorRoutes = require('./routes/promotor/promotorRoutes');
+const adminReportRoutes = require('./routes/admin/report/report');
 
 const publicPopupRouter = express.Router();
 publicPopupRouter.get('/active', require('./controllers/admin/popupController').getActivePopup);
@@ -55,7 +56,7 @@ const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:5000",
   "https://fast2-admin.vercel.app",
-  "https://api.fast2.in",
+  "http://localhost:5000",
   "https://admin.fast2.in",
   "https://www.admin.fast2.in",
   "https://seller.fast2.in",
@@ -118,6 +119,7 @@ app.use('/api/admin/popups', adminPopupRoutes);
 app.use('/api/popups', publicPopupRouter);
 app.use('/api/admin', adminUserRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/admin/reports', adminReportRoutes);
 
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB connected'))

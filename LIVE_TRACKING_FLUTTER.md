@@ -34,7 +34,7 @@ dependencies:
 ## Base URL
 
 ```dart
-const String baseUrl = 'https://api.fast2.in';        // production
+const String baseUrl = 'http://localhost:5000';        // production
 // const String baseUrl = 'http://localhost:5000';     // local dev
 ```
 
@@ -59,7 +59,7 @@ class TrackingService {
   /// Called once at app start (or after login)
   void connect() {
     _socket = IO.io(
-      'https://api.fast2.in',
+      'http://localhost:5000',
       IO.OptionBuilder()
           .setTransports(['websocket'])
           .disableAutoConnect()
@@ -151,7 +151,7 @@ class _OrderTrackingScreenState extends State<OrderTrackingScreen> {
     try {
       final res = await http.get(
         // orderId = human-readable ID e.g. "FST001", not the MongoDB _id
-        Uri.parse('https://api.fast2.in/api/orders/${widget.orderId}/tracking'),
+        Uri.parse('http://localhost:5000/api/orders/${widget.orderId}/tracking'),
         headers: {'Authorization': 'Bearer ${widget.authToken}'},
       );
       if (res.statusCode == 200) {
@@ -436,7 +436,7 @@ class LocationService {
 
     // Connect socket if not already connected
     _socket ??= IO.io(
-      'https://api.fast2.in',
+      'http://localhost:5000',
       IO.OptionBuilder()
           .setTransports(['websocket'])
           .disableAutoConnect()
@@ -499,7 +499,7 @@ If the driver app cannot maintain a socket connection, call the REST endpoint in
 ```dart
 Future<void> updateLocationRest(double lat, double lng, String token) async {
   await http.patch(
-    Uri.parse('https://api.fast2.in/api/driver/location'),
+    Uri.parse('http://localhost:5000/api/driver/location'),
     headers: {
       'Authorization': 'Bearer $token',
       'Content-Type': 'application/json',
@@ -670,7 +670,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 
 class SupportService {
-  static const _baseUrl = 'https://api.fast2.in';
+  static const _baseUrl = 'http://localhost:5000';
 
   static Future<SupportResult> submitRequest({
     required String name,
@@ -1020,7 +1020,7 @@ import 'package:open_filex/open_filex.dart';
 
 Future<void> downloadInvoice(String orderId, String token) async {
   final res = await http.get(
-    Uri.parse('https://api.fast2.in/api/orders/$orderId/invoice'),
+    Uri.parse('http://localhost:5000/api/orders/$orderId/invoice'),
     headers: {'Authorization': 'Bearer $token'},
   );
 

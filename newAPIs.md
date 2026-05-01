@@ -71,7 +71,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 
 class SupportService {
-  static const _baseUrl = 'https://api.fast2.in';
+  static const _baseUrl = 'http://localhost:5000';
 
   static Future<SupportResult> submitRequest({
     required String name,
@@ -421,7 +421,7 @@ import 'package:open_filex/open_filex.dart';
 
 Future<void> downloadInvoice(String orderId, String token) async {
   final res = await http.get(
-    Uri.parse('https://api.fast2.in/api/orders/$orderId/invoice'),
+    Uri.parse('http://localhost:5000/api/orders/$orderId/invoice'),
     headers: {'Authorization': 'Bearer $token'},
   );
 

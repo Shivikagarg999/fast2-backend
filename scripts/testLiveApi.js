@@ -37,7 +37,7 @@ function makeRequest(url, method, headers, body) {
 }
 
 async function testLiveServer() {
-    const baseUrl = 'https://api.fast2.in';
+    const baseUrl = 'http://localhost:5000';
     console.log(`🚀 Testing functionality on Test Live Server: ${baseUrl}`);
 
     try {
