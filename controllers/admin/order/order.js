@@ -1,4 +1,5 @@
 const Order = require("../../../models/order");
+const { formatOrderAmounts, formatOrdersAmounts } = require("../../../utils/orderAmounts");
 
 const downloadOrdersByStatusCSV = async (req, res) => {
   try {
@@ -42,7 +43,7 @@ const downloadOrdersByStatusCSV = async (req, res) => {
       'Product Quantities',
 
       // Financials
-      'Subtotal (total)',
+      'Total Order Value',
       'Handling Charge',
       'Total GST',
       'Coupon Code',
@@ -117,7 +118,7 @@ const downloadOrdersByStatusCSV = async (req, res) => {
         productQtys,
 
         // Financials
-        order.total || 0,
+        order.finalAmount || 0,
         order.handlingCharge || 0,
         order.totalGst || 0,
         order.coupon?.code || 'N/A',
@@ -222,7 +223,7 @@ const getAllOrders = async (req, res) => {
     const total = await Order.countDocuments(filter);
 
     res.json({
-      orders,
+      orders: formatOrdersAmounts(orders),
       totalPages: Math.ceil(total / limit),
       currentPage: page,
       total
@@ -245,7 +246,7 @@ const getOrderById = async (req, res) => {
       return res.status(404).json({ message: "Order not found" });
     }
 
-    res.json(order);
+    res.json(formatOrderAmounts(order));
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
   }
@@ -288,7 +289,7 @@ const updateOrderStatus = async (req, res) => {
 
     res.json({
       message: "Order updated successfully",
-      order
+      order: formatOrderAmounts(order)
     });
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
@@ -332,7 +333,7 @@ const assignDriver = async (req, res) => {
 
     res.json({
       message: "Driver assigned successfully",
-      order
+      order: formatOrderAmounts(order)
     });
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
@@ -381,7 +382,7 @@ const getOnlineOrders = async (req, res) => {
 
     res.json({
       success: true,
-      orders,
+      orders: formatOrdersAmounts(orders),
       total,
       page: parseInt(page),
       totalPages: Math.ceil(total / limit)
@@ -418,7 +419,7 @@ const updatePaymentStatus = async (req, res) => {
 
     res.json({
       message: "Payment status updated successfully",
-      order
+      order: formatOrderAmounts(order)
     });
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
@@ -441,7 +442,7 @@ const cancelOrder = async (req, res) => {
 
     res.json({
       message: "Order cancelled successfully",
-      order
+      order: formatOrderAmounts(order)
     });
   } catch (error) {
     res.status(500).json({ message: "Server error", error: error.message });
@@ -511,8 +512,8 @@ const getOrderStats = async (req, res) => {
       {
         $group: {
           _id: null,
-          totalRevenue: { $sum: "$total" },
-          averageOrderValue: { $avg: "$total" }
+          totalRevenue: { $sum: "$finalAmount" },
+          averageOrderValue: { $avg: "$finalAmount" }
         }
       }
     ]);
@@ -528,7 +529,7 @@ const getOrderStats = async (req, res) => {
       {
         $group: {
           _id: { $month: "$createdAt" },
-          revenue: { $sum: "$total" },
+          revenue: { $sum: "$finalAmount" },
           orders: { $sum: 1 }
         }
       },
@@ -597,7 +598,7 @@ const getFreshOrders = async (req, res) => {
     const total = await Order.countDocuments(filter);
 
     res.json({
-      orders,
+      orders: formatOrdersAmounts(orders),
       totalPages: Math.ceil(total / limit),
       currentPage: page,
       total,
@@ -653,7 +654,7 @@ const getFreshOrdersNotifications = async (req, res) => {
         acc[curr._id] = curr.count;
         return acc;
       }, {}),
-      latestOrders: freshOrders.slice(0, 5),
+      latestOrders: formatOrdersAmounts(freshOrders.slice(0, 5)),
       timestamp: new Date()
     };
 
@@ -695,8 +696,8 @@ const getFreshOrdersStats = async (req, res) => {
       {
         $group: {
           _id: null,
-          totalRevenue: { $sum: "$total" },
-          averageOrderValue: { $avg: "$total" },
+          totalRevenue: { $sum: "$finalAmount" },
+          averageOrderValue: { $avg: "$finalAmount" },
           orderCount: { $sum: 1 }
         }
       }
@@ -712,7 +713,7 @@ const getFreshOrdersStats = async (req, res) => {
         $group: {
           _id: { $hour: "$createdAt" },
           count: { $sum: 1 },
-          revenue: { $sum: "$total" }
+          revenue: { $sum: "$finalAmount" }
         }
       },
       {

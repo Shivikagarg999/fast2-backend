@@ -9,6 +9,13 @@ const mongoose = require('mongoose');
 const Razorpay = require('razorpay');
 const imagekit = require('../../utils/imagekit');
 const Shop = require('../../models/shop');
+const {
+  calculateFinalOrderAmount,
+  formatOrderAmounts,
+  formatOrdersAmounts,
+  getDisplayFinalAmount,
+  roundMoney
+} = require('../../utils/orderAmounts');
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -299,11 +306,16 @@ exports.createOrder = async (req, res) => {
     const numberOfShops = sellerDeliveryMap.size;
     const handlingCharge = numberOfShops * HANDLING_CHARGE_PER_SHOP;
 
-    let total = subtotal + deliveryCharges + handlingCharge;
+    let total = parseFloat((subtotal + deliveryCharges).toFixed(2));
     totalGst = parseFloat(totalGst.toFixed(2));
 
     let discount = 0;
-    let finalAmount = parseFloat((total + totalGst).toFixed(2));
+    let finalAmount = calculateFinalOrderAmount({
+      total,
+      handlingCharge,
+      totalGst,
+      coupon: { discount: 0 }
+    });
 
     if (coupon && coupon.discount) {
       discount = Math.min(coupon.discount, finalAmount);
@@ -491,6 +503,7 @@ exports.createOrder = async (req, res) => {
       total: total,
       totalGst: totalGst,
       coupon: coupon || {},
+      scratchCouponDiscount,
       finalAmount: finalAmount,
       shippingAddress: normalizedShippingAddress,
       paymentMethod,
@@ -554,7 +567,7 @@ exports.createOrder = async (req, res) => {
     const response = {
       success: true,
       message: "Order created successfully",
-      order: {
+      order: formatOrderAmounts({
         orderId: order.orderId,
         secretCode: order.secretCode,
         subtotal: subtotal,
@@ -563,6 +576,7 @@ exports.createOrder = async (req, res) => {
         handlingCharge: handlingCharge,
         numberOfShops: numberOfShops,
         total: total,
+        scratchCouponDiscount,
         finalAmount: finalAmount,
         walletDeduction: walletDeduction,
         cashOnDelivery: cashOnDelivery,
@@ -589,7 +603,7 @@ exports.createOrder = async (req, res) => {
           : { isEligible: false },
         ...(scratchCouponDetails && { scratchCouponApplied: scratchCouponDetails }),
         createdAt: order.createdAt
-      }
+      })
     };
 
     // Send notification to customer
@@ -1585,7 +1599,7 @@ exports.getMyOrders = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      orders: orders
+      orders: formatOrdersAmounts(orders)
     });
   } catch (error) {
     console.error('Get orders error:', error);
@@ -1657,8 +1671,10 @@ exports.downloadInvoice = async (req, res) => {
     const deliveryFee = order.deliveryCharges || 0;
     const handlingFee = order.handlingCharge || 0;
     const savedTotalGST = order.totalGst || 0;
-    const couponDiscount = order.coupon?.discount || 0;
+    const couponDiscount = roundMoney(order.coupon?.discount);
+    const scratchCouponDiscount = roundMoney(order.scratchCouponDiscount);
     const couponCode = order.coupon?.code || null;
+    const correctedFinalAmount = getDisplayFinalAmount(order);
 
     const shippingState = order.shippingAddress.state;
     let totalCGST = 0;
@@ -1717,12 +1733,13 @@ exports.downloadInvoice = async (req, res) => {
     const totalMRP = parseFloat(itemsWithGST.reduce((s, i) => s + i.mrpTotal, 0).toFixed(2));
     const totalDiscount = parseFloat(itemsWithGST.reduce((s, i) => s + i.discountTotal, 0).toFixed(2));
     const totalGST = savedTotalGST;
-    const finalPayableAmount = order.cashOnDelivery > 0 ? order.cashOnDelivery : order.finalAmount;
+    const amountToCollect = order.cashOnDelivery > 0
+      ? roundMoney(order.cashOnDelivery)
+      : Math.max(correctedFinalAmount - roundMoney(order.walletDeduction), 0);
 
     const invoiceData = {
       orderId: order.orderId,
       orderDate: order.createdAt,
-      secretCode: order.secretCode,
       customer: {
         name: order.user.name,
         email: order.user.email,
@@ -1736,7 +1753,8 @@ exports.downloadInvoice = async (req, res) => {
         status: order.paymentStatus,
         walletDeduction: order.walletDeduction,
         cashOnDelivery: order.cashOnDelivery,
-        finalAmount: order.finalAmount
+        amountToCollect,
+        finalAmount: correctedFinalAmount
       },
       summary: {
         totalMRP,
@@ -1745,13 +1763,17 @@ exports.downloadInvoice = async (req, res) => {
         deliveryFee,
         handlingFee,
         couponDiscount,
+        scratchCouponDiscount,
         couponCode,
+        totalBeforeGST: roundMoney(orderSubtotal + deliveryFee + handlingFee - couponDiscount - scratchCouponDiscount),
         totalGST,
         totalCGST,
         totalSGST,
         totalIGST,
+        grandTotal: correctedFinalAmount,
         walletDeduction: order.walletDeduction,
-        payableAmount: finalPayableAmount
+        payableAmount: correctedFinalAmount,
+        amountToCollect
       },
       gstSummary: {
         withinState: totalCGST > 0 || totalSGST > 0,
@@ -2021,6 +2043,9 @@ exports.generatePDFInvoice = async (invoiceData) => {
           : 'Coupon Discount:';
         row(couponLbl, `-Rs ${invoiceData.summary.couponDiscount.toFixed(2)}`, y); y += 10;
       }
+      if ((invoiceData.summary.scratchCouponDiscount || 0) > 0) {
+        row('Scratch Coupon:', `-Rs ${invoiceData.summary.scratchCouponDiscount.toFixed(2)}`, y); y += 10;
+      }
 
       // 6. Grand Total
       dashedLine(y); y += 6;
@@ -2041,10 +2066,6 @@ exports.generatePDFInvoice = async (invoiceData) => {
       doc.font('Courier').fontSize(7);
       row('Method:', (invoiceData.payment.method || '').toUpperCase(), y); y += 10;
       row('Status:', (invoiceData.payment.status || '').toUpperCase(), y); y += 10;
-      if (invoiceData.secretCode) {
-        row('Secret Code:', invoiceData.secretCode, y, { bold: true }); y += 10;
-      }
-
       // ── GST SUPPLY NOTE ──────────────────────────────────────
       if ((invoiceData.summary.totalGST || 0) > 0) {
         dashedLine(y); y += 8;

@@ -1,5 +1,6 @@
 // controllers/admin/reports/orderReport.js
 const Order = require("../../../models/order");
+const { roundMoney } = require("../../../utils/orderAmounts");
 
 const getOrderReport = async (req, res) => {
   try {
@@ -69,7 +70,10 @@ const getOrderReport = async (req, res) => {
         totalPrice: item.price * item.quantity,
         gstPercent: item.gstPercent
       })),
-      subtotal: order.total,
+      subtotal: roundMoney(
+        order.subtotal || order.items.reduce((sum, item) => sum + ((item.price || 0) * (item.quantity || 0)), 0)
+      ),
+      totalOrderValue: roundMoney(order.finalAmount || order.total),
       handlingCharge: order.handlingCharge,
       totalGST: order.totalGst,
       couponCode: order.coupon?.code || 'None',
@@ -113,14 +117,14 @@ const getOrderReport = async (req, res) => {
       const csvHeaders = [
         'Order ID', 'Order Date', 'Status', 'Customer Name', 'Customer Email', 'Customer Phone',
         'Seller Name', 'Seller Email', 'Driver Name', 'Driver Phone', 'Items Count',
-        'Subtotal', 'Handling Charge', 'Total GST', 'Final Amount', 'Payment Method', 'Payment Status',
+        'Items Subtotal', 'Handling Charge', 'Total GST', 'Total Order Value', 'Payment Method', 'Payment Status',
         'Seller Net Amount', 'Promotor Commission', 'Platform Fee', 'Refund Amount', 'Refund Status'
       ];
 
       const csvRows = reportData.map(order => [
         order.orderId, order.orderDate, order.status, order.customerName, order.customerEmail, order.customerPhone,
         order.sellerName, order.sellerEmail, order.driverName, order.driverPhone, order.itemsCount,
-        order.subtotal, order.handlingCharge, order.totalGST, order.finalAmount, order.paymentMethod, order.paymentStatus,
+        order.subtotal, order.handlingCharge, order.totalGST, order.totalOrderValue, order.paymentMethod, order.paymentStatus,
         order.sellerNetAmount, order.promotorCommissionAmount, order.platformServiceFee, order.refundAmount, order.refundStatus
       ].map(field => `"${String(field).replace(/"/g, '""')}"`).join(','));
 

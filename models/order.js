@@ -1,4 +1,5 @@
 const mongoose = require("mongoose");
+const { calculateFinalOrderAmount, roundMoney } = require("../utils/orderAmounts");
 
 const orderItemSchema = new mongoose.Schema({
   product: {
@@ -54,6 +55,18 @@ const orderSchema = new mongoose.Schema(
       default: null
     },
     items: [orderItemSchema],
+    subtotal: {
+      type: Number,
+      default: 0
+    },
+    deliveryCharges: {
+      type: Number,
+      default: 0
+    },
+    isFreeDelivery: {
+      type: Boolean,
+      default: false
+    },
     total: {
       type: Number,
       required: true
@@ -68,6 +81,10 @@ const orderSchema = new mongoose.Schema(
         type: Number,
         default: 0
       }
+    },
+    scratchCouponDiscount: {
+      type: Number,
+      default: 0
     },
     totalGst: {
       type: Number,
@@ -184,6 +201,15 @@ const orderSchema = new mongoose.Schema(
 );
 
 orderSchema.pre('save', async function (next) {
+  const calculatedFinalAmount = calculateFinalOrderAmount(this);
+  if (calculatedFinalAmount && roundMoney(this.finalAmount) < calculatedFinalAmount) {
+    this.finalAmount = calculatedFinalAmount;
+  }
+
+  if (this.paymentMethod === "cod") {
+    this.cashOnDelivery = roundMoney(Math.max(this.finalAmount - (this.walletDeduction || 0), 0));
+  }
+
   if (this.isNew) {
     try {
       const lastOrder = await this.constructor.findOne(

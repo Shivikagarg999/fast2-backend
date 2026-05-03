@@ -5,6 +5,7 @@ const DriverEarning = require('../../models/driverEarnings');
 const { sendNotification } = require("../../services/notificationService");
 const { notifyOrderTaken } = require("../../services/driverNotificationService");
 const { emitOrderTaken, serverLog, getIo } = require("../../socketManager");
+const { formatOrderAmounts, formatOrdersAmounts } = require("../../utils/orderAmounts");
 
 const findOrderByIdOrCustomId = (orderId) => {
   const query = mongoose.Types.ObjectId.isValid(orderId)
@@ -35,7 +36,7 @@ exports.getPendingOrders = async (req, res) => {
     res.status(200).json({
       success: true,
       count: pendingOrders.length,
-      data: pendingOrders
+      data: formatOrdersAmounts(pendingOrders)
     });
   } catch (error) {
     console.error("Error fetching pending orders:", error);
@@ -221,7 +222,9 @@ exports.verifySecretCodeAndPayment = async (req, res) => {
         });
       }
 
-      const expectedAmount = order.finalAmount;
+      const expectedAmount = order.cashOnDelivery > 0
+        ? order.cashOnDelivery
+        : Math.max((order.finalAmount || order.total || 0) - (order.walletDeduction || 0), 0);
       if (parseFloat(paidAmount) !== parseFloat(expectedAmount)) {
         return res.status(400).json({
           success: false,
@@ -259,6 +262,9 @@ exports.verifySecretCodeAndPayment = async (req, res) => {
         paymentMethod: order.paymentMethod,
         paidAmount: order.paymentMethod === "cod" ? paidAmount : 0,
         finalAmount: order.finalAmount,
+        total: order.finalAmount,
+        orderValue: order.finalAmount,
+        amountToCollect: expectedAmount,
         paymentNote: order.paymentMethod === "cod"
           ? `Customer paid ₹${paidAmount} cash to driver`
           : "Payment already completed online"
@@ -402,7 +408,7 @@ exports.getOngoingOrders = async (req, res) => {
     res.status(200).json({
       success: true,
       count: ongoingOrders.length,
-      data: ongoingOrders
+      data: formatOrdersAmounts(ongoingOrders)
     });
   } catch (error) {
     console.error("Error fetching ongoing orders:", error);
@@ -471,6 +477,8 @@ exports.checkOrderPlaced = async (req, res) => {
         status: order.status,
         paymentStatus: order.paymentStatus,
         finalAmount: order.finalAmount,
+        total: order.finalAmount,
+        orderValue: order.finalAmount,
         createdAt: order.createdAt,
       }
     });

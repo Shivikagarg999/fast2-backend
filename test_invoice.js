@@ -8,7 +8,6 @@ const path = require('path');
     const invoiceData = {
       orderId: 'TEST12345',
       orderDate: new Date(),
-      secretCode: 'SC123',
       customer: { name: 'John Doe', email: 'john@example.com', phone: '9999999999' },
       seller: { businessName: 'Fallback Seller', gstNumber: 'GSTFALLBACK', address: { street: 'Fallback St', city: 'Fallback City', state: 'Fallback State', pincode: '000000' } },
       shippingAddress: { addressLine: '10 Downing St', city: 'London', state: 'State', pinCode: '123456' },
