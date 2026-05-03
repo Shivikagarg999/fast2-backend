@@ -3,7 +3,7 @@ const SavedAddress = require("../../models/savedAddresses");
 exports.createAddress = async (req, res) => {
   try {
     const userId = req.user._id; 
-    const { label, fullName, phoneNumber, addressLine1, addressLine2, city, state, pincode, country, isDefault } = req.body;
+    const { label, fullName, phoneNumber, addressLine1, addressLine2, city, state, pincode, country, isDefault, lat, lng } = req.body;
 
     // Check if this is the first address - automatically set as default
     const addressCount = await SavedAddress.countDocuments({ user: userId });
@@ -24,6 +24,8 @@ exports.createAddress = async (req, res) => {
       state,
       pincode,
       country,
+      lat,
+      lng,
       isDefault: shouldBeDefault
     });
 
@@ -51,7 +53,7 @@ exports.updateAddress = async (req, res) => {
   try {
     const userId = req.user._id;
     const addressId = req.params.id;
-    const { label, fullName, phoneNumber, addressLine1, addressLine2, city, state, pincode, country, isDefault } = req.body;
+    const { label, fullName, phoneNumber, addressLine1, addressLine2, city, state, pincode, country, isDefault, lat, lng } = req.body;
 
     // If setting as default, remove default from all other addresses
     if (isDefault) {
@@ -60,7 +62,7 @@ exports.updateAddress = async (req, res) => {
 
     const updatedAddress = await SavedAddress.findOneAndUpdate(
       { _id: addressId, user: userId },
-      { label, fullName, phoneNumber, addressLine1, addressLine2, city, state, pincode, country, isDefault },
+      { label, fullName, phoneNumber, addressLine1, addressLine2, city, state, pincode, country, isDefault, lat, lng },
       { new: true }
     );
 

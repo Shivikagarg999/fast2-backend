@@ -122,23 +122,43 @@ exports.init = (httpServer) => {
         socket.on('update_driver_location', async ({ driverId, orderId, lat, lng }) => {
             if (!driverId || !lat || !lng) return;
 
-            // Persist to DB so users can fetch current location via REST
             try {
                 const Driver = require('./models/driver');
+                const mongoose = require('mongoose');
+
+                // Persist location to DB
                 await Driver.findByIdAndUpdate(driverId, {
                     'workInfo.currentLocation.coordinates.lat': lat,
                     'workInfo.currentLocation.coordinates.lng': lng,
                     'workInfo.currentLocation.lastUpdated': new Date(),
                 });
-            } catch (err) {
-                serverLog(`update_driver_location DB error: ${err.message}`, 'error');
-            }
 
-            // Broadcast to all customers tracking this order
-            if (orderId) {
-                const payload = { driverId: String(driverId), orderId: String(orderId), lat, lng, timestamp: Date.now() };
-                io.to(`order_${orderId}`).emit('driver_location', payload);
-                serverLog(`Location update for order ${orderId}: lat=${lat} lng=${lng}`, 'event');
+                // Resolve orderId to the FST001 custom ID so the room key always matches
+                let canonicalOrderId = null;
+                if (orderId) {
+                    const Order = require('./models/order');
+                    const query = mongoose.Types.ObjectId.isValid(orderId)
+                        ? { $or: [{ _id: orderId }, { orderId }] }
+                        : { orderId };
+                    const order = await Order.findOne(query).select('orderId').lean();
+                    canonicalOrderId = order?.orderId || null;
+                } else {
+                    // Fall back to the driver's current order in DB
+                    const driver = await Driver.findById(driverId).select('workInfo.currentOrder').lean();
+                    if (driver?.workInfo?.currentOrder) {
+                        const Order = require('./models/order');
+                        const order = await Order.findById(driver.workInfo.currentOrder).select('orderId').lean();
+                        canonicalOrderId = order?.orderId || null;
+                    }
+                }
+
+                if (canonicalOrderId) {
+                    const payload = { driverId: String(driverId), orderId: canonicalOrderId, lat, lng, timestamp: Date.now() };
+                    io.to(`order_${canonicalOrderId}`).emit('driver_location', payload);
+                    serverLog(`Location update for order ${canonicalOrderId}: lat=${lat} lng=${lng}`, 'event');
+                }
+            } catch (err) {
+                serverLog(`update_driver_location error: ${err.message}`, 'error');
             }
         });
 

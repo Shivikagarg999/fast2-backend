@@ -31,7 +31,9 @@ const shippingSchema = new mongoose.Schema({
   state: { type: String, required: true },
   pinCode: { type: String, required: true },
   country: { type: String, default: "India" },
-  phone: { type: String }
+  phone: { type: String },
+  lat: { type: Number },
+  lng: { type: Number }
 });
 
 const orderSchema = new mongoose.Schema(

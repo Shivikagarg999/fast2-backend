@@ -41,6 +41,8 @@ const savedAddressSchema = new mongoose.Schema({
     type: String,
     default: "India"
   },
+  lat: { type: Number },
+  lng: { type: Number },
   isDefault: {
     type: Boolean,
     default: false

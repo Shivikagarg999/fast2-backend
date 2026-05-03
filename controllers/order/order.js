@@ -2228,7 +2228,7 @@ exports.getOrderTracking = async (req, res) => {
     const { orderId } = req.params;
     const userId = req.user._id;
 
-    const order = await Order.findOne({ orderId }).select("driver status user").lean();
+    const order = await Order.findOne({ orderId }).select("driver status user orderId shippingAddress").lean();
     if (!order) {
       return res.status(404).json({ success: false, message: "Order not found" });
     }
@@ -2259,10 +2259,11 @@ exports.getOrderTracking = async (req, res) => {
     }
 
     const loc = driver.workInfo?.currentLocation;
+    const addr = order.shippingAddress;
     return res.status(200).json({
       success: true,
       data: {
-        orderId: String(order._id),
+        orderId: order.orderId,
         orderStatus: order.status,
         driver: {
           id: String(order.driver),
@@ -2274,6 +2275,9 @@ exports.getOrderTracking = async (req, res) => {
               lng: loc.coordinates.lng,
               lastUpdated: loc.lastUpdated,
             }
+          : null,
+        destination: addr?.lat
+          ? { lat: addr.lat, lng: addr.lng, address: addr.addressLine }
           : null,
       },
     });

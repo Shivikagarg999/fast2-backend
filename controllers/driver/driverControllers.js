@@ -1,9 +1,17 @@
+const mongoose = require('mongoose');
 const Order = require("../../models/order");
 const Driver = require("../../models/driver");
 const DriverEarning = require('../../models/driverEarnings');
 const { sendNotification } = require("../../services/notificationService");
 const { notifyOrderTaken } = require("../../services/driverNotificationService");
 const { emitOrderTaken, serverLog, getIo } = require("../../socketManager");
+
+const findOrderByIdOrCustomId = (orderId) => {
+  const query = mongoose.Types.ObjectId.isValid(orderId)
+    ? { $or: [{ _id: orderId }, { orderId }] }
+    : { orderId };
+  return Order.findOne(query);
+};
 
 exports.getPendingOrders = async (req, res) => {
   try {
@@ -51,7 +59,7 @@ exports.acceptOrder = async (req, res) => {
       return res.status(400).json({ success: false, message: "Driver must be online to accept an order" });
     }
 
-    const order = await Order.findOne({ orderId });
+    const order = await findOrderByIdOrCustomId(orderId);
     if (!order) {
       return res.status(404).json({ success: false, message: "Order not found" });
     }
@@ -90,7 +98,7 @@ exports.acceptOrder = async (req, res) => {
       success: true,
       message: "Order accepted successfully",
       data: {
-        orderId: order._id,
+        orderId: order.orderId,
         orderCustomId: order.orderId,
         driverId: driver._id
       }
@@ -145,7 +153,7 @@ exports.markOrderPickedUp = async (req, res) => {
       return res.status(404).json({ success: false, message: "Driver not found" });
     }
 
-    const order = await Order.findOne({ orderId });
+    const order = await findOrderByIdOrCustomId(orderId);
     if (!order) {
       return res.status(404).json({ success: false, message: "Order not found" });
     }
@@ -182,7 +190,7 @@ exports.verifySecretCodeAndPayment = async (req, res) => {
       return res.status(404).json({ success: false, message: "Driver not found" });
     }
 
-    const order = await Order.findOne({ orderId });
+    const order = await findOrderByIdOrCustomId(orderId);
     if (!order) {
       return res.status(404).json({ success: false, message: "Order not found" });
     }
@@ -232,7 +240,7 @@ exports.verifySecretCodeAndPayment = async (req, res) => {
     }
 
     if (order.paymentMethod === "online") {
-      order.driverMarkedPaid = true; s
+      order.driverMarkedPaid = true;
     }
 
     order.isSecretCodeVerified = true;
@@ -243,7 +251,7 @@ exports.verifySecretCodeAndPayment = async (req, res) => {
       success: true,
       message: "Secret code verified and payment confirmed successfully",
       data: {
-        orderId: order._id,
+        orderId: order.orderId,
         orderCustomId: order.orderId,
         isSecretCodeVerified: true,
         driverMarkedPaid: true,
@@ -273,7 +281,7 @@ exports.markOrderDelivered = async (req, res) => {
       return res.status(404).json({ success: false, message: "Driver not found" });
     }
 
-    const order = await Order.findOne({ orderId });
+    const order = await findOrderByIdOrCustomId(orderId);
     if (!order) {
       return res.status(404).json({ success: false, message: "Order not found" });
     }
@@ -433,67 +441,6 @@ exports.getWalletDetails = async (req, res) => {
   }
 };
 
-exports.verifySecretCodeAndPayment = async (req, res) => {
-  try {
-    const { orderId } = req.params;
-    const { secretCode, isPaid } = req.body;
-
-    const driver = await Driver.findById(req.driver.driverId);
-    if (!driver) {
-      return res.status(404).json({ success: false, message: "Driver not found" });
-    }
-
-    const order = await Order.findOne({ orderId });
-    if (!order) {
-      return res.status(404).json({ success: false, message: "Order not found" });
-    }
-
-    if (order.driver?.toString() !== driver._id.toString()) {
-      return res.status(403).json({ success: false, message: "You are not assigned to this order" });
-    }
-
-    if (order.status !== "picked-up") {
-      return res.status(400).json({
-        success: false,
-        message: "Order must be picked up before verifying delivery"
-      });
-    }
-
-    if (order.secretCode !== secretCode) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid secret code"
-      });
-    }
-
-    order.isSecretCodeVerified = true;
-    order.driverMarkedPaid = isPaid;
-
-    if (order.paymentMethod === "cod" && isPaid) {
-      order.paymentStatus = "paid";
-    }
-
-    await order.save();
-
-    res.status(200).json({
-      success: true,
-      message: "Secret code verified successfully",
-      data: {
-        orderId: order._id,
-        orderCustomId: order.orderId,
-        isSecretCodeVerified: true,
-        driverMarkedPaid: order.driverMarkedPaid,
-        paymentStatus: order.paymentStatus
-      }
-    });
-  } catch (error) {
-    console.error("Error verifying secret code:", error);
-    res.status(500).json({
-      success: false,
-      message: "Internal Server Error"
-    });
-  }
-};
 
 exports.checkOrderPlaced = async (req, res) => {
   try {
@@ -916,7 +863,7 @@ exports.updateDriverLocation = async (req, res) => {
     res.status(200).json({
       success: true,
       message: "Location updated",
-      data: { lat, lng, orderId: orderId || null },
+      data: { lat, lng },
     });
   } catch (error) {
     console.error("Error updating driver location:", error);
