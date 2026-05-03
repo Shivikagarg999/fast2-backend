@@ -214,6 +214,10 @@ exports.verifySecretCodeAndPayment = async (req, res) => {
       });
     }
 
+    const expectedAmount = order.cashOnDelivery > 0
+      ? order.cashOnDelivery
+      : Math.max((order.finalAmount || order.total || 0) - (order.walletDeduction || 0), 0);
+
     if (order.paymentMethod === "cod") {
       if (!paidAmount) {
         return res.status(400).json({
@@ -222,17 +226,16 @@ exports.verifySecretCodeAndPayment = async (req, res) => {
         });
       }
 
-      const expectedAmount = order.cashOnDelivery > 0
-        ? order.cashOnDelivery
-        : Math.max((order.finalAmount || order.total || 0) - (order.walletDeduction || 0), 0);
-      if (parseFloat(paidAmount) !== parseFloat(expectedAmount)) {
+      const paid = parseFloat(paidAmount);
+      const expected = parseFloat(expectedAmount);
+      if (Math.abs(paid - expected) > 0.01) {
         return res.status(400).json({
           success: false,
           message: `Payment amount mismatch. Expected: ₹${expectedAmount}, Received: ₹${paidAmount}`,
           data: {
             expectedAmount,
             receivedAmount: paidAmount,
-            difference: Math.abs(expectedAmount - paidAmount)
+            difference: Math.abs(expected - paid)
           }
         });
       }
@@ -329,10 +332,14 @@ exports.markOrderDelivered = async (req, res) => {
 
     await driverEarning.save();
 
-    driver.earnings.totalEarnings += deliveryEarning;
-    driver.earnings.currentBalance += deliveryEarning;
-    driver.earnings.pendingPayout += deliveryEarning;
-    driver.earnings.todayEarnings += deliveryEarning;
+    driver.earnings = driver.earnings || {};
+    driver.earnings.totalEarnings = (driver.earnings.totalEarnings || 0) + deliveryEarning;
+    driver.earnings.currentBalance = (driver.earnings.currentBalance || 0) + deliveryEarning;
+    driver.earnings.pendingPayout = (driver.earnings.pendingPayout || 0) + deliveryEarning;
+    driver.earnings.todayEarnings = (driver.earnings.todayEarnings || 0) + deliveryEarning;
+    driver.deliveryStats = driver.deliveryStats || {};
+    driver.deliveryStats.totalOrders = (driver.deliveryStats.totalOrders || 0) + 1;
+    driver.deliveryStats.completedOrders = (driver.deliveryStats.completedOrders || 0) + 1;
     driver.workInfo.currentOrder = null;
     driver.workInfo.availability = "online";
     await driver.save();
