@@ -3,6 +3,16 @@ const Order = require('../../../models/order');
 const mongoose = require('mongoose');
 const { sendDriverNotification } = require('../../../services/driverNotificationService');
 
+const toFullDriverResponse = (driver) => {
+  const fullDriver = driver.toObject({ virtuals: true });
+
+  if (fullDriver.auth?.password) {
+    delete fullDriver.auth.password;
+  }
+
+  return fullDriver;
+};
+
 exports.getAllDrivers = async (req, res) => {
   try {
     const { 
@@ -21,7 +31,14 @@ exports.getAllDrivers = async (req, res) => {
       filter['workInfo.status'] = status;
     }
     if (availability) {
-      filter['workInfo.availability'] = availability;
+      const availabilityValues = String(availability)
+        .split(',')
+        .map(value => value.trim())
+        .filter(Boolean);
+
+      filter['workInfo.availability'] = availabilityValues.length > 1
+        ? { $in: availabilityValues }
+        : availabilityValues[0];
     }
     
     if (search) {
@@ -44,11 +61,12 @@ exports.getAllDrivers = async (req, res) => {
       .skip((page - 1) * limit);
 
     const total = await Driver.countDocuments(filter);
+    const fullDrivers = drivers.map(toFullDriverResponse);
 
     res.json({
       success: true,
       data: {
-        drivers,
+        drivers: fullDrivers,
         pagination: {
           current: parseInt(page),
           pages: Math.ceil(total / limit),

@@ -54,6 +54,38 @@ const orderSchema = new mongoose.Schema(
       ref: "Driver",
       default: null
     },
+    driverAssignedAt: {
+      type: Date,
+      default: null
+    },
+    driverAssignedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Admin",
+      default: null
+    },
+    driverAssignmentHistory: [
+      {
+        driver: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Driver",
+          default: null
+        },
+        assignedBy: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Admin",
+          default: null
+        },
+        assignedAt: {
+          type: Date,
+          default: Date.now
+        },
+        action: {
+          type: String,
+          enum: ["assigned", "unassigned"],
+          required: true
+        }
+      }
+    ],
     items: [orderItemSchema],
     subtotal: {
       type: Number,

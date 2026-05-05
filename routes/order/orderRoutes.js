@@ -15,15 +15,13 @@ router.put("/:orderId/status", auth, orderController.updateOrderStatus);
 router.get("/my-scratch-coupons", auth, orderController.getScratchCouponHistory);
 router.post("/:orderId/scratch-coupon", auth, orderController.scratchOrderCard);
 router.post("/redeem-scratch-coupon", auth, orderController.redeemScratchCoupon);
-router.get('/:orderId/invoice', auth, orderController.downloadInvoice);
+router.get('/:orderId/invoice', orderController.downloadInvoice);
 router.get("/:orderId/payout-details", auth, orderController.getOrderPayoutDetails);
 router.post("/:orderId/seller-payout", auth, orderController.processSellerPayout);
 router.post("/:orderId/promotor-payout", auth, orderController.processPromotorPayout);
 router.get("/seller/:sellerId/payouts", auth, orderController.getSellerPayouts);
 router.get("/promotor/:promotorId/payouts", auth, orderController.getPromotorPayouts);
 router.get("/payouts/summary", auth, orderController.getPayoutSummary);
-
-// Live driver location for a user's order
 router.get("/:orderId/tracking", auth, orderController.getOrderTracking);
 
 module.exports = router;

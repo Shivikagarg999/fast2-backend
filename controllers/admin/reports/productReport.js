@@ -1,5 +1,6 @@
 const Product = require("../../../models/product");
 const Order = require("../../../models/order");
+const { sendReportCsv } = require("../../../utils/reportCsv");
 
 const getProductReport = async (req, res) => {
   try {
@@ -10,9 +11,15 @@ const getProductReport = async (req, res) => {
       minPrice,
       maxPrice,
       format = "json",
+      download,
+      all,
       page = 1,
       limit = 20
     } = req.query;
+    const isCsvExport = format === "csv" && download === "true";
+    const exportAll = isCsvExport && all === "true";
+    const pageNumber = parseInt(page);
+    const limitNumber = parseInt(limit);
 
     const filter = {};
     if (sellerId) filter.seller = sellerId;
@@ -27,7 +34,7 @@ const getProductReport = async (req, res) => {
     // Get total count for pagination
     const totalCount = await Product.countDocuments(filter);
 
-    const products = await Product.find(filter)
+    const productQuery = Product.find(filter)
       .populate("seller", "name email phone businessName")
       .populate("category", "name")
       .populate({
@@ -35,9 +42,13 @@ const getProductReport = async (req, res) => {
         model: "Promotor",
         select: "name email phone commissionRate"
       })
-      .skip((parseInt(page) - 1) * parseInt(limit))
-      .limit(parseInt(limit))
-      .lean();
+      .sort({ createdAt: -1 });
+
+    if (!exportAll) {
+      productQuery.skip((pageNumber - 1) * limitNumber).limit(limitNumber);
+    }
+
+    const products = await productQuery.lean();
 
     const reportData = await Promise.all(products.map(async (product) => {
       // Get sales data for this product
@@ -129,7 +140,7 @@ const getProductReport = async (req, res) => {
       sellersCount: new Set(allProductsForSummary.map(p => p.seller?.toString())).size
     };
 
-    if (format === 'csv') {
+    if (isCsvExport || format === 'csv') {
       const csvHeaders = [
         'Product Name', 'Category', 'Price', 'Old Price', 'Discount (%)',
         'GST (%)', 'HSN Code', 'Current Stock', 'Stock Status',
@@ -145,13 +156,9 @@ const getProductReport = async (req, res) => {
         product.totalRevenue, product.totalOrdersCount, product.sellerName,
         product.sellerEmail, product.promotorName, product.promotorCommissionRate,
         product.isActive, product.createdAt
-      ].map(field => `"${String(field).replace(/"/g, '""')}"`).join(','));
+      ]);
 
-      const csvContent = [csvHeaders.join(','), ...csvRows].join('\n');
-      
-      res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', `attachment; filename="product_report_${Date.now()}.csv"`);
-      return res.send(csvContent);
+      return sendReportCsv(res, 'products', csvHeaders, csvRows);
     }
 
     res.json({
@@ -159,15 +166,15 @@ const getProductReport = async (req, res) => {
       summary,
       data: reportData,
       pagination: {
-        currentPage: parseInt(page),
-        totalPages: Math.ceil(totalCount / parseInt(limit)),
+        currentPage: pageNumber,
+        totalPages: Math.ceil(totalCount / limitNumber),
         totalRecords: totalCount,
-        recordsPerPage: parseInt(limit)
+        recordsPerPage: limitNumber
       }
     });
   } catch (error) {
     console.error("Error in getProductReport:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    res.status(500).json({ success: false, message: "Failed to export report", error: error.message });
   }
 };
 

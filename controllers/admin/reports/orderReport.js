@@ -1,6 +1,13 @@
 // controllers/admin/reports/orderReport.js
 const Order = require("../../../models/order");
 const { roundMoney } = require("../../../utils/orderAmounts");
+const { sendReportCsv } = require("../../../utils/reportCsv");
+
+const getEndOfDay = (date) => {
+  const end = new Date(date);
+  end.setHours(23, 59, 59, 999);
+  return end;
+};
 
 const getOrderReport = async (req, res) => {
   try {
@@ -11,16 +18,22 @@ const getOrderReport = async (req, res) => {
       paymentStatus,
       sellerId,
       format = "json",
+      download,
+      all,
       page = 1,
       limit = 20
     } = req.query;
+    const isCsvExport = format === "csv" && download === "true";
+    const exportAll = isCsvExport && all === "true";
+    const pageNumber = parseInt(page);
+    const limitNumber = parseInt(limit);
 
     const filter = {};
 
     if (startDate || endDate) {
       filter.createdAt = {};
       if (startDate) filter.createdAt.$gte = new Date(startDate);
-      if (endDate) filter.createdAt.$lte = new Date(endDate);
+      if (endDate) filter.createdAt.$lte = getEndOfDay(endDate);
     }
     if (status) filter.status = status;
     if (paymentStatus) filter.paymentStatus = paymentStatus;
@@ -29,7 +42,7 @@ const getOrderReport = async (req, res) => {
     // Get total count for pagination
     const totalCount = await Order.countDocuments(filter);
 
-    const orders = await Order.find(filter)
+    const orderQuery = Order.find(filter)
       .populate("user", "name email phone")
       .populate({
         path: "driver",
@@ -42,10 +55,13 @@ const getOrderReport = async (req, res) => {
         select: "name email phone businessName gstNumber panNumber"
       })
       .populate("items.product", "name price gstPercent hsnCode")
-      .sort({ createdAt: -1 })
-      .skip((parseInt(page) - 1) * parseInt(limit))
-      .limit(parseInt(limit))
-      .lean();
+      .sort({ createdAt: -1 });
+
+    if (!exportAll) {
+      orderQuery.skip((pageNumber - 1) * limitNumber).limit(limitNumber);
+    }
+
+    const orders = await orderQuery.lean();
 
     // Transform orders to human-readable format
     const reportData = orders.map(order => ({
@@ -113,7 +129,7 @@ const getOrderReport = async (req, res) => {
       }, {})
     };
 
-    if (format === 'csv') {
+    if (isCsvExport || format === 'csv') {
       const csvHeaders = [
         'Order ID', 'Order Date', 'Status', 'Customer Name', 'Customer Email', 'Customer Phone',
         'Seller Name', 'Seller Email', 'Driver Name', 'Driver Phone', 'Items Count',
@@ -126,13 +142,9 @@ const getOrderReport = async (req, res) => {
         order.sellerName, order.sellerEmail, order.driverName, order.driverPhone, order.itemsCount,
         order.subtotal, order.handlingCharge, order.totalGST, order.totalOrderValue, order.paymentMethod, order.paymentStatus,
         order.sellerNetAmount, order.promotorCommissionAmount, order.platformServiceFee, order.refundAmount, order.refundStatus
-      ].map(field => `"${String(field).replace(/"/g, '""')}"`).join(','));
+      ]);
 
-      const csvContent = [csvHeaders.join(','), ...csvRows].join('\n');
-      
-      res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', `attachment; filename="order_report_${Date.now()}.csv"`);
-      return res.send(csvContent);
+      return sendReportCsv(res, 'orders', csvHeaders, csvRows);
     }
 
     res.json({
@@ -141,14 +153,14 @@ const getOrderReport = async (req, res) => {
       data: reportData,
       pagination: {
         currentPage: parseInt(page),
-        totalPages: Math.ceil(totalCount / parseInt(limit)),
+        totalPages: Math.ceil(totalCount / limitNumber),
         totalRecords: totalCount,
-        recordsPerPage: parseInt(limit)
+        recordsPerPage: limitNumber
       }
     });
   } catch (error) {
     console.error("Error in getOrderReport:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    res.status(500).json({ success: false, message: "Failed to export report", error: error.message });
   }
 };
 

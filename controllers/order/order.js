@@ -1612,10 +1612,12 @@ exports.getMyOrders = async (req, res) => {
 
 exports.downloadInvoice = async (req, res) => {
   try {
-    const { orderId } = req.params;
-    const userId = req.user._id;
+    const orderIdentifier = req.params.orderId || req.params.id;
+    const orderQuery = mongoose.Types.ObjectId.isValid(orderIdentifier)
+      ? { _id: orderIdentifier }
+      : { orderId: orderIdentifier };
 
-    const order = await Order.findOne({ orderId })
+    const order = await Order.findOne(orderQuery)
       .populate('user', 'name email phone')
       .populate('seller', 'name businessName gstNumber panNumber address bankDetails')
       .populate({
@@ -1641,10 +1643,10 @@ exports.downloadInvoice = async (req, res) => {
       });
     }
 
-    if (order.user._id.toString() !== userId.toString()) {
-      return res.status(403).json({
+    if (!order.user) {
+      return res.status(404).json({
         success: false,
-        error: "Access denied"
+        error: "Order customer not found"
       });
     }
 

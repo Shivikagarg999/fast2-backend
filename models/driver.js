@@ -486,8 +486,17 @@ driverSchema.methods.getEarningsSummary = function () {
 };
 
 driverSchema.virtual('fullAddress').get(function () {
-  const addr = this.address.currentAddress;
-  return `${addr.addressLine}, ${addr.city}, ${addr.state} - ${addr.pinCode}`;
+  const addr = this.address?.currentAddress;
+  if (!addr) return '';
+
+  const cityState = [addr.city, addr.state].filter(Boolean).join(', ');
+  const pinCode = addr.pinCode ? ` - ${addr.pinCode}` : '';
+
+  return [
+    addr.addressLine,
+    cityState ? `${cityState}${pinCode}` : addr.pinCode,
+    addr.country
+  ].filter(Boolean).join(', ');
 });
 
 driverSchema.virtual('performanceScore').get(function () {
@@ -502,7 +511,7 @@ driverSchema.virtual('performanceScore').get(function () {
 driverSchema.virtual('isEligibleForPayout').get(function () {
   return this.earnings.pendingPayout >= this.payoutDetails.payoutThreshold &&
     this.workInfo.status === 'approved' &&
-    (this.payoutDetails.upiId || this.payoutDetails.bankAccount.accountNumber);
+    (this.payoutDetails.upiId || this.payoutDetails.bankAccount?.accountNumber);
 });
 
 driverSchema.virtual('payoutEta').get(function () {

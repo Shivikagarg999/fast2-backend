@@ -2,6 +2,7 @@
 const Seller = require("../../../models/seller");
 const Order = require("../../../models/order");
 const Product = require("../../../models/product");
+const { sendReportCsv } = require("../../../utils/reportCsv");
 
 const getSellerReport = async (req, res) => {
   try {
@@ -9,9 +10,15 @@ const getSellerReport = async (req, res) => {
       sellerId,
       approvalStatus,
       format = "json",
+      download,
+      all,
       page = 1,
       limit = 20
     } = req.query;
+    const isCsvExport = format === "csv" && download === "true";
+    const exportAll = isCsvExport && all === "true";
+    const pageNumber = parseInt(page);
+    const limitNumber = parseInt(limit);
 
     const filter = {};
     if (sellerId) filter._id = sellerId;
@@ -20,12 +27,16 @@ const getSellerReport = async (req, res) => {
     // Get total count for pagination
     const totalCount = await Seller.countDocuments(filter);
 
-    const sellers = await Seller.find(filter)
+    const sellerQuery = Seller.find(filter)
       .populate("promotor", "name email phone commissionRate commissionType")
       .populate("shop", "name address")
-      .skip((parseInt(page) - 1) * parseInt(limit))
-      .limit(parseInt(limit))
-      .lean();
+      .sort({ createdAt: -1 });
+
+    if (!exportAll) {
+      sellerQuery.skip((pageNumber - 1) * limitNumber).limit(limitNumber);
+    }
+
+    const sellers = await sellerQuery.lean();
 
     const reportData = await Promise.all(sellers.map(async (seller) => {
       // Get seller's orders
@@ -112,7 +123,7 @@ const getSellerReport = async (req, res) => {
       pendingApproval: allSellersForSummary.filter(s => s.approvalStatus === 'pending').length
     };
 
-    if (format === 'csv') {
+    if (isCsvExport || format === 'csv') {
       const csvHeaders = [
         'Seller Name', 'Business Name', 'Email', 'Phone', 'GST Number', 'PAN Number',
         'Promotor Name', 'Total Sales', 'Total Orders', 'Completed Orders',
@@ -127,13 +138,9 @@ const getSellerReport = async (req, res) => {
         seller.cancelledOrders, seller.orderCompletionRate, seller.totalPayoutReceived,
         seller.totalProducts, seller.activeProducts, seller.outOfStockProducts,
         seller.approvalStatus, seller.rating
-      ].map(field => `"${String(field).replace(/"/g, '""')}"`).join(','));
+      ]);
 
-      const csvContent = [csvHeaders.join(','), ...csvRows].join('\n');
-      
-      res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', `attachment; filename="seller_report_${Date.now()}.csv"`);
-      return res.send(csvContent);
+      return sendReportCsv(res, 'sellers', csvHeaders, csvRows);
     }
 
     res.json({
@@ -141,15 +148,15 @@ const getSellerReport = async (req, res) => {
       summary,
       data: reportData,
       pagination: {
-        currentPage: parseInt(page),
-        totalPages: Math.ceil(totalCount / parseInt(limit)),
+        currentPage: pageNumber,
+        totalPages: Math.ceil(totalCount / limitNumber),
         totalRecords: totalCount,
-        recordsPerPage: parseInt(limit)
+        recordsPerPage: limitNumber
       }
     });
   } catch (error) {
     console.error("Error in getSellerReport:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    res.status(500).json({ success: false, message: "Failed to export report", error: error.message });
   }
 };
 

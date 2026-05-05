@@ -1,5 +1,13 @@
 const Order = require("../../../models/order");
+const Driver = require("../../../models/driver");
+const mongoose = require("mongoose");
 const { formatOrderAmounts, formatOrdersAmounts } = require("../../../utils/orderAmounts");
+
+const driverPopulate = {
+  path: "driver",
+  model: "Driver",
+  select: "personalInfo workInfo vehicle"
+};
 
 const downloadOrdersByStatusCSV = async (req, res) => {
   try {
@@ -299,44 +307,107 @@ const updateOrderStatus = async (req, res) => {
 const assignDriver = async (req, res) => {
   try {
     const { driverId } = req.body;
+    const orderId = req.params.orderId || req.params.id;
 
-    if (!driverId) {
-      return res.status(400).json({ message: "Driver ID is required" });
+    if (!mongoose.Types.ObjectId.isValid(orderId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid order ID"
+      });
     }
 
-    const order = await Order.findByIdAndUpdate(
-      req.params.id,
-      { driver: driverId },
-      { new: true, runValidators: true }
-    )
-      .populate("user", "name email")
-      .populate("driver", "name phone vehicle");
+    if (driverId !== null && !driverId) {
+      return res.status(400).json({
+        success: false,
+        message: "Driver ID is required"
+      });
+    }
+
+    if (driverId !== null && !mongoose.Types.ObjectId.isValid(driverId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid driver ID"
+      });
+    }
+
+    const order = await Order.findById(orderId);
 
     if (!order) {
-      return res.status(404).json({ message: "Order not found" });
+      return res.status(404).json({
+        success: false,
+        message: "Order not found"
+      });
     }
 
-    try {
-      const notificationService = require('../../../services/notificationService');
-      const driverName = order.driver.name;
-      await notificationService.sendNotification(
-        order.user._id || order.user,
-        'Driver Assigned',
-        `${driverName} is picking up your order #${order.orderId}.`,
-        'delivery',
-        order.orderId,
-        { orderId: order.orderId, driverId: driverId }
-      );
-    } catch (notifError) {
-      console.error('Notification error:', notifError);
+    let driver = null;
+    if (driverId !== null) {
+      driver = await Driver.findById(driverId);
+
+      if (!driver) {
+        return res.status(404).json({
+          success: false,
+          message: "Driver not found"
+        });
+      }
+
+      if (driver.workInfo?.status !== "approved") {
+        return res.status(400).json({
+          success: false,
+          message: "Driver is not approved"
+        });
+      }
+    }
+
+    order.driver = driverId;
+    order.driverAssignedAt = driverId === null ? null : new Date();
+    if (req.admin?._id) {
+      order.driverAssignedBy = req.admin._id;
+    }
+    order.driverAssignmentHistory = [
+      ...(order.driverAssignmentHistory || []),
+      {
+        driver: driverId,
+        assignedBy: req.admin?._id,
+        assignedAt: new Date(),
+        action: driverId === null ? "unassigned" : "assigned"
+      }
+    ];
+
+    await order.save();
+
+    const updatedOrder = await Order.findById(order._id)
+      .populate("user", "name email phone")
+      .populate(driverPopulate)
+      .populate("items.product", "name images category");
+
+    if (driverId !== null) {
+      try {
+        const notificationService = require('../../../services/notificationService');
+        const driverName = updatedOrder.driver?.personalInfo?.name || 'Your driver';
+        await notificationService.sendNotification(
+          updatedOrder.user._id || updatedOrder.user,
+          'Driver Assigned',
+          `${driverName} is picking up your order #${updatedOrder.orderId}.`,
+          'delivery',
+          updatedOrder.orderId,
+          { orderId: updatedOrder.orderId, driverId: driverId }
+        );
+      } catch (notifError) {
+        console.error('Notification error:', notifError);
+      }
     }
 
     res.json({
-      message: "Driver assigned successfully",
-      order: formatOrderAmounts(order)
+      success: true,
+      message: driverId === null ? "Driver unassigned successfully" : "Driver assigned successfully",
+      order: formatOrderAmounts(updatedOrder)
     });
   } catch (error) {
-    res.status(500).json({ message: "Server error", error: error.message });
+    res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message
+    });
   }
 };
 
