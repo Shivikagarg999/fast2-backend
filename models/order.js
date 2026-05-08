@@ -227,7 +227,14 @@ const orderSchema = new mongoose.Schema(
       scratchedAt: { type: Date, default: null },
       isRedeemed: { type: Boolean, default: false },
       redeemedAt: { type: Date, default: null }
-    }
+    },
+
+    scratchGifts: [{
+      product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+      coinsAmount: { type: Number, default: 0 },
+      isScratched: { type: Boolean, default: false },
+      scratchedAt: { type: Date, default: null }
+    }]
   },
   { timestamps: true }
 );

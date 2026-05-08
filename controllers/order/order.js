@@ -465,6 +465,15 @@ exports.createOrder = async (req, res) => {
         gstAmount
       };
     });
+    const scratchGifts = products
+      .filter(p => p.scratchGift && p.scratchGift.isEnabled && p.price > 200)
+      .map(p => ({
+        product: p._id,
+        coinsAmount: p.scratchGift.coinsAmount,
+        isScratched: false,
+        scratchedAt: null
+      }));
+
     let orderScratchCard = { isEligible: false, couponCode: null, isScratched: false, scratchedAt: null };
     if (subtotal > 199) {
       const now = new Date();
@@ -512,6 +521,7 @@ exports.createOrder = async (req, res) => {
       cashOnDelivery,
       seller: primarySeller,
       orderScratchCard,
+      scratchGifts,
       ...(paymentMethod === "online" && razorpayOrder && {
         razorpayOrderId: razorpayOrder.id,
         razorpayReceipt: razorpayOrder.receipt,
@@ -1846,27 +1856,44 @@ exports.generatePDFInvoice = async (invoiceData) => {
           .undash().restore();
       };
 
-      // Label left, value right-aligned — both on same y
+      // Draw text blocks using their measured height so wrapped invoice text does not overlap.
+      const measuredText = (text, x, y, width, opts = {}) => {
+        const font = opts.bold ? 'Courier-Bold' : 'Courier';
+        const size = opts.size || 7;
+        const value = String(text ?? '');
+        const textOptions = { width, align: opts.align || 'left' };
+        doc.font(font).fontSize(size).fillColor(opts.color || '#000000');
+        const height = doc.heightOfString(value, textOptions);
+        doc.text(value, x, y, textOptions);
+        return y + Math.max(opts.minHeight || 0, height) + (opts.gap || 2);
+      };
+
       const row = (label, value, y, opts = {}) => {
         const f = opts.bold ? 'Courier-Bold' : 'Courier';
         const sz = opts.size || 7;
+        const gap = opts.gap ?? 3;
+        const labelWidth = opts.labelWidth || 108;
+        const valueX = MARGIN + labelWidth + gap;
+        const valueWidth = CONTENT_WIDTH - labelWidth - gap;
+        const labelText = String(label ?? '');
+        const valueText = String(value ?? '');
+        const labelOptions = { width: labelWidth };
+        const valueOptions = { width: valueWidth, align: 'right' };
+
         doc.font(f).fontSize(sz).fillColor('#000000')
-          .text(label, MARGIN, y, { width: CONTENT_WIDTH * 0.62, lineBreak: false });
+          .text(labelText, MARGIN, y, labelOptions);
         doc.font(f).fontSize(sz)
-          .text(value, MARGIN, y, { width: CONTENT_WIDTH, align: 'right', lineBreak: false });
+          .text(valueText, valueX, y, valueOptions);
+
+        const labelHeight = doc.font(f).fontSize(sz).heightOfString(labelText, { width: labelWidth });
+        const valueHeight = doc.font(f).fontSize(sz).heightOfString(valueText, valueOptions);
+        return y + Math.max(opts.minHeight || 10, labelHeight, valueHeight) + (opts.afterGap || 0);
       };
 
-      // Two label-value pairs on the same line (left half | right half)
+      // Draw paired metadata as compact stacked rows on narrow receipt paper.
       const twoColRow = (lbl1, val1, lbl2, val2, y, sz = 7) => {
-        const half = Math.floor(CONTENT_WIDTH / 2); // 107
-        doc.font('Courier-Bold').fontSize(sz).fillColor('#000000')
-          .text(lbl1, MARGIN, y, { width: 48, lineBreak: false });
-        doc.font('Courier').fontSize(sz)
-          .text(val1, MARGIN, y, { width: half, align: 'right', lineBreak: false });
-        doc.font('Courier-Bold').fontSize(sz)
-          .text(lbl2, MARGIN + half + 4, y, { width: 30, lineBreak: false });
-        doc.font('Courier').fontSize(sz)
-          .text(val2, MARGIN + half + 4, y, { width: half - 4, align: 'right', lineBreak: false });
+        y = row(lbl1, val1, y, { size: sz, bold: true, minHeight: 9 });
+        return row(lbl2, val2, y, { size: sz, bold: true, minHeight: 9 });
       };
 
       const center = (text, y, opts = {}) => {
@@ -1899,13 +1926,12 @@ exports.generatePDFInvoice = async (invoiceData) => {
       const orderDate = new Date(invoiceData.orderDate).toLocaleDateString('en-IN', {
         day: '2-digit', month: 'short', year: 'numeric'
       });
-      // Invoice No and Date on same line
-      twoColRow('Invoice No:', invoiceData.orderId, 'Date:', orderDate, y, 7); y += 10;
-      row('Order ID:', invoiceData.orderId, y); y += 10;
+      y = twoColRow('Invoice No:', invoiceData.orderId, 'Date:', orderDate, y, 7);
+      y = row('Order ID:', invoiceData.orderId, y);
 
       const buyerState = invoiceData.shippingAddress.state || '';
       const buyerStateCode = getStateCode(buyerState);
-      row('Place of Supply:', `${buyerState} (Code: ${buyerStateCode})`, y); y += 10;
+      y = row('Place of Supply:', `${buyerState} (Code: ${buyerStateCode})`, y, { labelWidth: 98 });
       dashedLine(y); y += 10;
 
       // ── SELLER ───────────────────────────────────────────────
@@ -1919,28 +1945,24 @@ exports.generatePDFInvoice = async (invoiceData) => {
         ? `${sellerAddrObj.street || ''}, ${sellerAddrObj.city || ''}, ${sellerState} - ${sellerAddrObj.pincode || ''}`
         : 'Address not available';
 
-      doc.font('Courier-Bold').fontSize(7).fillColor('#000000').text('SOLD BY:', MARGIN, y); y += 10;
-      doc.font('Courier').fontSize(7).text(sellerName, MARGIN, y, { width: CONTENT_WIDTH }); y += 9;
-      doc.font('Courier').fontSize(6).text(`GSTIN: ${sellerGST}`, MARGIN, y, { width: CONTENT_WIDTH }); y += 8;
-      doc.font('Courier').fontSize(6)
-        .text(`State: ${sellerState}  |  State Code: ${sellerStateCode}`, MARGIN, y, { width: CONTENT_WIDTH }); y += 8;
-      doc.font('Courier').fontSize(6).text(sellerAddress, MARGIN, y, { width: CONTENT_WIDTH }); y += 16;
+      y = measuredText('SOLD BY:', MARGIN, y, CONTENT_WIDTH, { bold: true, size: 7, minHeight: 8 });
+      y = measuredText(sellerName, MARGIN, y, CONTENT_WIDTH, { size: 7, minHeight: 8 });
+      y = measuredText(`GSTIN: ${sellerGST}`, MARGIN, y, CONTENT_WIDTH, { size: 6, minHeight: 7 });
+      y = measuredText(`State: ${sellerState}  |  State Code: ${sellerStateCode}`, MARGIN, y, CONTENT_WIDTH, { size: 6, minHeight: 7 });
+      y = measuredText(sellerAddress, MARGIN, y, CONTENT_WIDTH, { size: 6, minHeight: 7, gap: 8 });
       dashedLine(y); y += 10;
 
       // ── BUYER ────────────────────────────────────────────────
       const addr = invoiceData.shippingAddress;
-      doc.font('Courier-Bold').fontSize(7).text('BILL TO:', MARGIN, y); y += 10;
-      doc.font('Courier').fontSize(7).text(invoiceData.customer.name, MARGIN, y, { width: CONTENT_WIDTH }); y += 9;
-      doc.font('Courier').fontSize(6).text(`Ph: ${invoiceData.customer.phone || 'N/A'}`, MARGIN, y, { width: CONTENT_WIDTH }); y += 8;
+      y = measuredText('BILL TO:', MARGIN, y, CONTENT_WIDTH, { bold: true, size: 7, minHeight: 8 });
+      y = measuredText(invoiceData.customer.name, MARGIN, y, CONTENT_WIDTH, { size: 7, minHeight: 8 });
+      y = measuredText(`Ph: ${invoiceData.customer.phone || 'N/A'}`, MARGIN, y, CONTENT_WIDTH, { size: 6, minHeight: 7 });
       if (addr.addressLine) {
-        doc.font('Courier').fontSize(6).text(addr.addressLine, MARGIN, y, { width: CONTENT_WIDTH }); y += 8;
+        y = measuredText(addr.addressLine, MARGIN, y, CONTENT_WIDTH, { size: 6, minHeight: 7 });
       }
-      doc.font('Courier').fontSize(6)
-        .text(`${addr.city}, ${buyerState} - ${addr.pinCode || addr.pincode || ''}`, MARGIN, y, { width: CONTENT_WIDTH }); y += 8;
-      doc.font('Courier').fontSize(6)
-        .text(`State Code: ${buyerStateCode}`, MARGIN, y, { width: CONTENT_WIDTH }); y += 8;
-      doc.font('Courier').fontSize(6)
-        .text(`Email: ${invoiceData.customer.email || 'N/A'}`, MARGIN, y, { width: CONTENT_WIDTH }); y += 12;
+      y = measuredText(`${addr.city}, ${buyerState} - ${addr.pinCode || addr.pincode || ''}`, MARGIN, y, CONTENT_WIDTH, { size: 6, minHeight: 7 });
+      y = measuredText(`State Code: ${buyerStateCode}`, MARGIN, y, CONTENT_WIDTH, { size: 6, minHeight: 7 });
+      y = measuredText(`Email: ${invoiceData.customer.email || 'N/A'}`, MARGIN, y, CONTENT_WIDTH, { size: 6, minHeight: 7, gap: 6 });
       dashedLine(y); y += 10;
 
       // ── ITEMS TABLE ──────────────────────────────────────────
@@ -1969,7 +1991,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
 
       invoiceData.items.forEach((item) => {
         const product = item.product;
-        const name = (product?.name || 'Product').substring(0, 20);
+        const name = product?.name || 'Product';
         const mrpUnit   = item.mrp || item.price;
         const discUnit  = item.discountPerUnit || 0;
         const mrpLine   = (mrpUnit * item.quantity).toFixed(2);
@@ -1978,12 +2000,14 @@ exports.generatePDFInvoice = async (invoiceData) => {
 
         // Row 1: Item cols
         doc.font('Courier').fontSize(6).fillColor('#000000');
-        doc.text(name,              CI, y, { width: WI });
+        const itemOptions = { width: WI };
+        const itemNameHeight = doc.heightOfString(name, itemOptions);
+        doc.text(name,              CI, y, itemOptions);
         doc.text(String(item.quantity), CQ, y, { width: WQ, align: 'right' });
         doc.text(mrpLine,           CM, y, { width: WM, align: 'right' });
         doc.text(discLine,          CD, y, { width: WD, align: 'right' });
         doc.text(priceLine,         CP, y, { width: WP, align: 'right' });
-        y += 9;
+        y += Math.max(9, itemNameHeight + 2);
 
         // Row 2: GST detail
         const hsn = product?.hsnCode || product?.category?.hsnCode || '';
@@ -1993,9 +2017,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
               : `IGST ${item.gstRate}% =Rs${item.gstAmount.toFixed(2)}`)
           : 'GST: Nil';
         const detail = [hsn ? `HSN:${hsn}` : '', gstLabel].filter(Boolean).join('  ');
-        doc.font('Courier').fontSize(5.5).fillColor('#555555')
-          .text(detail, MARGIN, y, { width: CONTENT_WIDTH });
-        y += 9;
+        y = measuredText(detail, MARGIN, y, CONTENT_WIDTH, { size: 5.5, color: '#555555', minHeight: 7, gap: 2 });
       });
 
       dashedLine(y); y += 8;
@@ -2007,58 +2029,58 @@ exports.generatePDFInvoice = async (invoiceData) => {
       const totalDiscount = invoiceData.summary.totalDiscount || 0;
       const totalMRP = invoiceData.summary.totalMRP || invoiceData.summary.subtotal;
       if (totalDiscount > 0) {
-        row('MRP Total:', `Rs ${totalMRP.toFixed(2)}`, y); y += 10;
-        row('Product Discount:', `-Rs ${totalDiscount.toFixed(2)}`, y); y += 10;
+        y = row('MRP Total:', `Rs ${totalMRP.toFixed(2)}`, y);
+        y = row('Product Discount:', `-Rs ${totalDiscount.toFixed(2)}`, y);
       }
-      row('Subtotal (after disc):', `Rs ${invoiceData.summary.subtotal.toFixed(2)}`, y); y += 10;
+      y = row('Subtotal (after disc):', `Rs ${invoiceData.summary.subtotal.toFixed(2)}`, y);
 
       // 2. GST breakdown
       dashedLine(y); y += 6;
       doc.font('Courier-Bold').fontSize(6.5).text('GST BREAKDOWN:', MARGIN, y); y += 9;
       doc.font('Courier').fontSize(7);
       if ((invoiceData.summary.totalCGST || 0) > 0 || (invoiceData.summary.totalSGST || 0) > 0) {
-        row('CGST:', `Rs ${(invoiceData.summary.totalCGST || 0).toFixed(2)}`, y); y += 10;
-        row('SGST:', `Rs ${(invoiceData.summary.totalSGST || 0).toFixed(2)}`, y); y += 10;
+        y = row('CGST:', `Rs ${(invoiceData.summary.totalCGST || 0).toFixed(2)}`, y);
+        y = row('SGST:', `Rs ${(invoiceData.summary.totalSGST || 0).toFixed(2)}`, y);
       }
       if ((invoiceData.summary.totalIGST || 0) > 0) {
-        row('IGST:', `Rs ${(invoiceData.summary.totalIGST || 0).toFixed(2)}`, y); y += 10;
+        y = row('IGST:', `Rs ${(invoiceData.summary.totalIGST || 0).toFixed(2)}`, y);
       }
       if ((invoiceData.summary.totalGST || 0) === 0) {
-        row('Total GST:', 'Rs 0.00 (Nil)', y); y += 10;
+        y = row('Total GST:', 'Rs 0.00 (Nil)', y);
       } else {
-        row('Total GST:', `Rs ${(invoiceData.summary.totalGST || 0).toFixed(2)}`, y); y += 10;
+        y = row('Total GST:', `Rs ${(invoiceData.summary.totalGST || 0).toFixed(2)}`, y);
       }
 
       // 3. Handling charges
       dashedLine(y); y += 6;
       if ((invoiceData.summary.handlingFee || 0) > 0) {
-        row('Handling Charge:', `Rs ${invoiceData.summary.handlingFee.toFixed(2)}`, y); y += 10;
+        y = row('Handling Charge:', `Rs ${invoiceData.summary.handlingFee.toFixed(2)}`, y);
       }
 
       // 4. Delivery charges
-      row('Delivery Charges:', `Rs ${(invoiceData.summary.deliveryFee || 0).toFixed(2)}`, y); y += 10;
+      y = row('Delivery Charges:', `Rs ${(invoiceData.summary.deliveryFee || 0).toFixed(2)}`, y);
 
       // 5. Coupon discount
       if ((invoiceData.summary.couponDiscount || 0) > 0) {
         const couponLbl = invoiceData.summary.couponCode
           ? `Coupon (${invoiceData.summary.couponCode}):`
           : 'Coupon Discount:';
-        row(couponLbl, `-Rs ${invoiceData.summary.couponDiscount.toFixed(2)}`, y); y += 10;
+        y = row(couponLbl, `-Rs ${invoiceData.summary.couponDiscount.toFixed(2)}`, y);
       }
       if ((invoiceData.summary.scratchCouponDiscount || 0) > 0) {
-        row('Scratch Coupon:', `-Rs ${invoiceData.summary.scratchCouponDiscount.toFixed(2)}`, y); y += 10;
+        y = row('Scratch Coupon:', `-Rs ${invoiceData.summary.scratchCouponDiscount.toFixed(2)}`, y);
       }
 
       // 6. Grand Total
       dashedLine(y); y += 6;
-      row('GRAND TOTAL:', `Rs ${invoiceData.summary.payableAmount.toFixed(2)}`, y, { bold: true, size: 8 }); y += 14;
+      y = row('GRAND TOTAL:', `Rs ${invoiceData.summary.payableAmount.toFixed(2)}`, y, { bold: true, size: 8, minHeight: 12, afterGap: 2 });
 
       // 7. Wallet deduction → amount paid
       if ((invoiceData.payment.walletDeduction || 0) > 0) {
-        row('Wallet Deduction:', `-Rs ${invoiceData.payment.walletDeduction.toFixed(2)}`, y); y += 10;
+        y = row('Wallet Deduction:', `-Rs ${invoiceData.payment.walletDeduction.toFixed(2)}`, y);
         dashedLine(y); y += 6;
         const paid = invoiceData.summary.payableAmount - invoiceData.payment.walletDeduction;
-        row('AMOUNT PAID:', `Rs ${paid.toFixed(2)}`, y, { bold: true, size: 8 }); y += 14;
+        y = row('AMOUNT PAID:', `Rs ${paid.toFixed(2)}`, y, { bold: true, size: 8, minHeight: 12, afterGap: 2 });
       }
 
       dashedLine(y); y += 10;
@@ -2066,23 +2088,23 @@ exports.generatePDFInvoice = async (invoiceData) => {
       // ── PAYMENT ──────────────────────────────────────────────
       doc.font('Courier-Bold').fontSize(7).text('PAYMENT:', MARGIN, y); y += 10;
       doc.font('Courier').fontSize(7);
-      row('Method:', (invoiceData.payment.method || '').toUpperCase(), y); y += 10;
-      row('Status:', (invoiceData.payment.status || '').toUpperCase(), y); y += 10;
+      y = row('Method:', (invoiceData.payment.method || '').toUpperCase(), y);
+      y = row('Status:', (invoiceData.payment.status || '').toUpperCase(), y);
       // ── GST SUPPLY NOTE ──────────────────────────────────────
       if ((invoiceData.summary.totalGST || 0) > 0) {
         dashedLine(y); y += 8;
         doc.font('Courier').fontSize(6).fillColor('#000000');
         if (invoiceData.gstSummary.withinState) {
-          doc.text(
+          y = measuredText(
             `Within-state supply: CGST Rs ${(invoiceData.summary.totalCGST || 0).toFixed(2)} + SGST Rs ${(invoiceData.summary.totalSGST || 0).toFixed(2)}`,
-            MARGIN, y, { width: CONTENT_WIDTH }
-          ); y += 9;
+            MARGIN, y, CONTENT_WIDTH, { size: 6, minHeight: 7 }
+          );
         }
         if (invoiceData.gstSummary.interState) {
-          doc.text(
+          y = measuredText(
             `Inter-state supply: IGST Rs ${(invoiceData.summary.totalIGST || 0).toFixed(2)}`,
-            MARGIN, y, { width: CONTENT_WIDTH }
-          ); y += 9;
+            MARGIN, y, CONTENT_WIDTH, { size: 6, minHeight: 7 }
+          );
         }
       }
 
@@ -2246,6 +2268,56 @@ exports.redeemScratchCoupon = async (req, res) => {
     return res.status(400).json({ success: false, message: err.message });
   }
 };
+
+exports.scratchCard = async (req, res) => {
+  try {
+    const { orderId, scratchIndex } = req.params;
+    const userId = req.user._id;
+
+    const order = await Order.findOne({ orderId, user: userId });
+    if (!order) {
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    if (order.status !== 'delivered') {
+      return res.status(400).json({
+        success: false,
+        message: 'Scratch card is only available after delivery'
+      });
+    }
+
+    const idx = parseInt(scratchIndex, 10);
+    const gift = order.scratchGifts[idx];
+    if (!gift) {
+      return res.status(404).json({ success: false, message: 'Scratch card not found' });
+    }
+
+    if (gift.isScratched) {
+      return res.status(400).json({ success: false, message: 'This scratch card has already been used' });
+    }
+
+    gift.isScratched = true;
+    gift.scratchedAt = new Date();
+    await order.save();
+
+    const updatedUser = await User.findByIdAndUpdate(
+      userId,
+      { $inc: { wallet: gift.coinsAmount } },
+      { new: true }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: `Congratulations! ${gift.coinsAmount} coins credited to your wallet`,
+      coinsAwarded: gift.coinsAmount,
+      newWalletBalance: updatedUser.wallet
+    });
+  } catch (err) {
+    console.error('Scratch card error:', err);
+    return res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
 exports.getOrderTracking = async (req, res) => {
   try {
     const { orderId } = req.params;

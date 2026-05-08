@@ -15,6 +15,7 @@ router.put("/:orderId/status", auth, orderController.updateOrderStatus);
 router.get("/my-scratch-coupons", auth, orderController.getScratchCouponHistory);
 router.post("/:orderId/scratch-coupon", auth, orderController.scratchOrderCard);
 router.post("/redeem-scratch-coupon", auth, orderController.redeemScratchCoupon);
+router.post("/:orderId/scratch/:scratchIndex", auth, orderController.scratchCard);
 router.get('/:orderId/invoice', orderController.downloadInvoice);
 router.get("/:orderId/payout-details", auth, orderController.getOrderPayoutDetails);
 router.post("/:orderId/seller-payout", auth, orderController.processSellerPayout);
