@@ -3,6 +3,47 @@ const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const emailService = require("../../services/emailServices");
 const User = require("../../models/user");
+const firebaseAdmin = require("../../config/firebase");
+
+const signUserToken = (userId) => jwt.sign({ id: userId }, process.env.JWT_SECRET, {
+    expiresIn: "7d"
+});
+
+function generateReferralCode() {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let result = '';
+    for (let i = 0; i < 8; i++) {
+        result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return result;
+}
+
+const buildAuthResponse = (message, token, user) => ({
+    message,
+    token,
+    wallet: user.wallet,
+    referralCode: user.referralCode,
+    user: {
+        id: user._id,
+        email: user.email,
+        phone: user.phone,
+        name: user.name,
+        avatar: user.avatar
+    }
+});
+
+const normalizeFirebasePhone = (phoneNumber) => {
+    if (!phoneNumber) return null;
+
+    const digits = String(phoneNumber).replace(/\D/g, '');
+    if (digits.length === 12 && digits.startsWith('91')) {
+        return digits.slice(2);
+    }
+    if (digits.length === 10) {
+        return digits;
+    }
+    return digits || null;
+};
 
 exports.register = async (req, res) => {
     try {
@@ -49,9 +90,7 @@ exports.register = async (req, res) => {
             await referrer.save();
         }
 
-        const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
-            expiresIn: "7d"
-        });
+        const token = signUserToken(user._id);
 
         try {
             await emailService.sendWelcomeEmail(email);
@@ -110,9 +149,7 @@ exports.login = async (req, res) => {
             return res.status(401).json({ error: "Invalid email or password" });
         }
 
-        const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
-            expiresIn: "7d"
-        });
+        const token = signUserToken(user._id);
 
         return res.json({
             message: "Login successful",
@@ -129,6 +166,84 @@ exports.login = async (req, res) => {
     } catch (err) {
         console.error("Login error:", err);
         return res.status(500).json({ error: err.message });
+    }
+};
+
+exports.firebaseOtpLogin = async (req, res) => {
+    try {
+        const { idToken, name, referralCode, fcmToken } = req.body;
+
+        if (!idToken) {
+            return res.status(400).json({ error: "Firebase idToken is required" });
+        }
+
+        if (!firebaseAdmin.apps || firebaseAdmin.apps.length === 0) {
+            return res.status(500).json({ error: "Firebase Admin is not configured on the server" });
+        }
+
+        const decodedToken = await firebaseAdmin.auth().verifyIdToken(idToken);
+        const firebaseUid = decodedToken.uid;
+        const phone = normalizeFirebasePhone(decodedToken.phone_number);
+        const email = decodedToken.email;
+
+        if (!phone && !email) {
+            return res.status(400).json({ error: "Firebase token must contain a verified phone number or email" });
+        }
+
+        let user = await User.findOne({
+            $or: [
+                { firebaseUid },
+                ...(phone ? [{ phone }] : []),
+                ...(email ? [{ email: email.toLowerCase() }] : [])
+            ]
+        });
+
+        let isNewUser = false;
+
+        if (!user) {
+            const newReferralCode = generateReferralCode();
+            let referrer = null;
+
+            if (referralCode) {
+                referrer = await User.findOne({ referralCode });
+            }
+
+            user = await User.create({
+                name: name || decodedToken.name || "User",
+                email: email ? email.toLowerCase() : undefined,
+                phone,
+                firebaseUid,
+                fcmToken,
+                wallet: 20,
+                referralCode: newReferralCode,
+                referredBy: referrer ? referrer._id : null,
+                isVerified: true
+            });
+
+            if (referrer) {
+                referrer.wallet += 200;
+                referrer.referralCount += 1;
+                await referrer.save();
+            }
+
+            isNewUser = true;
+        } else {
+            if (!user.firebaseUid) user.firebaseUid = firebaseUid;
+            if (phone && !user.phone) user.phone = phone;
+            if (email && !user.email) user.email = email.toLowerCase();
+            if (name && !user.name) user.name = name;
+            if (fcmToken) user.fcmToken = fcmToken;
+            user.isVerified = true;
+            await user.save();
+        }
+
+        const token = signUserToken(user._id);
+        return res.status(isNewUser ? 201 : 200).json(
+            buildAuthResponse(isNewUser ? "Signup successful" : "Login successful", token, user)
+        );
+    } catch (err) {
+        console.error("Firebase OTP login error:", err);
+        return res.status(401).json({ error: err.message || "Invalid Firebase token" });
     }
 };
 
@@ -451,11 +566,3 @@ exports.deleteAccount = async (req, res) => {
     }
 };
 
-function generateReferralCode() {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    let result = '';
-    for (let i = 0; i < 8; i++) {
-        result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
-}
