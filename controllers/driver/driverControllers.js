@@ -317,6 +317,17 @@ exports.markOrderDelivered = async (req, res) => {
     order.paymentStatus = "paid";
     await order.save();
 
+    if (order.user) {
+      await sendNotification(
+        order.user,
+        "Order Delivered",
+        `Your order #${order.orderId} has been delivered. Enjoy!`,
+        "order",
+        order._id,
+        { orderId: order.orderId, status: order.status }
+      );
+    }
+
     const deliveryEarning = 18;
     const driverEarning = new DriverEarning({
       driver: driver._id,

@@ -49,12 +49,16 @@ exports.sendNotification = async (userId, title, body, type = 'system', referenc
             if (admin && admin.apps.length > 0) {
                 await admin.messaging().send(message);
                 // console.log(`Push sent to ${userId}`);
+            } else {
+                console.warn(`Push skipped for ${userId}: Firebase Admin is not initialized`);
             }
+        } else {
+            console.warn(`Push skipped for ${userId}: user has no fcmToken`);
         }
 
         return notification;
     } catch (error) {
-        console.error(`Error sending notification to ${userId}:`, error.message);
+        console.error(`Error sending notification to ${userId}:`, error.code || error.message, error.message);
         // Don't crash the main flow if notification fails
     }
 };
