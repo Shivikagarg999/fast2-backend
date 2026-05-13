@@ -44,6 +44,7 @@ const adminShopRoutes = require('./routes/admin/shopRoutes');
 const adminPopupRoutes = require('./routes/admin/popupRoutes');
 const promotorRoutes = require('./routes/promotor/promotorRoutes');
 const adminReportRoutes = require('./routes/admin/report/report');
+const warehouseRoutes = require('./routes/warehouse/warehouseRoutes');
 
 const publicPopupRouter = express.Router();
 publicPopupRouter.get('/active', require('./controllers/admin/popupController').getActivePopup);
@@ -120,6 +121,7 @@ app.use('/api/popups', publicPopupRouter);
 app.use('/api/admin', adminUserRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/admin/reports', adminReportRoutes);
+app.use('/api/warehouse', warehouseRoutes);
 
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB connected'))
