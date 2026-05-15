@@ -134,16 +134,53 @@ const getProducts = async (req, res) => {
   }
 };
 
+// GET /api/warehouse/products/:id
+const getProductById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: "Invalid product ID" });
+    }
+
+    const warehouse = await Warehouse.findById(req.warehouse._id).select("products");
+    const productQuery = { ...getWarehouseProductQuery(warehouse), _id: new mongoose.Types.ObjectId(id) };
+
+    const product = await Product.findOne(productQuery)
+      .populate("category", "name")
+      .populate("seller", "name businessName email phone address")
+      .populate("shop", "name logo isOpen isActive")
+      .populate("warehouse.id", "name code location");
+
+    if (!product) {
+      return res.status(404).json({ success: false, message: "Product not found" });
+    }
+
+    res.json({ success: true, product });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
 // GET /api/warehouse/sellers
 const getSellers = async (req, res) => {
   try {
     const { search, approvalStatus } = req.query;
     const { page, limit, skip } = getPagination(req.query);
 
-    const warehouse = await Warehouse.findById(req.warehouse._id).select("sellers");
-    const sellerIds = warehouse.sellers;
+    const warehouse = await Warehouse.findById(req.warehouse._id).select("sellers products");
+    const productIds = await getWarehouseProductIds(warehouse);
 
-    const sellerQuery = { _id: { $in: sellerIds } };
+    // Derive seller IDs from warehouse products (covers cases where warehouse.sellers is unpopulated)
+    const warehouseProducts = await Product.find({ _id: { $in: productIds } }).select("seller");
+    const derivedSellerIds = [...new Set(warehouseProducts.map((p) => p.seller?.toString()).filter(Boolean))];
+
+    // Merge with any explicitly listed sellers on the warehouse doc
+    const explicitSellerIds = (warehouse.sellers || []).map((id) => id.toString());
+    const allSellerIds = [...new Set([...derivedSellerIds, ...explicitSellerIds])].map(
+      (id) => new mongoose.Types.ObjectId(id)
+    );
+
+    const sellerQuery = { _id: { $in: allSellerIds } };
     if (search) {
       const safeSearch = escapeRegex(search.trim());
       sellerQuery.$or = [
@@ -185,10 +222,10 @@ const getOrders = async (req, res) => {
     const { status, paymentStatus, paymentMethod, from, to } = req.query;
     const { page, limit, skip } = getPagination(req.query);
 
-    const warehouse = await Warehouse.findById(req.warehouse._id).select("sellers");
-    const sellerIds = warehouse.sellers;
+    const warehouse = await Warehouse.findById(req.warehouse._id).select("sellers products");
+    const productIds = await getWarehouseProductIds(warehouse);
 
-    const orderQuery = { seller: { $in: sellerIds } };
+    const orderQuery = { "items.product": { $in: productIds } };
     if (status) orderQuery.status = status;
     if (paymentStatus) orderQuery.paymentStatus = paymentStatus;
     if (paymentMethod) orderQuery.paymentMethod = paymentMethod;
@@ -212,9 +249,11 @@ const getOrders = async (req, res) => {
 
     const [orders, total] = await Promise.all([
       Order.find(orderQuery)
-        .populate("user", "name email phone")
-        .populate("seller", "name businessName")
-        .populate("items.product", "name images price")
+        .populate("user", "name email phone wallet")
+        .populate("seller", "name businessName email phone address")
+        .populate("driver", "personalInfo.name personalInfo.phone workInfo.driverId")
+        .populate("items.product", "name images price brand description unit unitValue stockStatus category")
+        .populate("scratchGifts.product", "name images")
         .skip(skip)
         .limit(limit)
         .sort({ createdAt: -1 }),
@@ -236,17 +275,55 @@ const getOrders = async (req, res) => {
   }
 };
 
+// GET /api/warehouse/orders/:id
+const getOrderById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ success: false, message: "Invalid order ID" });
+    }
+
+    const warehouse = await Warehouse.findById(req.warehouse._id).select("sellers products");
+    const productIds = await getWarehouseProductIds(warehouse);
+
+    const order = await Order.findOne({
+      _id: id,
+      "items.product": { $in: productIds },
+    })
+      .populate("user", "name email phone wallet")
+      .populate("seller", "name businessName email phone address")
+      .populate("driver", "personalInfo.name personalInfo.phone workInfo.driverId")
+      .populate("items.product", "name images price brand description unit unitValue stockStatus category")
+      .populate("scratchGifts.product", "name images");
+
+    if (!order) {
+      return res.status(404).json({ success: false, message: "Order not found" });
+    }
+
+    res.json({ success: true, order });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
 // GET /api/warehouse/analytics
 const getAnalytics = async (req, res) => {
   try {
     const warehouse = await Warehouse.findById(req.warehouse._id).select("sellers products capacity currentStock");
-    const sellerIds = warehouse.sellers;
     const productIds = await getWarehouseProductIds(warehouse);
+
+    // Derive seller IDs from the warehouse's actual products
+    const warehouseProducts = await Product.find({ _id: { $in: productIds } }).select("seller");
+    const sellerIds = [
+      ...new Set(warehouseProducts.map((p) => p.seller?.toString()).filter(Boolean)),
+    ].map((id) => new mongoose.Types.ObjectId(id));
 
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 5, 1);
+
+    const baseMatch = { "items.product": { $in: productIds } };
 
     const [
       totalOrders,
@@ -262,42 +339,42 @@ const getAnalytics = async (req, res) => {
       activeSellers,
       totalProducts,
     ] = await Promise.all([
-      Order.countDocuments({ seller: { $in: sellerIds } }),
+      Order.countDocuments(baseMatch),
 
       Order.aggregate([
-        { $match: { seller: { $in: sellerIds }, paymentStatus: "paid" } },
+        { $match: { ...baseMatch, paymentStatus: "paid" } },
         { $group: { _id: null, total: { $sum: "$finalAmount" } } },
       ]),
 
-      Order.countDocuments({ seller: { $in: sellerIds }, createdAt: { $gte: startOfMonth } }),
+      Order.countDocuments({ ...baseMatch, createdAt: { $gte: startOfMonth } }),
 
       Order.aggregate([
-        { $match: { seller: { $in: sellerIds }, paymentStatus: "paid", createdAt: { $gte: startOfMonth } } },
+        { $match: { ...baseMatch, paymentStatus: "paid", createdAt: { $gte: startOfMonth } } },
         { $group: { _id: null, total: { $sum: "$finalAmount" } } },
       ]),
 
-      Order.countDocuments({ seller: { $in: sellerIds }, createdAt: { $gte: startOfToday } }),
+      Order.countDocuments({ ...baseMatch, createdAt: { $gte: startOfToday } }),
 
       Order.aggregate([
-        { $match: { seller: { $in: sellerIds }, paymentStatus: "paid", createdAt: { $gte: startOfToday } } },
+        { $match: { ...baseMatch, paymentStatus: "paid", createdAt: { $gte: startOfToday } } },
         { $group: { _id: null, total: { $sum: "$finalAmount" } } },
       ]),
 
       Order.aggregate([
-        { $match: { seller: { $in: sellerIds } } },
+        { $match: baseMatch },
         { $group: { _id: "$status", count: { $sum: 1 } } },
         { $sort: { count: -1 } },
       ]),
 
       Order.aggregate([
-        { $match: { seller: { $in: sellerIds } } },
+        { $match: baseMatch },
         { $group: { _id: "$paymentMethod", count: { $sum: 1 } } },
       ]),
 
       Order.aggregate([
         {
           $match: {
-            seller: { $in: sellerIds },
+            ...baseMatch,
             paymentStatus: "paid",
             createdAt: { $gte: sixMonthsAgo },
           },
@@ -387,4 +464,4 @@ const getWarehouseForPincode = async (req, res) => {
   }
 };
 
-module.exports = { login, getProfile, getProducts, getSellers, getOrders, getAnalytics, getWarehouseForPincode };
+module.exports = { login, getProfile, getProducts, getProductById, getSellers, getOrders, getOrderById, getAnalytics, getWarehouseForPincode };
