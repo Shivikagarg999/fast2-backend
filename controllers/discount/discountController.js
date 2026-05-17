@@ -13,7 +13,7 @@ exports.createDiscount = async (req, res) => {
     const discount = new Discount({
       name,
       discountPercentage,
-      category: categoryId,
+      category: categoryId || undefined,
       products: productIds,
       startDate,
       endDate

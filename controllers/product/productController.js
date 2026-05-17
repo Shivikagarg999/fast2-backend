@@ -7,6 +7,7 @@ const Seller = require('../../models/seller');
 const Warehouse = require('../../models/warehouse');
 const imagekit = require('../../utils/imagekit');
 const fs = require('fs');
+const { getActiveDiscounts, applyDiscountToProduct } = require('../../utils/discountHelper');
 
 const createProduct = async (req, res) => {
   try {
@@ -854,8 +855,11 @@ const getProducts = async (req, res) => {
     const totalProducts = await Product.countDocuments(filter);
     const totalPages = Math.ceil(totalProducts / limit);
 
+    const discounts = await getActiveDiscounts();
+    const productsWithDiscount = products.map(p => applyDiscountToProduct(p.toObject(), discounts));
+
     res.json({
-      products,
+      products: productsWithDiscount,
       pagination: {
         currentPage: parseInt(page),
         totalPages,
@@ -993,8 +997,11 @@ const getProductsByPincode = async (req, res) => {
     const totalProducts = await Product.countDocuments(filter);
     const totalPages = Math.ceil(totalProducts / limit);
 
+    const discounts = await getActiveDiscounts();
+    const productsWithDiscount = products.map(p => applyDiscountToProduct(p.toObject(), discounts));
+
     res.json({
-      products,
+      products: productsWithDiscount,
       pincode,
       pagination: {
         currentPage: parseInt(page),
@@ -1512,7 +1519,8 @@ const getProductById = async (req, res) => {
       .populate('promotor.id')
       .select('-__v');
     if (!product) return res.status(404).json({ message: 'Product not found' });
-    res.json(product);
+    const discounts = await getActiveDiscounts();
+    res.json(applyDiscountToProduct(product.toObject(), discounts));
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -1530,7 +1538,10 @@ const getProductsByCategory = async (req, res) => {
       .populate('category')
       .populate('promotor.id');
 
-    res.json({ category: category.name, products });
+    const discounts = await getActiveDiscounts();
+    const productsWithDiscount = products.map(p => applyDiscountToProduct(p.toObject(), discounts));
+
+    res.json({ category: category.name, products: productsWithDiscount });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: error.message });
@@ -1687,9 +1698,12 @@ const getProductsForPincode = async (req, res) => {
       .populate('promotor.id')
       .populate('warehouse.id');
 
+    const discounts = await getActiveDiscounts();
+    const productsWithDiscount = products.map(p => applyDiscountToProduct(p.toObject(), discounts));
+
     res.json({
       success: true,
-      data: products,
+      data: productsWithDiscount,
       warehouse: {
         name: warehouse.name,
         code: warehouse.code,

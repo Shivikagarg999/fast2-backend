@@ -1,5 +1,6 @@
 const Cart = require("../../models/cart");
 const Product = require("../../models/product");
+const { getActiveDiscounts, getEffectivePrice } = require('../../utils/discountHelper');
 
 // Get user's cart
 const getCart = async (req, res) => {
@@ -65,17 +66,21 @@ const addToCart = async (req, res) => {
     }
 
     const gstPercent = product.category?.gstPercent || 0;
-    
+
+    // Resolve effective price considering active campaign discounts
+    const discounts = await getActiveDiscounts();
+    const { effectivePrice } = getEffectivePrice(product, discounts);
+
     // Check if product is in stock
     if (product.quantity < quantity) {
-      return res.status(400).json({ 
-        message: `Only ${product.quantity} items available in stock` 
+      return res.status(400).json({
+        message: `Only ${product.quantity} items available in stock`
       });
     }
-    
+
     // Find user's cart
     let cart = await Cart.findOne({ user: req.user._id });
-    
+
     if (!cart) {
       // Create new cart if it doesn't exist
       cart = new Cart({
@@ -83,7 +88,7 @@ const addToCart = async (req, res) => {
         items: [{
           product: productId,
           quantity,
-          price: product.price,
+          price: effectivePrice,
           gstPercent
         }]
       });
@@ -92,25 +97,27 @@ const addToCart = async (req, res) => {
       const existingItemIndex = cart.items.findIndex(
         item => item.product.toString() === productId
       );
-      
+
       if (existingItemIndex > -1) {
         // Update quantity if product exists
         const newQuantity = cart.items[existingItemIndex].quantity + quantity;
-        
+
         // Check stock again with updated quantity
         if (product.quantity < newQuantity) {
-          return res.status(400).json({ 
-            message: `Only ${product.quantity} items available in stock` 
+          return res.status(400).json({
+            message: `Only ${product.quantity} items available in stock`
           });
         }
-        
+
         cart.items[existingItemIndex].quantity = newQuantity;
+        // Refresh price to reflect any currently active discount
+        cart.items[existingItemIndex].price = effectivePrice;
       } else {
         // Add new item to cart
         cart.items.push({
           product: productId,
           quantity,
-          price: product.price,
+          price: effectivePrice,
           gstPercent
         });
       }
