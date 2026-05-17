@@ -10,6 +10,7 @@ const {
   getSellerStats,
   getSellerPassword,
   resetSellerPassword,
+  deleteSeller,
 } = require('../../../controllers/admin/seller/seller');
 
 router.post('/sellers/create', createSeller);
@@ -25,6 +26,8 @@ router.patch('/seller/:sellerId/approval', updateSellerApproval);
 router.patch('/seller/:sellerId/status', toggleSellerStatus);
 
 router.put('/seller/:sellerId', updateSellerDetails);
+
+router.delete('/seller/:sellerId', deleteSeller);
 
 // Password management
 router.get('/seller/:sellerId/password', getSellerPassword);

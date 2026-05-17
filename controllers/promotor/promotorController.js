@@ -4,6 +4,9 @@ const Promotor = require("../../models/promotor");
 const Seller = require("../../models/seller");
 const Product = require("../../models/product");
 const Order = require("../../models/order");
+const Category = require("../../models/category");
+const Shop = require("../../models/shop");
+const imagekit = require("../../utils/imagekit");
 require("dotenv").config();
 
 // POST /api/promotor/login
@@ -197,6 +200,167 @@ exports.getOrders = async (req, res) => {
 };
 
 // GET /api/promotor/dashboard
+// POST /api/promotor/products
+exports.addProduct = async (req, res) => {
+  try {
+    const promotorId = req.promotor._id;
+    const productData = req.body;
+
+    // sellerId must be provided — promotor adds on behalf of a seller
+    const { sellerId } = productData;
+    if (!sellerId) {
+      return res.status(400).json({ success: false, message: "sellerId is required" });
+    }
+
+    // Verify the seller belongs to this promotor
+    const seller = await Seller.findById(sellerId);
+    if (!seller) {
+      return res.status(404).json({ success: false, message: "Seller not found" });
+    }
+    if (seller.promotor?.toString() !== promotorId.toString()) {
+      return res.status(403).json({ success: false, message: "This seller does not belong to your account" });
+    }
+    if (seller.approvalStatus !== "approved") {
+      return res.status(403).json({ success: false, message: "Seller is not approved yet" });
+    }
+
+    // Parse JSON string fields sent from multipart forms
+    const parseField = (val, fallback) => {
+      if (!val) return fallback;
+      if (typeof val === "object") return val;
+      try { return JSON.parse(val); } catch { return fallback; }
+    };
+
+    const parsedDimensions        = parseField(productData.dimensions, {});
+    const parsedAvailablePincodes  = parseField(productData.availablePincodes, []);
+    const parsedServiceablePincodes = parseField(productData.serviceablePincodes, []);
+    const parsedVariants           = parseField(productData.variants, []);
+
+    // Resolve category
+    let categoryId = productData.category;
+    if (categoryId && !/^[0-9a-fA-F]{24}$/.test(categoryId)) {
+      const cat = await Category.findOne({ name: categoryId });
+      if (!cat) return res.status(404).json({ success: false, message: `Category '${categoryId}' not found` });
+      categoryId = cat._id;
+    }
+    const foundCategory = categoryId ? await Category.findById(categoryId) : null;
+
+    const productTaxInfo = {
+      hsnCode:    productData.hsnCode    || foundCategory?.hsnCode,
+      gstPercent: productData.gstPercent !== undefined ? productData.gstPercent : foundCategory?.gstPercent,
+      taxType:    productData.taxType    || foundCategory?.taxType,
+    };
+
+    // Commission from promotor's own rate
+    const commissionRate = req.promotor.commissionRate || 5;
+    const commissionType = req.promotor.commissionType || "percentage";
+    const commissionAmount = commissionType === "percentage"
+      ? (productData.price * commissionRate) / 100
+      : commissionRate;
+
+    const discountPercentage = productData.oldPrice > 0
+      ? Math.round(((productData.oldPrice - productData.price) / productData.oldPrice) * 100)
+      : 0;
+
+    const stockStatus = productData.quantity > 0 ? "in-stock" : "out-of-stock";
+
+    // Upload images to ImageKit
+    let uploadedImages = [];
+    if (req.files && req.files.length > 0) {
+      for (let i = 0; i < req.files.length; i++) {
+        try {
+          const uploaded = await imagekit.upload({
+            file: req.files[i].buffer.toString("base64"),
+            fileName: `product_${sellerId}_${Date.now()}_${i}.jpg`,
+            folder: "/seller-products/images",
+            useUniqueFileName: true,
+          });
+          uploadedImages.push({
+            url: uploaded.url,
+            fileId: uploaded.fileId,
+            altText: productData.imageAltText || `${productData.name} - Image ${i + 1}`,
+            isPrimary: i === 0,
+            order: i,
+          });
+        } catch (err) {
+          console.error(`Image upload error (${i}):`, err.message);
+        }
+      }
+    }
+
+    const newProduct = new Product({
+      name:               productData.name,
+      description:        productData.description,
+      brand:              productData.brand,
+      category:           categoryId,
+      price:              productData.price,
+      oldPrice:           productData.oldPrice || 0,
+      discountPercentage,
+      hsnCode:            productTaxInfo.hsnCode,
+      gstPercent:         productTaxInfo.gstPercent,
+      taxType:            productTaxInfo.taxType,
+      unit:               productData.unit,
+      unitValue:          productData.unitValue,
+      promotor: {
+        id:               promotorId,
+        commissionRate,
+        commissionType,
+        commissionAmount,
+      },
+      seller:             sellerId,
+      quantity:           productData.quantity || 0,
+      minOrderQuantity:   productData.minOrderQuantity || 1,
+      maxOrderQuantity:   productData.maxOrderQuantity || 10,
+      stockStatus,
+      lowStockThreshold:  productData.lowStockThreshold || 10,
+      weight:             productData.weight,
+      weightUnit:         productData.weightUnit || "g",
+      dimensions:         parsedDimensions,
+      images:             uploadedImages,
+      delivery: {
+        estimatedDeliveryTime: productData.estimatedDeliveryTime,
+        deliveryCharges:       productData.deliveryCharges || 0,
+        freeDeliveryThreshold: productData.freeDeliveryThreshold || 0,
+        availablePincodes:     parsedAvailablePincodes,
+      },
+      serviceablePincodes: parsedServiceablePincodes,
+      variants:            parsedVariants,
+      isActive:            true,
+    });
+
+    await newProduct.save();
+
+    // Add product to seller's products array
+    seller.products.push(newProduct._id);
+    await seller.save();
+
+    // Sync product into the seller's shop
+    const shop = await Shop.findOne({ seller: sellerId });
+    if (shop) {
+      shop.products.push(newProduct._id);
+      shop.analytics.totalProductsListed = shop.products.length;
+      if (categoryId && !shop.categories.some((c) => c.toString() === categoryId.toString())) {
+        shop.categories.push(categoryId);
+      }
+      await shop.save();
+      newProduct.shop = shop._id;
+      await newProduct.save();
+    }
+
+    // Increment promotor's totalProductsAdded counter
+    await Promotor.findByIdAndUpdate(promotorId, { $inc: { totalProductsAdded: 1 } });
+
+    res.status(201).json({
+      success: true,
+      message: "Product added successfully",
+      data: newProduct,
+    });
+  } catch (error) {
+    console.error("Promotor addProduct error:", error);
+    res.status(500).json({ success: false, message: "Error adding product", error: error.message });
+  }
+};
+
 exports.getDashboard = async (req, res) => {
   try {
     const promotorId = req.promotor._id;

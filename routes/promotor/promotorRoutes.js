@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const promotorAuth = require("../../middlewares/promotorAuth");
+const upload = require("../../middlewares/upload");
 const {
   loginPromotor,
   getProfile,
@@ -8,6 +9,7 @@ const {
   getProducts,
   getOrders,
   getDashboard,
+  addProduct,
 } = require("../../controllers/promotor/promotorController");
 
 // Public
@@ -19,5 +21,6 @@ router.get("/dashboard", promotorAuth, getDashboard);
 router.get("/sellers", promotorAuth, getSellers);
 router.get("/products", promotorAuth, getProducts);
 router.get("/orders", promotorAuth, getOrders);
+router.post("/products", promotorAuth, upload.array("images", 5), addProduct);
 
 module.exports = router;

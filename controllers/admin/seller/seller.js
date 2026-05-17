@@ -444,6 +444,21 @@ exports.resetSellerPassword = async (req, res) => {
   }
 };
 
+exports.deleteSeller = async (req, res) => {
+  try {
+    const { sellerId } = req.params;
+    const seller = await Seller.findByIdAndDelete(sellerId);
+
+    if (!seller) {
+      return res.status(404).json({ success: false, message: 'Seller not found' });
+    }
+
+    res.json({ success: true, message: 'Seller deleted successfully', data: { _id: sellerId } });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Error deleting seller', error: error.message });
+  }
+};
+
 exports.updateSellerDetails = async (req, res) => {
   try {
     const { sellerId } = req.params;
