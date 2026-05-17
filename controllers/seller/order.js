@@ -136,9 +136,9 @@ exports.getOrderDetails = async (req, res) => {
 
     // Populate related data
     const populatedOrder = await Order.populate(order, [
-      { 
-        path: 'items.product', 
-        select: 'name images price description category brand' 
+      {
+        path: 'items.product',
+        select: 'name images price description category brand seller'
       },
       { 
         path: 'user', 

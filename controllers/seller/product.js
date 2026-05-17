@@ -612,6 +612,41 @@ exports.getSellerProducts = async (req, res) => {
   }
 };
 
+exports.getProductById = async (req, res) => {
+  try {
+    const sellerId = req.seller.id;
+    const { productId } = req.params;
+
+    const product = await Product.findOne({ _id: productId, seller: sellerId })
+      .populate('category', 'name hsnCode gstPercent')
+      .populate('seller', 'name businessName email phone address')
+      .populate('warehouse.id', 'name code storageType location')
+      .lean();
+
+    if (!product) {
+      return res.status(404).json({ success: false, message: 'Product not found or access denied' });
+    }
+
+    // Sales stats for this product
+    const [salesData] = await Order.aggregate([
+      { $unwind: '$items' },
+      { $match: { 'items.product': product._id, status: { $ne: 'cancelled' } } },
+      { $group: { _id: null, totalSold: { $sum: '$items.quantity' }, totalRevenue: { $sum: { $multiply: ['$items.price', '$items.quantity'] } } } },
+    ]);
+
+    res.json({
+      success: true,
+      product: {
+        ...product,
+        totalSold: salesData?.totalSold || 0,
+        totalRevenue: salesData?.totalRevenue || 0,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Error fetching product', error: error.message });
+  }
+};
+
 exports.toggleProductStatus = async (req, res) => {
   try {
     const sellerId = req.seller.id;

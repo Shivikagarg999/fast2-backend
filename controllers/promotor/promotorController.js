@@ -6,6 +6,7 @@ const Product = require("../../models/product");
 const Order = require("../../models/order");
 const Category = require("../../models/category");
 const Shop = require("../../models/shop");
+const Warehouse = require("../../models/warehouse");
 const imagekit = require("../../utils/imagekit");
 require("dotenv").config();
 
@@ -199,6 +200,49 @@ exports.getOrders = async (req, res) => {
   }
 };
 
+// GET /api/promotor/orders/:id
+exports.getOrderById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Verify the order belongs to this promotor's sellers
+    const sellerIds = await Seller.find({ promotor: req.promotor._id }).distinct("_id");
+    const productIds = await Product.find({ seller: { $in: sellerIds } }).distinct("_id");
+
+    const query = mongoose.Types.ObjectId.isValid(id)
+      ? { _id: id, "items.product": { $in: productIds } }
+      : { orderId: id, "items.product": { $in: productIds } };
+
+    const order = await Order.findOne(query)
+      .populate("user", "name email phone wallet")
+      .populate("seller", "name businessName email phone address")
+      .populate("driver", "personalInfo.name personalInfo.phone workInfo.driverId")
+      .populate("items.product", "name images price brand description unit unitValue category")
+      .populate("scratchGifts.product", "name images");
+
+    if (!order) return res.status(404).json({ success: false, message: "Order not found" });
+
+    res.json({ success: true, order });
+  } catch (error) {
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
+// GET /api/promotor/warehouses
+exports.getWarehouses = async (req, res) => {
+  try {
+    const promotorId = req.promotor._id;
+    const warehouses = await Warehouse.find({ promotor: promotorId, isActive: true })
+      .select("_id name code storageType location.city location.address capacity currentStock serviceablePincodes")
+      .sort({ name: 1 });
+
+    res.status(200).json({ success: true, data: warehouses });
+  } catch (error) {
+    console.error("Get warehouses error:", error);
+    res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
 // GET /api/promotor/dashboard
 // POST /api/promotor/products
 exports.addProduct = async (req, res) => {
@@ -251,18 +295,40 @@ exports.addProduct = async (req, res) => {
       taxType:    productData.taxType    || foundCategory?.taxType,
     };
 
-    // Commission from promotor's own rate
-    const commissionRate = req.promotor.commissionRate || 5;
-    const commissionType = req.promotor.commissionType || "percentage";
+    // Commission — use per-product override if provided, else fall back to promotor's defaults
+    const commissionRate = productData.commissionRate !== undefined
+      ? parseFloat(productData.commissionRate)
+      : (req.promotor.commissionRate || 5);
+    const commissionType = productData.commissionType || req.promotor.commissionType || "percentage";
+    const price = parseFloat(productData.price) || 0;
     const commissionAmount = commissionType === "percentage"
-      ? (productData.price * commissionRate) / 100
+      ? (price * commissionRate) / 100
       : commissionRate;
 
-    const discountPercentage = productData.oldPrice > 0
-      ? Math.round(((productData.oldPrice - productData.price) / productData.oldPrice) * 100)
+    // Warehouse lookup — must belong to this promotor
+    let warehouseInfo = null;
+    if (productData.warehouseId) {
+      const warehouse = await Warehouse.findById(productData.warehouseId);
+      if (!warehouse) {
+        return res.status(404).json({ success: false, message: "Warehouse not found" });
+      }
+      if (warehouse.promotor.toString() !== promotorId.toString()) {
+        return res.status(403).json({ success: false, message: "Warehouse does not belong to your account" });
+      }
+      warehouseInfo = {
+        id: warehouse._id,
+        code: warehouse.code,
+        storageType: warehouse.storageType,
+      };
+    }
+
+    const oldPrice = parseFloat(productData.oldPrice) || 0;
+    const discountPercentage = oldPrice > 0
+      ? Math.round(((oldPrice - price) / oldPrice) * 100)
       : 0;
 
-    const stockStatus = productData.quantity > 0 ? "in-stock" : "out-of-stock";
+    const quantity = parseInt(productData.quantity) || 0;
+    const stockStatus = quantity > 0 ? "in-stock" : "out-of-stock";
 
     // Upload images to ImageKit
     let uploadedImages = [];
@@ -293,14 +359,14 @@ exports.addProduct = async (req, res) => {
       description:        productData.description,
       brand:              productData.brand,
       category:           categoryId,
-      price:              productData.price,
-      oldPrice:           productData.oldPrice || 0,
+      price,
+      oldPrice,
       discountPercentage,
       hsnCode:            productTaxInfo.hsnCode,
-      gstPercent:         productTaxInfo.gstPercent,
+      gstPercent:         productTaxInfo.gstPercent !== undefined ? parseFloat(productTaxInfo.gstPercent) : undefined,
       taxType:            productTaxInfo.taxType,
       unit:               productData.unit,
-      unitValue:          productData.unitValue,
+      unitValue:          productData.unitValue ? parseFloat(productData.unitValue) : undefined,
       promotor: {
         id:               promotorId,
         commissionRate,
@@ -308,27 +374,38 @@ exports.addProduct = async (req, res) => {
         commissionAmount,
       },
       seller:             sellerId,
-      quantity:           productData.quantity || 0,
-      minOrderQuantity:   productData.minOrderQuantity || 1,
-      maxOrderQuantity:   productData.maxOrderQuantity || 10,
+      warehouse:          warehouseInfo,
+      quantity,
+      minOrderQuantity:   parseInt(productData.minOrderQuantity) || 1,
+      maxOrderQuantity:   parseInt(productData.maxOrderQuantity) || 10,
       stockStatus,
-      lowStockThreshold:  productData.lowStockThreshold || 10,
-      weight:             productData.weight,
+      lowStockThreshold:  parseInt(productData.lowStockThreshold) || 10,
+      weight:             productData.weight ? parseFloat(productData.weight) : undefined,
       weightUnit:         productData.weightUnit || "g",
       dimensions:         parsedDimensions,
       images:             uploadedImages,
       delivery: {
         estimatedDeliveryTime: productData.estimatedDeliveryTime,
-        deliveryCharges:       productData.deliveryCharges || 0,
-        freeDeliveryThreshold: productData.freeDeliveryThreshold || 0,
+        deliveryCharges:       parseFloat(productData.deliveryCharges) || 0,
+        freeDeliveryThreshold: parseFloat(productData.freeDeliveryThreshold) || 0,
         availablePincodes:     parsedAvailablePincodes,
       },
       serviceablePincodes: parsedServiceablePincodes,
       variants:            parsedVariants,
-      isActive:            true,
+      isActive:            productData.isActive !== undefined
+        ? (productData.isActive === "true" || productData.isActive === true)
+        : true,
     });
 
     await newProduct.save();
+
+    // Add product to warehouse if specified
+    if (warehouseInfo) {
+      await Warehouse.findByIdAndUpdate(warehouseInfo.id, {
+        $addToSet: { products: newProduct._id },
+        $inc: { currentStock: quantity },
+      });
+    }
 
     // Add product to seller's products array
     seller.products.push(newProduct._id);

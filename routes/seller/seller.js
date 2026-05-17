@@ -15,6 +15,7 @@ const {
 const {
   addProduct,
   getSellerProducts,
+  getProductById,
   updateProduct,
   toggleProductStatus
 } = require('../../controllers/seller/product');
@@ -40,6 +41,7 @@ router.get('/dashboard', sellerAuth, getSellerDashboard);
 // Products
 router.post('/products', sellerAuth, upload.array('images', 5), addProduct);
 router.get('/products', sellerAuth, getSellerProducts);
+router.get('/products/:productId', sellerAuth, getProductById);
 router.put('/products/:productId', sellerAuth, upload.fields([
   { name: 'images', maxCount: 5 },
   { name: 'video', maxCount: 1 }
