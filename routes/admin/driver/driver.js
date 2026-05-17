@@ -15,6 +15,10 @@ router.get('/:id/earnings', adminDriverController.getDriverEarnings);
 router.patch('/:id/location', adminDriverController.updateDriverLocation);
 router.get('/:id/performance', adminDriverController.getDriverPerformance);
 
+// Password management
+router.get('/:id/password', adminDriverController.getDriverPassword);
+router.patch('/:id/password', adminDriverController.resetDriverPassword);
+
 // Available Drivers
 router.get('/available/nearby', adminDriverController.getNearbyAvailableDrivers);
 

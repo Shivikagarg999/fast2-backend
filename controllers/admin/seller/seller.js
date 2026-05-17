@@ -402,6 +402,48 @@ exports.getSellerStats = async (req, res) => {
   }
 };
 
+// GET /api/admin/seller/:sellerId/password
+exports.getSellerPassword = async (req, res) => {
+  try {
+    const seller = await Seller.findById(req.params.sellerId).select('name email phone password');
+    if (!seller) return res.status(404).json({ success: false, message: 'Seller not found' });
+
+    res.json({
+      success: true,
+      data: {
+        _id: seller._id,
+        name: seller.name,
+        email: seller.email,
+        phone: seller.phone,
+        hasPassword: !!seller.password,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Error fetching seller password info', error: error.message });
+  }
+};
+
+// PATCH /api/admin/seller/:sellerId/password
+exports.resetSellerPassword = async (req, res) => {
+  try {
+    const { newPassword } = req.body;
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ success: false, message: 'Password must be at least 6 characters' });
+    }
+
+    const seller = await Seller.findById(req.params.sellerId);
+    if (!seller) return res.status(404).json({ success: false, message: 'Seller not found' });
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+    seller.password = hashed;
+    await seller.save();
+
+    res.json({ success: true, message: 'Seller password updated successfully' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Error updating seller password', error: error.message });
+  }
+};
+
 exports.updateSellerDetails = async (req, res) => {
   try {
     const { sellerId } = req.params;

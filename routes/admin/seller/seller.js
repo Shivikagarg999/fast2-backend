@@ -1,13 +1,15 @@
 const express = require('express');
 const router = express.Router();
-const { 
+const {
   createSeller,
-  updateSellerApproval, 
-  getAllSellers, 
-  getSellerById, 
-  updateSellerDetails, 
-  toggleSellerStatus, 
-  getSellerStats 
+  updateSellerApproval,
+  getAllSellers,
+  getSellerById,
+  updateSellerDetails,
+  toggleSellerStatus,
+  getSellerStats,
+  getSellerPassword,
+  resetSellerPassword,
 } = require('../../../controllers/admin/seller/seller');
 
 router.post('/sellers/create', createSeller);
@@ -23,5 +25,9 @@ router.patch('/seller/:sellerId/approval', updateSellerApproval);
 router.patch('/seller/:sellerId/status', toggleSellerStatus);
 
 router.put('/seller/:sellerId', updateSellerDetails);
+
+// Password management
+router.get('/seller/:sellerId/password', getSellerPassword);
+router.patch('/seller/:sellerId/password', resetSellerPassword);
 
 module.exports = router;

@@ -80,3 +80,45 @@ exports.deletePromotor = async (req, res) => {
     res.status(500).json({ message: "Error deleting promotor", error: err.message });
   }
 };
+
+// GET /api/admin/promotor/:id/password
+exports.getPromotorPassword = async (req, res) => {
+  try {
+    const promotor = await Promotor.findById(req.params.id).select('name email phone password');
+    if (!promotor) return res.status(404).json({ success: false, message: "Promotor not found" });
+
+    res.json({
+      success: true,
+      data: {
+        _id: promotor._id,
+        name: promotor.name,
+        email: promotor.email,
+        phone: promotor.phone,
+        hasPassword: !!promotor.password,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Error fetching promotor password info", error: err.message });
+  }
+};
+
+// PATCH /api/admin/promotor/:id/password
+exports.resetPromotorPassword = async (req, res) => {
+  try {
+    const { newPassword } = req.body;
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ success: false, message: "Password must be at least 6 characters" });
+    }
+
+    const promotor = await Promotor.findById(req.params.id);
+    if (!promotor) return res.status(404).json({ success: false, message: "Promotor not found" });
+
+    const hashed = await bcrypt.hash(newPassword, 10);
+    promotor.password = hashed;
+    await promotor.save();
+
+    res.json({ success: true, message: "Promotor password updated successfully" });
+  } catch (err) {
+    res.status(500).json({ success: false, message: "Error updating promotor password", error: err.message });
+  }
+};

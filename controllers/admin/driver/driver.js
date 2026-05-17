@@ -637,6 +637,47 @@ exports.getAvailableDriversForOrder = async (req, res) => {
   }
 };
 
+// GET /api/admin/drivers/:id/password
+exports.getDriverPassword = async (req, res) => {
+  try {
+    const driver = await Driver.findById(req.params.id).select('personalInfo.name personalInfo.phone auth.password');
+    if (!driver) return res.status(404).json({ success: false, message: 'Driver not found' });
+
+    res.json({
+      success: true,
+      data: {
+        _id: driver._id,
+        name: driver.personalInfo?.name,
+        phone: driver.personalInfo?.phone,
+        hasPassword: !!driver.auth?.password,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Error fetching driver password info', error: error.message });
+  }
+};
+
+// PATCH /api/admin/drivers/:id/password
+exports.resetDriverPassword = async (req, res) => {
+  try {
+    const { newPassword } = req.body;
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ success: false, message: 'Password must be at least 6 characters' });
+    }
+
+    const driver = await Driver.findById(req.params.id);
+    if (!driver) return res.status(404).json({ success: false, message: 'Driver not found' });
+
+    // Pre-save hook on driver model handles hashing when auth.password is modified
+    driver.auth.password = newPassword;
+    await driver.save();
+
+    res.json({ success: true, message: 'Driver password updated successfully' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Error updating driver password', error: error.message });
+  }
+};
+
 // Helper functions
 const getDriverEarningsForPeriod = async (driverId, period) => {
   const dateFilter = getDateFilter(period);

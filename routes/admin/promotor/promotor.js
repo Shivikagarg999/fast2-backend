@@ -8,4 +8,8 @@ router.get('/:id', promotorController.getPromotorById);
 router.put('/:id', promotorController.updatePromotor);
 router.delete('/:id', promotorController.deletePromotor);
 
+// Password management
+router.get('/:id/password', promotorController.getPromotorPassword);
+router.patch('/:id/password', promotorController.resetPromotorPassword);
+
 module.exports = router;
