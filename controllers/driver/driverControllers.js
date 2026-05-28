@@ -120,13 +120,18 @@ exports.toggleAvailability = async (req, res) => {
       return res.status(404).json({ success: false, message: "Driver not found" });
     }
 
-    const { availability } = req.body;
+    const { availability, pincode } = req.body;
 
     if (!["online", "offline"].includes(availability)) {
       return res.status(400).json({ success: false, message: "Invalid availability value" });
     }
 
     driver.workInfo.availability = availability;
+
+    if (availability === "online" && pincode) {
+      driver.workInfo.currentPincode = pincode;
+    }
+
     await driver.save();
 
     res.status(200).json({
@@ -135,6 +140,7 @@ exports.toggleAvailability = async (req, res) => {
       data: {
         driverId: driver._id,
         availability: driver.workInfo.availability,
+        currentPincode: driver.workInfo.currentPincode,
       },
     });
   } catch (error) {

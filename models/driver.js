@@ -146,6 +146,10 @@ const driverSchema = new mongoose.Schema({
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Order',
       default: null
+    },
+    currentPincode: {
+      type: String,
+      default: null
     }
   },
   earnings: {

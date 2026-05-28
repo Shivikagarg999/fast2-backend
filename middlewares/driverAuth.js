@@ -15,7 +15,6 @@ const authenticateToken = async (req, res, next) => {
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     
-    // Verify driver exists in database
     const driver = await Driver.findById(decoded.driverId);
     if (!driver) {
       return res.status(401).json({

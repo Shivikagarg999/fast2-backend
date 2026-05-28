@@ -113,13 +113,18 @@ exports.notifyOrderTaken = async (acceptedByDriverId, orderId, orderCustomId) =>
     }
 };
 
-exports.notifyNearbyDrivers = async (_lat, _lng, orderId, orderCustomId) => {
+exports.notifyNearbyDrivers = async (_lat, _lng, orderId, orderCustomId, deliveryPincode = null) => {
     try {
-        const drivers = await Driver.find({
+        const driverFilter = {
             'workInfo.status': 'approved',
             'workInfo.availability': 'online',
             'auth.fcmToken': { $ne: null },
-        }).select('auth.fcmToken');
+        };
+        if (deliveryPincode) {
+            driverFilter['workInfo.currentPincode'] = deliveryPincode;
+        }
+
+        const drivers = await Driver.find(driverFilter).select('auth.fcmToken');
 
         if (!drivers.length) {
             console.log(`No online drivers found for order ${orderCustomId}`);

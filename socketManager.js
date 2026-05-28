@@ -78,21 +78,49 @@ exports.init = (httpServer) => {
         });
 
         // Driver registers itself after connecting (or reconnecting after phone was off)
-        socket.on('driver_online', async (driverId) => {
+        // Accepts either a plain driverId string or { driverId, pincode }
+        socket.on('driver_online', async (data) => {
+            const driverId = typeof data === 'string' ? data : data?.driverId;
+            const pincode  = typeof data === 'object' ? data?.pincode : null;
             if (!driverId) return;
+
             driverSockets.set(String(driverId), socket.id);
             serverLog(`Driver ${driverId} is now ONLINE (socket: ${socket.id}) | Total online: ${driverSockets.size}`, 'success');
+
+            const Driver = require('./models/driver');
+
+            // Persist pincode when provided
+            let effectivePincode = pincode;
+            if (pincode) {
+                try {
+                    await Driver.findByIdAndUpdate(driverId, { 'workInfo.currentPincode': pincode });
+                    serverLog(`Driver ${driverId} pincode saved: ${pincode}`, 'info');
+                } catch (err) {
+                    serverLog(`Error saving pincode for driver ${driverId}: ${err.message}`, 'error');
+                }
+            } else {
+                // Fall back to whatever pincode is already in DB
+                try {
+                    const d = await Driver.findById(driverId).select('workInfo.currentPincode').lean();
+                    effectivePincode = d?.workInfo?.currentPincode || null;
+                } catch (_) {}
+            }
 
             // Send only recent unassigned pending orders (last 30 minutes) the driver may have missed
             try {
                 const Order = require('./models/order');
-                const since = new Date(Date.now() - 30 * 60 * 1000); // last 30 minutes only
+                const since = new Date(Date.now() - 30 * 60 * 1000);
 
-                const pendingOrders = await Order.find({
+                const orderFilter = {
                     status: 'pending',
                     driver: null,
                     createdAt: { $gte: since },
-                }).select('_id orderId').lean();
+                };
+                if (effectivePincode) {
+                    orderFilter['shippingAddress.pinCode'] = effectivePincode;
+                }
+
+                const pendingOrders = await Order.find(orderFilter).select('_id orderId').lean();
 
                 if (pendingOrders.length) {
                     serverLog(`Driver ${driverId} reconnected — pushing ${pendingOrders.length} recent pending order(s)`, 'warn');
@@ -216,9 +244,10 @@ exports.init = (httpServer) => {
 exports.getIo = () => io;
 
 /**
- * Emit a new order event to ALL connected online drivers.
+ * Emit a new order event to online drivers whose currentPincode matches the delivery pincode.
+ * If deliveryPincode is null/undefined, falls back to all online drivers (backward compat).
  */
-exports.emitNewOrder = async (orderId, orderCustomId) => {
+exports.emitNewOrder = async (orderId, orderCustomId, deliveryPincode = null) => {
     if (!io) return;
 
     const payload = {
@@ -229,19 +258,24 @@ exports.emitNewOrder = async (orderId, orderCustomId) => {
     try {
         const Driver = require('./models/driver');
 
-        // Only drivers who are approved + online in DB
-        const onlineDriverIds = await Driver.find({
+        const driverFilter = {
             'workInfo.status': 'approved',
             'workInfo.availability': 'online',
-        }).select('_id').lean();
+        };
+        if (deliveryPincode) {
+            driverFilter['workInfo.currentPincode'] = deliveryPincode;
+        }
+
+        // Only drivers who are approved + online (+ pincode match if provided)
+        const onlineDriverIds = await Driver.find(driverFilter).select('_id').lean();
 
         if (!onlineDriverIds.length) {
-            serverLog(`New order ${orderCustomId} — no approved+online drivers in DB`, 'warn');
+            serverLog(`New order ${orderCustomId} — no matching drivers (pincode: ${deliveryPincode || 'any'})`, 'warn');
             io.to('_testers').emit('new_order', payload);
             return;
         }
 
-        serverLog(`New order ${orderCustomId} — ${onlineDriverIds.length} approved+online driver(s) in DB`, 'event');
+        serverLog(`New order ${orderCustomId} — ${onlineDriverIds.length} driver(s) matched (pincode: ${deliveryPincode || 'any'})`, 'event');
 
         let socketSent = 0, noSocket = 0;
         for (const { _id } of onlineDriverIds) {
