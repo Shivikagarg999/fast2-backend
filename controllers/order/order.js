@@ -2075,11 +2075,13 @@ exports.generatePDFInvoice = async (invoiceData) => {
       dashedLine(y); y += 6;
       y = row('GRAND TOTAL:', `Rs ${invoiceData.summary.payableAmount.toFixed(2)}`, y, { bold: true, size: 8, minHeight: 12, afterGap: 2 });
 
-      // 7. Wallet deduction → amount paid
-      if ((invoiceData.payment.walletDeduction || 0) > 0) {
+      // 7. Wallet deduction → amount paid (only show if user explicitly used wallet)
+      const paymentMethodStr = (invoiceData.payment.method || '').toLowerCase();
+      const walletWasUsed = paymentMethodStr.includes('wallet') && (invoiceData.payment.walletDeduction || 0) > 0;
+      if (walletWasUsed) {
         y = row('Wallet Deduction:', `-Rs ${invoiceData.payment.walletDeduction.toFixed(2)}`, y);
         dashedLine(y); y += 6;
-        const paid = invoiceData.summary.payableAmount - invoiceData.payment.walletDeduction;
+        const paid = Math.max(0, invoiceData.summary.payableAmount - invoiceData.payment.walletDeduction);
         y = row('AMOUNT PAID:', `Rs ${paid.toFixed(2)}`, y, { bold: true, size: 8, minHeight: 12, afterGap: 2 });
       }
 
