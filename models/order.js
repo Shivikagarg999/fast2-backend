@@ -138,6 +138,10 @@ const orderSchema = new mongoose.Schema(
       type: String,
       default: "pending"
     },
+    deliveredAt: {
+      type: Date,
+      default: null
+    },
     shippingAddress: shippingSchema,
     paymentMethod: {
       type: String,

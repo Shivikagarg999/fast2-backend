@@ -12,6 +12,7 @@ const {
   getFreshOrders,
   getFreshOrdersNotifications,
   getOnlineOrders,
+  getLiveOrders,
   getFreshOrdersStats,
   downloadOrdersByStatusCSV
 } = require("../../../controllers/admin/order/order");
@@ -46,6 +47,8 @@ const requireOrderUpdatePermission = (req, res, next) => {
 };
 
 router.get("/getall", getAllOrders);
+
+router.get("/live", getLiveOrders);
 
 router.get("/getonline", getOnlineOrders);
 

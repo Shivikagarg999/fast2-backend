@@ -272,6 +272,7 @@ const updateOrderStatus = async (req, res) => {
 
     const updateData = {};
     if (status) updateData.status = status;
+    if (status === 'delivered') updateData.deliveredAt = new Date();
     if (deliveryNotes !== undefined) updateData.deliveryNotes = deliveryNotes;
     if (estimatedDelivery) updateData.estimatedDelivery = estimatedDelivery;
     if (trackingNumber) updateData.trackingNumber = trackingNumber;
@@ -814,6 +815,42 @@ const getFreshOrdersStats = async (req, res) => {
   }
 };
 
+const getLiveOrders = async (req, res) => {
+  try {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayEnd = new Date();
+    todayEnd.setHours(23, 59, 59, 999);
+
+    const [ongoing, completedToday] = await Promise.all([
+      Order.find({ status: { $in: ['accepted', 'picked-up'] } })
+        .populate('user', 'name phone')
+        .populate(driverPopulate)
+        .select('orderId status createdAt shippingAddress items totalAmount')
+        .sort({ createdAt: -1 })
+        .lean(),
+
+      Order.find({
+        status: 'delivered',
+        $or: [
+          { deliveredAt: { $gte: todayStart, $lte: todayEnd } },
+          { deliveredAt: null, updatedAt: { $gte: todayStart, $lte: todayEnd } },
+        ],
+      })
+        .populate('user', 'name phone')
+        .populate(driverPopulate)
+        .select('orderId status createdAt updatedAt shippingAddress items totalAmount')
+        .sort({ updatedAt: -1 })
+        .lean(),
+    ]);
+
+    res.json({ success: true, ongoing, completedToday });
+  } catch (error) {
+    console.error('getLiveOrders error:', error);
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+};
+
 module.exports = {
   getAllOrders,
   getOrderById,
@@ -826,5 +863,6 @@ module.exports = {
   getFreshOrdersNotifications,
   getFreshOrdersStats,
   getOnlineOrders,
+  getLiveOrders,
   downloadOrdersByStatusCSV
 };

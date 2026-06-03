@@ -321,6 +321,7 @@ exports.markOrderDelivered = async (req, res) => {
 
     order.status = "delivered";
     order.paymentStatus = "paid";
+    order.deliveredAt = new Date();
     await order.save();
 
     if (order.user) {
