@@ -244,10 +244,10 @@ exports.init = (httpServer) => {
 exports.getIo = () => io;
 
 /**
- * Emit a new order event to online drivers whose currentPincode matches the delivery pincode.
- * If deliveryPincode is null/undefined, falls back to all online drivers (backward compat).
+ * Emit a new order event to online drivers within 10 km of the delivery location.
+ * Falls back to pincode match if lat/lng unavailable, or all online drivers if neither provided.
  */
-exports.emitNewOrder = async (orderId, orderCustomId, deliveryPincode = null) => {
+exports.emitNewOrder = async (orderId, orderCustomId, lat = null, lng = null, deliveryPincode = null) => {
     if (!io) return;
 
     const payload = {
@@ -262,20 +262,28 @@ exports.emitNewOrder = async (orderId, orderCustomId, deliveryPincode = null) =>
             'workInfo.status': 'approved',
             'workInfo.availability': 'online',
         };
-        if (deliveryPincode) {
+
+        let matchMode = 'any';
+        if (lat != null && lng != null && lat !== 0 && lng !== 0) {
+            const deltaLat = 10 / 111;
+            const deltaLng = 10 / (111 * Math.cos(lat * Math.PI / 180));
+            driverFilter['workInfo.currentLocation.coordinates.lat'] = { $gte: lat - deltaLat, $lte: lat + deltaLat };
+            driverFilter['workInfo.currentLocation.coordinates.lng'] = { $gte: lng - deltaLng, $lte: lng + deltaLng };
+            matchMode = '10km radius';
+        } else if (deliveryPincode) {
             driverFilter['workInfo.currentPincode'] = deliveryPincode;
+            matchMode = `pincode ${deliveryPincode}`;
         }
 
-        // Only drivers who are approved + online (+ pincode match if provided)
         const onlineDriverIds = await Driver.find(driverFilter).select('_id').lean();
 
         if (!onlineDriverIds.length) {
-            serverLog(`New order ${orderCustomId} — no matching drivers (pincode: ${deliveryPincode || 'any'})`, 'warn');
+            serverLog(`New order ${orderCustomId} — no matching drivers (${matchMode})`, 'warn');
             io.to('_testers').emit('new_order', payload);
             return;
         }
 
-        serverLog(`New order ${orderCustomId} — ${onlineDriverIds.length} driver(s) matched (pincode: ${deliveryPincode || 'any'})`, 'event');
+        serverLog(`New order ${orderCustomId} — ${onlineDriverIds.length} driver(s) matched (${matchMode})`, 'event');
 
         let socketSent = 0, noSocket = 0;
         for (const { _id } of onlineDriverIds) {

@@ -6,7 +6,7 @@ const Driver = require('../models/driver');
  * @param {string} fcmToken
  * @param {string} title
  * @param {string} body
- * @param {'order'|'general'} channelType
+ * @param {'order'|'g  eneral'} channelType
  * @param {object} data  - extra key/value pairs (all values must be strings)
  */
 exports.sendDriverFcm = async (fcmToken, title, body, channelType = 'general', data = {}) => {
@@ -113,14 +113,21 @@ exports.notifyOrderTaken = async (acceptedByDriverId, orderId, orderCustomId) =>
     }
 };
 
-exports.notifyNearbyDrivers = async (_lat, _lng, orderId, orderCustomId, deliveryPincode = null) => {
+exports.notifyNearbyDrivers = async (lat, lng, orderId, orderCustomId, deliveryPincode = null) => {
     try {
         const driverFilter = {
             'workInfo.status': 'approved',
             'workInfo.availability': 'online',
             'auth.fcmToken': { $ne: null },
         };
-        if (deliveryPincode) {
+
+        if (lat != null && lng != null && lat !== 0 && lng !== 0) {
+            // 10 km bounding box: 1 degree lat ≈ 111 km
+            const deltaLat = 10 / 111;
+            const deltaLng = 10 / (111 * Math.cos(lat * Math.PI / 180));
+            driverFilter['workInfo.currentLocation.coordinates.lat'] = { $gte: lat - deltaLat, $lte: lat + deltaLat };
+            driverFilter['workInfo.currentLocation.coordinates.lng'] = { $gte: lng - deltaLng, $lte: lng + deltaLng };
+        } else if (deliveryPincode) {
             driverFilter['workInfo.currentPincode'] = deliveryPincode;
         }
 
@@ -145,7 +152,8 @@ exports.notifyNearbyDrivers = async (_lat, _lng, orderId, orderCustomId, deliver
         );
 
         const sent = results.filter(r => r.status === 'fulfilled').length;
-        console.log(`New order ${orderCustomId}: notified ${sent}/${drivers.length} nearby drivers`);
+        const mode = (lat != null && lng != null) ? '10km radius' : `pincode ${deliveryPincode}`;
+        console.log(`New order ${orderCustomId}: notified ${sent}/${drivers.length} drivers (${mode})`);
     } catch (error) {
         console.error('Error notifying nearby drivers:', error.message);
     }
