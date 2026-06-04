@@ -229,6 +229,7 @@ exports.init = (httpServer) => {
                         socket.emit('new_order', {
                             orderId: String(order._id),
                             orderCustomId: String(order.orderId),
+                            pincode: normalizePincode(order.shippingAddress?.pinCode),
                         });
                         serverLog(`  ↳ Sent missed order ${order.orderId} to driver ${driverId}`, 'event');
                     }
@@ -356,6 +357,7 @@ exports.emitNewOrder = async (orderId, orderCustomId, lat = null, lng = null, de
     const payload = {
         orderId: String(orderId),
         orderCustomId: String(orderCustomId),
+        pincode: deliveryPincode ? String(deliveryPincode) : null,
     };
 
     try {
