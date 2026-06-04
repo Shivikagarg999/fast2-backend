@@ -148,7 +148,6 @@ exports.init = (httpServer) => {
 
             const Driver = require('./models/driver');
 
-            // Persist pincode when provided
             let effectivePincode = pincode;
             if (pincode) {
                 try {
@@ -159,7 +158,6 @@ exports.init = (httpServer) => {
                 }
             }
 
-            // Always fetch driver's full location + pincode from DB
             let driverLat = null, driverLng = null;
             try {
                 const d = await Driver.findById(driverId)
@@ -371,7 +369,7 @@ exports.emitNewOrder = async (orderId, orderCustomId, lat = null, lng = null, de
         const areaQuery = getOrderAreaQuery(lat, lng, deliveryPincode);
         if (!areaQuery.length) {
             serverLog(`New order ${orderCustomId} — no lat/lng or pincode, skipping driver ring`, 'warn');
-            io.to('_testers').emit('new_order', payload);
+            io.to('_testers').emit('tester_new_order', payload);
             return;
         }
 
@@ -383,7 +381,7 @@ exports.emitNewOrder = async (orderId, orderCustomId, lat = null, lng = null, de
 
         if (!onlineDriverIds.length) {
             serverLog(`New order ${orderCustomId} — no matching drivers (pincode or exact 10km radius)`, 'warn');
-            io.to('_testers').emit('new_order', payload);
+            io.to('_testers').emit('tester_new_order', payload);
             return;
         }
 
@@ -413,7 +411,7 @@ exports.emitNewOrder = async (orderId, orderCustomId, lat = null, lng = null, de
     }
 
     // Always push to test clients regardless of DB status
-    io.to('_testers').emit('new_order', payload);
+    io.to('_testers').emit('tester_new_order', payload);
 };
 
 /**
@@ -425,7 +423,8 @@ exports.recordDecline = (orderId, driverId) => {
     const notified = orderNotifiedDrivers.get(orderId);
     const declines = orderDeclines.get(orderId);
 
-    if (!notified || !declines) return; // order already assigned or unknown
+    if (!notified || !declines) return;
+    if (!notified.has(driverId)) return; // driver wasn't notified for this order, ignore
 
     declines.add(driverId);
 
