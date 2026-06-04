@@ -353,6 +353,8 @@ exports.getIo = () => io;
 exports.emitNewOrder = async (orderId, orderCustomId, lat = null, lng = null, deliveryPincode = null) => {
     if (!io) return;
 
+    serverLog(`[DEBUG] emitNewOrder called — order=${orderCustomId} lat=${lat} lng=${lng} pincode=${deliveryPincode}`, 'info');
+
     const payload = {
         orderId: String(orderId),
         orderCustomId: String(orderCustomId),
