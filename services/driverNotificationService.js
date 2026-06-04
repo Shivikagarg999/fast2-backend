@@ -204,6 +204,7 @@ exports.notifyNearbyDrivers = async (lat, lng, orderId, orderCustomId, deliveryP
             orderCustomId: String(orderCustomId),
             type: 'new_order',
             screen: 'OrderDetails',
+            pincode: deliveryPincode ? String(deliveryPincode) : '',
         };
 
         const results = await Promise.allSettled(
