@@ -1,5 +1,70 @@
 const driverApp = require('../config/firebaseDriver');
 const Driver = require('../models/driver');
+const DRIVER_RING_RADIUS_KM = 10;
+
+const normalizePincode = (pincode) => {
+    if (pincode == null) return null;
+    const normalized = String(pincode).trim();
+    return normalized || null;
+};
+
+const toValidCoordinate = (value) => {
+    const number = Number(value);
+    return Number.isFinite(number) && number !== 0 ? number : null;
+};
+
+const getDistanceKm = (lat1, lng1, lat2, lng2) => {
+    const earthRadiusKm = 6371;
+    const toRadians = (degree) => degree * Math.PI / 180;
+    const dLat = toRadians(lat2 - lat1);
+    const dLng = toRadians(lng2 - lng1);
+    const a = Math.sin(dLat / 2) ** 2
+        + Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2))
+        * Math.sin(dLng / 2) ** 2;
+    return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+const driverMatchesOrderArea = (driver, orderLat, orderLng, deliveryPincode) => {
+    const normalizedDeliveryPincode = normalizePincode(deliveryPincode);
+    const driverPincode = normalizePincode(driver?.workInfo?.currentPincode);
+
+    if (normalizedDeliveryPincode && driverPincode === normalizedDeliveryPincode) {
+        return true;
+    }
+
+    const lat = toValidCoordinate(orderLat);
+    const lng = toValidCoordinate(orderLng);
+    const driverLat = toValidCoordinate(driver?.workInfo?.currentLocation?.coordinates?.lat);
+    const driverLng = toValidCoordinate(driver?.workInfo?.currentLocation?.coordinates?.lng);
+
+    if (lat == null || lng == null || driverLat == null || driverLng == null) {
+        return false;
+    }
+
+    return getDistanceKm(lat, lng, driverLat, driverLng) <= DRIVER_RING_RADIUS_KM;
+};
+
+const getOrderAreaQuery = (lat, lng, pincode) => {
+    const query = [];
+    const validLat = toValidCoordinate(lat);
+    const validLng = toValidCoordinate(lng);
+    const normalizedPincode = normalizePincode(pincode);
+
+    if (normalizedPincode) {
+        query.push({ 'workInfo.currentPincode': normalizedPincode });
+    }
+
+    if (validLat != null && validLng != null) {
+        const deltaLat = DRIVER_RING_RADIUS_KM / 111;
+        const deltaLng = DRIVER_RING_RADIUS_KM / (111 * Math.cos(validLat * Math.PI / 180));
+        query.push({
+            'workInfo.currentLocation.coordinates.lat': { $gte: validLat - deltaLat, $lte: validLat + deltaLat },
+            'workInfo.currentLocation.coordinates.lng': { $gte: validLng - deltaLng, $lte: validLng + deltaLng },
+        });
+    }
+
+    return query;
+};
 
 /**
  * Send FCM to a specific FCM token with channel-aware payload
@@ -121,20 +186,17 @@ exports.notifyNearbyDrivers = async (lat, lng, orderId, orderCustomId, deliveryP
             'auth.fcmToken': { $ne: null },
         };
 
-        if (lat != null && lng != null && lat !== 0 && lng !== 0) {
-            // 10 km bounding box: 1 degree lat ≈ 111 km
-            const deltaLat = 10 / 111;
-            const deltaLng = 10 / (111 * Math.cos(lat * Math.PI / 180));
-            driverFilter['workInfo.currentLocation.coordinates.lat'] = { $gte: lat - deltaLat, $lte: lat + deltaLat };
-            driverFilter['workInfo.currentLocation.coordinates.lng'] = { $gte: lng - deltaLng, $lte: lng + deltaLng };
-        } else if (deliveryPincode) {
-            driverFilter['workInfo.currentPincode'] = deliveryPincode;
-        } else {
+        const areaQuery = getOrderAreaQuery(lat, lng, deliveryPincode);
+        if (!areaQuery.length) {
             console.log(`notifyNearbyDrivers: no lat/lng or pincode for order ${orderCustomId}, skipping FCM`);
             return;
         }
 
-        const drivers = await Driver.find(driverFilter).select('auth.fcmToken');
+        driverFilter.$or = areaQuery;
+        const drivers = (await Driver.find(driverFilter)
+            .select('auth.fcmToken workInfo.currentLocation.coordinates workInfo.currentPincode')
+            .lean())
+            .filter(driver => driverMatchesOrderArea(driver, lat, lng, deliveryPincode));
 
         if (!drivers.length) {
             console.log(`No online drivers found for order ${orderCustomId}`);
@@ -155,7 +217,7 @@ exports.notifyNearbyDrivers = async (lat, lng, orderId, orderCustomId, deliveryP
         );
 
         const sent = results.filter(r => r.status === 'fulfilled').length;
-        const mode = (lat != null && lng != null) ? '10km radius' : `pincode ${deliveryPincode}`;
+        const mode = 'pincode or exact 10km radius';
         console.log(`New order ${orderCustomId}: notified ${sent}/${drivers.length} drivers (${mode})`);
     } catch (error) {
         console.error('Error notifying nearby drivers:', error.message);

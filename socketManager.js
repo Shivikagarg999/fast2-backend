@@ -6,6 +6,71 @@
  */
 
 let io = null;
+const DRIVER_RING_RADIUS_KM = 10;
+
+const normalizePincode = (pincode) => {
+    if (pincode == null) return null;
+    const normalized = String(pincode).trim();
+    return normalized || null;
+};
+
+const toValidCoordinate = (value) => {
+    const number = Number(value);
+    return Number.isFinite(number) && number !== 0 ? number : null;
+};
+
+const getDistanceKm = (lat1, lng1, lat2, lng2) => {
+    const earthRadiusKm = 6371;
+    const toRadians = (degree) => degree * Math.PI / 180;
+    const dLat = toRadians(lat2 - lat1);
+    const dLng = toRadians(lng2 - lng1);
+    const a = Math.sin(dLat / 2) ** 2
+        + Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2))
+        * Math.sin(dLng / 2) ** 2;
+    return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+const driverMatchesOrderArea = (driver, orderLat, orderLng, deliveryPincode) => {
+    const normalizedDeliveryPincode = normalizePincode(deliveryPincode);
+    const driverPincode = normalizePincode(driver?.workInfo?.currentPincode);
+
+    if (normalizedDeliveryPincode && driverPincode === normalizedDeliveryPincode) {
+        return true;
+    }
+
+    const lat = toValidCoordinate(orderLat);
+    const lng = toValidCoordinate(orderLng);
+    const driverLat = toValidCoordinate(driver?.workInfo?.currentLocation?.coordinates?.lat);
+    const driverLng = toValidCoordinate(driver?.workInfo?.currentLocation?.coordinates?.lng);
+
+    if (lat == null || lng == null || driverLat == null || driverLng == null) {
+        return false;
+    }
+
+    return getDistanceKm(lat, lng, driverLat, driverLng) <= DRIVER_RING_RADIUS_KM;
+};
+
+const getOrderAreaQuery = (lat, lng, pincode) => {
+    const query = [];
+    const validLat = toValidCoordinate(lat);
+    const validLng = toValidCoordinate(lng);
+    const normalizedPincode = normalizePincode(pincode);
+
+    if (normalizedPincode) {
+        query.push({ 'workInfo.currentPincode': normalizedPincode });
+    }
+
+    if (validLat != null && validLng != null) {
+        const deltaLat = DRIVER_RING_RADIUS_KM / 111;
+        const deltaLng = DRIVER_RING_RADIUS_KM / (111 * Math.cos(validLat * Math.PI / 180));
+        query.push({
+            'workInfo.currentLocation.coordinates.lat': { $gte: validLat - deltaLat, $lte: validLat + deltaLat },
+            'workInfo.currentLocation.coordinates.lng': { $gte: validLng - deltaLng, $lte: validLng + deltaLng },
+        });
+    }
+
+    return query;
+};
 const driverSockets = new Map();        // driverId → socketId
 const orderNotifiedDrivers = new Map(); // orderId  → Set<driverId>  (who was rung)
 const orderDeclines = new Map();        // orderId  → Set<driverId>  (who declined)
@@ -81,7 +146,7 @@ exports.init = (httpServer) => {
         // Accepts either a plain driverId string or { driverId, pincode }
         socket.on('driver_online', async (data) => {
             const driverId = typeof data === 'string' ? data : data?.driverId;
-            const pincode  = typeof data === 'object' ? data?.pincode : null;
+            const pincode  = normalizePincode(typeof data === 'object' ? data?.pincode : null);
             if (!driverId) return;
 
             driverSockets.set(String(driverId), socket.id);
@@ -106,11 +171,13 @@ exports.init = (httpServer) => {
                 const d = await Driver.findById(driverId)
                     .select('workInfo.currentLocation.coordinates workInfo.currentPincode')
                     .lean();
-                if (!effectivePincode) effectivePincode = d?.workInfo?.currentPincode || null;
+                if (!effectivePincode) effectivePincode = normalizePincode(d?.workInfo?.currentPincode);
                 const coords = d?.workInfo?.currentLocation?.coordinates;
-                if (coords?.lat && coords?.lng && coords.lat !== 0 && coords.lng !== 0) {
-                    driverLat = coords.lat;
-                    driverLng = coords.lng;
+                const currentLat = toValidCoordinate(coords?.lat);
+                const currentLng = toValidCoordinate(coords?.lng);
+                if (currentLat != null && currentLng != null) {
+                    driverLat = currentLat;
+                    driverLng = currentLng;
                 }
             } catch (_) {}
 
@@ -125,20 +192,44 @@ exports.init = (httpServer) => {
                     createdAt: { $gte: since },
                 };
 
-                if (driverLat && driverLng) {
-                    const deltaLat = 10 / 111;
-                    const deltaLng = 10 / (111 * Math.cos(driverLat * Math.PI / 180));
-                    orderFilter['shippingAddress.lat'] = { $gte: driverLat - deltaLat, $lte: driverLat + deltaLat };
-                    orderFilter['shippingAddress.lng'] = { $gte: driverLng - deltaLng, $lte: driverLng + deltaLng };
-                } else if (effectivePincode) {
-                    orderFilter['shippingAddress.pinCode'] = effectivePincode;
+                const orderAreaQuery = [];
+
+                if (effectivePincode) {
+                    orderAreaQuery.push({ 'shippingAddress.pinCode': effectivePincode });
+                }
+
+                if (driverLat != null && driverLng != null) {
+                    const deltaLat = DRIVER_RING_RADIUS_KM / 111;
+                    const deltaLng = DRIVER_RING_RADIUS_KM / (111 * Math.cos(driverLat * Math.PI / 180));
+                    orderAreaQuery.push({
+                        'shippingAddress.lat': { $gte: driverLat - deltaLat, $lte: driverLat + deltaLat },
+                        'shippingAddress.lng': { $gte: driverLng - deltaLng, $lte: driverLng + deltaLng },
+                    });
+                }
+
+                if (orderAreaQuery.length) {
+                    orderFilter.$or = orderAreaQuery;
                 } else {
                     // No location and no pincode — skip to avoid ringing for all orders everywhere
                     serverLog(`Driver ${driverId} reconnected — no location/pincode, skipping missed orders`, 'warn');
                     return;
                 }
 
-                const pendingOrders = await Order.find(orderFilter).select('_id orderId').lean();
+                const pendingOrders = (await Order.find(orderFilter)
+                    .select('_id orderId shippingAddress.lat shippingAddress.lng shippingAddress.pinCode')
+                    .lean())
+                    .filter(order => {
+                        const orderPincode = normalizePincode(order.shippingAddress?.pinCode);
+                        if (effectivePincode && orderPincode === effectivePincode) return true;
+
+                        const orderLat = toValidCoordinate(order.shippingAddress?.lat);
+                        const orderLng = toValidCoordinate(order.shippingAddress?.lng);
+                        return orderLat != null
+                            && orderLng != null
+                            && driverLat != null
+                            && driverLng != null
+                            && getDistanceKm(driverLat, driverLng, orderLat, orderLng) <= DRIVER_RING_RADIUS_KM;
+                    });
 
                 if (pendingOrders.length) {
                     serverLog(`Driver ${driverId} reconnected — pushing ${pendingOrders.length} recent pending order(s)`, 'warn');
@@ -281,31 +372,26 @@ exports.emitNewOrder = async (orderId, orderCustomId, lat = null, lng = null, de
             'workInfo.availability': 'online',
         };
 
-        let matchMode;
-        if (lat != null && lng != null && lat !== 0 && lng !== 0) {
-            const deltaLat = 10 / 111;
-            const deltaLng = 10 / (111 * Math.cos(lat * Math.PI / 180));
-            driverFilter['workInfo.currentLocation.coordinates.lat'] = { $gte: lat - deltaLat, $lte: lat + deltaLat };
-            driverFilter['workInfo.currentLocation.coordinates.lng'] = { $gte: lng - deltaLng, $lte: lng + deltaLng };
-            matchMode = '10km radius';
-        } else if (deliveryPincode) {
-            driverFilter['workInfo.currentPincode'] = deliveryPincode;
-            matchMode = `pincode ${deliveryPincode}`;
-        } else {
+        const areaQuery = getOrderAreaQuery(lat, lng, deliveryPincode);
+        if (!areaQuery.length) {
             serverLog(`New order ${orderCustomId} — no lat/lng or pincode, skipping driver ring`, 'warn');
             io.to('_testers').emit('new_order', payload);
             return;
         }
 
-        const onlineDriverIds = await Driver.find(driverFilter).select('_id').lean();
+        driverFilter.$or = areaQuery;
+        const onlineDriverIds = (await Driver.find(driverFilter)
+            .select('_id workInfo.currentLocation.coordinates workInfo.currentPincode')
+            .lean())
+            .filter(driver => driverMatchesOrderArea(driver, lat, lng, deliveryPincode));
 
         if (!onlineDriverIds.length) {
-            serverLog(`New order ${orderCustomId} — no matching drivers (${matchMode})`, 'warn');
+            serverLog(`New order ${orderCustomId} — no matching drivers (pincode or exact 10km radius)`, 'warn');
             io.to('_testers').emit('new_order', payload);
             return;
         }
 
-        serverLog(`New order ${orderCustomId} — ${onlineDriverIds.length} driver(s) matched (${matchMode})`, 'event');
+        serverLog(`New order ${orderCustomId} — ${onlineDriverIds.length} driver(s) matched (pincode or exact 10km radius)`, 'event');
 
         let socketSent = 0, noSocket = 0;
         for (const { _id } of onlineDriverIds) {
