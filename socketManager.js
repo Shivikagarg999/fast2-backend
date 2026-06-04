@@ -98,13 +98,21 @@ exports.init = (httpServer) => {
                 } catch (err) {
                     serverLog(`Error saving pincode for driver ${driverId}: ${err.message}`, 'error');
                 }
-            } else {
-                // Fall back to whatever pincode is already in DB
-                try {
-                    const d = await Driver.findById(driverId).select('workInfo.currentPincode').lean();
-                    effectivePincode = d?.workInfo?.currentPincode || null;
-                } catch (_) {}
             }
+
+            // Always fetch driver's full location + pincode from DB
+            let driverLat = null, driverLng = null;
+            try {
+                const d = await Driver.findById(driverId)
+                    .select('workInfo.currentLocation.coordinates workInfo.currentPincode')
+                    .lean();
+                if (!effectivePincode) effectivePincode = d?.workInfo?.currentPincode || null;
+                const coords = d?.workInfo?.currentLocation?.coordinates;
+                if (coords?.lat && coords?.lng && coords.lat !== 0 && coords.lng !== 0) {
+                    driverLat = coords.lat;
+                    driverLng = coords.lng;
+                }
+            } catch (_) {}
 
             // Send only recent unassigned pending orders (last 30 minutes) the driver may have missed
             try {
@@ -116,8 +124,18 @@ exports.init = (httpServer) => {
                     driver: null,
                     createdAt: { $gte: since },
                 };
-                if (effectivePincode) {
+
+                if (driverLat && driverLng) {
+                    const deltaLat = 10 / 111;
+                    const deltaLng = 10 / (111 * Math.cos(driverLat * Math.PI / 180));
+                    orderFilter['shippingAddress.lat'] = { $gte: driverLat - deltaLat, $lte: driverLat + deltaLat };
+                    orderFilter['shippingAddress.lng'] = { $gte: driverLng - deltaLng, $lte: driverLng + deltaLng };
+                } else if (effectivePincode) {
                     orderFilter['shippingAddress.pinCode'] = effectivePincode;
+                } else {
+                    // No location and no pincode — skip to avoid ringing for all orders everywhere
+                    serverLog(`Driver ${driverId} reconnected — no location/pincode, skipping missed orders`, 'warn');
+                    return;
                 }
 
                 const pendingOrders = await Order.find(orderFilter).select('_id orderId').lean();
@@ -263,7 +281,7 @@ exports.emitNewOrder = async (orderId, orderCustomId, lat = null, lng = null, de
             'workInfo.availability': 'online',
         };
 
-        let matchMode = 'any';
+        let matchMode;
         if (lat != null && lng != null && lat !== 0 && lng !== 0) {
             const deltaLat = 10 / 111;
             const deltaLng = 10 / (111 * Math.cos(lat * Math.PI / 180));
@@ -273,6 +291,10 @@ exports.emitNewOrder = async (orderId, orderCustomId, lat = null, lng = null, de
         } else if (deliveryPincode) {
             driverFilter['workInfo.currentPincode'] = deliveryPincode;
             matchMode = `pincode ${deliveryPincode}`;
+        } else {
+            serverLog(`New order ${orderCustomId} — no lat/lng or pincode, skipping driver ring`, 'warn');
+            io.to('_testers').emit('new_order', payload);
+            return;
         }
 
         const onlineDriverIds = await Driver.find(driverFilter).select('_id').lean();

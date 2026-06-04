@@ -129,6 +129,9 @@ exports.notifyNearbyDrivers = async (lat, lng, orderId, orderCustomId, deliveryP
             driverFilter['workInfo.currentLocation.coordinates.lng'] = { $gte: lng - deltaLng, $lte: lng + deltaLng };
         } else if (deliveryPincode) {
             driverFilter['workInfo.currentPincode'] = deliveryPincode;
+        } else {
+            console.log(`notifyNearbyDrivers: no lat/lng or pincode for order ${orderCustomId}, skipping FCM`);
+            return;
         }
 
         const drivers = await Driver.find(driverFilter).select('auth.fcmToken');
