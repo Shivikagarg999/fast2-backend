@@ -31,23 +31,19 @@ const getDistanceKm = (lat1, lng1, lat2, lng2) => {
 };
 
 const driverMatchesOrderArea = (driver, orderLat, orderLng, deliveryPincode) => {
-    const normalizedDeliveryPincode = normalizePincode(deliveryPincode);
-    const driverPincode = normalizePincode(driver?.workInfo?.currentPincode);
-
-    if (normalizedDeliveryPincode && driverPincode === normalizedDeliveryPincode) {
-        return true;
-    }
-
     const lat = toValidCoordinate(orderLat);
     const lng = toValidCoordinate(orderLng);
-    const driverLat = toValidCoordinate(driver?.workInfo?.currentLocation?.coordinates?.lat);
-    const driverLng = toValidCoordinate(driver?.workInfo?.currentLocation?.coordinates?.lng);
 
-    if (lat == null || lng == null || driverLat == null || driverLng == null) {
-        return false;
+    if (lat != null && lng != null) {
+        const driverLat = toValidCoordinate(driver?.workInfo?.currentLocation?.coordinates?.lat);
+        const driverLng = toValidCoordinate(driver?.workInfo?.currentLocation?.coordinates?.lng);
+        if (driverLat == null || driverLng == null) return false;
+        return getDistanceKm(lat, lng, driverLat, driverLng) <= DRIVER_RING_RADIUS_KM;
     }
 
-    return getDistanceKm(lat, lng, driverLat, driverLng) <= DRIVER_RING_RADIUS_KM;
+    const normalizedDeliveryPincode = normalizePincode(deliveryPincode);
+    const driverPincode = normalizePincode(driver?.workInfo?.currentPincode);
+    return !!normalizedDeliveryPincode && driverPincode === normalizedDeliveryPincode;
 };
 
 const getOrderAreaQuery = (lat, lng, pincode) => {
@@ -56,10 +52,6 @@ const getOrderAreaQuery = (lat, lng, pincode) => {
     const validLng = toValidCoordinate(lng);
     const normalizedPincode = normalizePincode(pincode);
 
-    if (normalizedPincode) {
-        query.push({ 'workInfo.currentPincode': normalizedPincode });
-    }
-
     if (validLat != null && validLng != null) {
         const deltaLat = DRIVER_RING_RADIUS_KM / 111;
         const deltaLng = DRIVER_RING_RADIUS_KM / (111 * Math.cos(validLat * Math.PI / 180));
@@ -67,6 +59,8 @@ const getOrderAreaQuery = (lat, lng, pincode) => {
             'workInfo.currentLocation.coordinates.lat': { $gte: validLat - deltaLat, $lte: validLat + deltaLat },
             'workInfo.currentLocation.coordinates.lng': { $gte: validLng - deltaLng, $lte: validLng + deltaLng },
         });
+    } else if (normalizedPincode) {
+        query.push({ 'workInfo.currentPincode': normalizedPincode });
     }
 
     return query;
