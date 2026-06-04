@@ -16,10 +16,28 @@ const findOrderByIdOrCustomId = (orderId) => {
 
 exports.getPendingOrders = async (req, res) => {
   try {
-    const pendingOrders = await Order.find({
+    const driver = await Driver.findById(req.driver.driverId)
+      .select('workInfo.currentLocation.coordinates workInfo.currentPincode')
+      .lean();
+
+    const orderFilter = {
       status: { $in: ["pending", "confirmed"] },
-      driver: null
-    })
+      driver: null,
+    };
+
+    const driverLat = driver?.workInfo?.currentLocation?.coordinates?.lat;
+    const driverLng = driver?.workInfo?.currentLocation?.coordinates?.lng;
+
+    if (driverLat && driverLng && driverLat !== 0 && driverLng !== 0) {
+      const deltaLat = 10 / 111;
+      const deltaLng = 10 / (111 * Math.cos(driverLat * Math.PI / 180));
+      orderFilter['shippingAddress.lat'] = { $gte: driverLat - deltaLat, $lte: driverLat + deltaLat };
+      orderFilter['shippingAddress.lng'] = { $gte: driverLng - deltaLng, $lte: driverLng + deltaLng };
+    } else if (driver?.workInfo?.currentPincode) {
+      orderFilter['shippingAddress.pinCode'] = driver.workInfo.currentPincode;
+    }
+
+    const pendingOrders = await Order.find(orderFilter)
       .populate("user", "name email phone")
       .populate({
         path: "seller",
