@@ -16,10 +16,44 @@ const findOrderByIdOrCustomId = (orderId) => {
 
 exports.getPendingOrders = async (req, res) => {
   try {
-    const pendingOrders = await Order.find({
-      status: { $in: ["pending", "confirmed"] },
-      driver: null
-    })
+    const driver = await Driver.findById(req.driver.driverId)
+      .select('workInfo.currentLocation.coordinates workInfo.currentPincode')
+      .lean();
+
+    const driverLat = driver?.workInfo?.currentLocation?.coordinates?.lat;
+    const driverLng = driver?.workInfo?.currentLocation?.coordinates?.lng;
+    const driverPincode = driver?.workInfo?.currentPincode;
+
+    const hasValidLocation = driverLat && driverLng && driverLat !== 0 && driverLng !== 0;
+
+    const baseFilter = { status: { $in: ["pending", "confirmed"] }, driver: null };
+
+    if (hasValidLocation) {
+      const deltaLat = 10 / 111;
+      const deltaLng = 10 / (111 * Math.cos(driverLat * Math.PI / 180));
+      const orConditions = [
+        // orders with valid lat/lng within 10 km
+        {
+          'shippingAddress.lat': { $gt: 0, $gte: driverLat - deltaLat, $lte: driverLat + deltaLat },
+          'shippingAddress.lng': { $gt: 0, $gte: driverLng - deltaLng, $lte: driverLng + deltaLng },
+        },
+      ];
+      // orders without lat/lng but same pincode
+      if (driverPincode) {
+        orConditions.push({
+          $or: [
+            { 'shippingAddress.lat': { $in: [null, 0] } },
+            { 'shippingAddress.lat': { $exists: false } },
+          ],
+          'shippingAddress.pinCode': driverPincode,
+        });
+      }
+      baseFilter.$or = orConditions;
+    } else if (driverPincode) {
+      baseFilter['shippingAddress.pinCode'] = driverPincode;
+    }
+
+    const pendingOrders = await Order.find(baseFilter)
       .populate("user", "name email phone")
       .populate({
         path: "seller",
