@@ -1917,8 +1917,9 @@ exports.generatePDFInvoice = async (invoiceData) => {
 
       // ── HEADER ───────────────────────────────────────────────
       center('TAX INVOICE', y, { bold: true, size: 8 }); y += 12;
+      center('Indra Nagar near Sain Devin school,', y, { size: 6 }); y += 8;
+      center('Thatipur, Gwalior, MP 474011', y, { size: 6 }); y += 9;
       center('GSTIN: 23LQZPK8550M1ZO', y, { size: 6 }); y += 9;
-      center('Gwalior, Madhya Pradesh', y, { size: 6 }); y += 9;
       center('PAN: LQZPK8550M', y, { size: 6 }); y += 10;
       dashedLine(y); y += 10;
 
