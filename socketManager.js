@@ -114,7 +114,6 @@ exports.init = (httpServer) => {
             });
         });
 
-        // Return list of DB approved+online drivers with socket status
         socket.on('get_online_drivers', async () => {
             try {
                 const Driver = require('./models/driver');
@@ -133,11 +132,9 @@ exports.init = (httpServer) => {
                 socket.emit('online_drivers_list', list);
             } catch (err) {
                 socket.emit('online_drivers_list', []);
-            }
+            } 
         });
 
-        // Driver registers itself after connecting (or reconnecting after phone was off)
-        // Accepts either a plain driverId string or { driverId, pincode }
         socket.on('driver_online', async (data) => {
             const driverId = typeof data === 'string' ? data : data?.driverId;
             const pincode  = normalizePincode(typeof data === 'object' ? data?.pincode : null);

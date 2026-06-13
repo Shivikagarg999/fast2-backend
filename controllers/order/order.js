@@ -1917,7 +1917,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
 
       // ── HEADER ───────────────────────────────────────────────
       center('TAX INVOICE', y, { bold: true, size: 8 }); y += 12;
-      center('GSTIN: ', y, { size: 6 }); y += 9;
+      center('GSTIN: CX029528377IN', y, { size: 6 }); y += 9;
       center('Gwalior, Madhya Pradesh', y, { size: 6 }); y += 9;
       center('PAN: ', y, { size: 6 }); y += 10;
       dashedLine(y); y += 10;
