@@ -49,6 +49,7 @@ const prepareDriverData = (driver) => {
     },
     address: driver.address,
     vehicle: driver.vehicle,
+    documents: driver.documents,
     deliveryStats: driver.deliveryStats,
     earnings: driver.earnings
   };
@@ -62,10 +63,19 @@ const registerDriver = async (req, res) => {
     const { name, email, phone, password } = req.body;
 
     // Check if files are present
-    if (!req.files || !req.files['aadharFront'] || !req.files['aadharBack'] || !req.files['panCard']) {
+    if (
+      !req.files ||
+      !req.files['aadharFront'] ||
+      !req.files['aadharBack'] ||
+      !req.files['panCard'] ||
+      !req.files['drivingLicense'] ||
+      !req.files['rcDocument'] ||
+      !req.files['insurance'] ||
+      !req.files['bankProof']
+    ) {
       return res.status(400).json({
         success: false,
-        message: 'Aadhar front, back and PAN card images are required'
+        message: 'Aadhar front, back, PAN card, driving licence, vehicle RC, insurance and bank passbook/cheque images are required'
       });
     }
 
@@ -112,6 +122,32 @@ const registerDriver = async (req, res) => {
       `drivers/pan/${phone}_pan.jpg`
     );
 
+    // Upload driving licence, vehicle RC, insurance and bank proof
+    const drivingLicenseFile = req.files['drivingLicense'][0];
+    const rcDocumentFile = req.files['rcDocument'][0];
+    const insuranceFile = req.files['insurance'][0];
+    const bankProofFile = req.files['bankProof'][0];
+
+    const drivingLicenseUrl = await uploadBufferToImageKit(
+      drivingLicenseFile.buffer,
+      `drivers/license/${phone}_dl.jpg`
+    );
+
+    const rcDocumentUrl = await uploadBufferToImageKit(
+      rcDocumentFile.buffer,
+      `drivers/vehicle/${phone}_rc.jpg`
+    );
+
+    const insuranceUrl = await uploadBufferToImageKit(
+      insuranceFile.buffer,
+      `drivers/vehicle/${phone}_insurance.jpg`
+    );
+
+    const bankProofUrl = await uploadBufferToImageKit(
+      bankProofFile.buffer,
+      `drivers/bank/${phone}_proof.jpg`
+    );
+
     // Create driver
     const driver = new Driver({
       personalInfo: {
@@ -120,6 +156,10 @@ const registerDriver = async (req, res) => {
         phone: phone.trim()
       },
       auth: { password },
+      vehicle: {
+        rcDocument: rcDocumentUrl,
+        insuranceDocument: insuranceUrl
+      },
       documents: {
         aadharCard: {
           frontImage: aadharFrontUrl,
@@ -127,7 +167,13 @@ const registerDriver = async (req, res) => {
         },
         panCard: {
           image: panCardUrl
+        },
+        drivingLicense: {
+          frontImage: drivingLicenseUrl
         }
+      },
+      bankDetails: {
+        passbookOrChequeImage: bankProofUrl
       }
     });
 

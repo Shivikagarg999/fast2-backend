@@ -79,6 +79,9 @@ const driverSchema = new mongoose.Schema({
     },
     rcDocument: {
       type: String,
+    },
+    insuranceDocument: {
+      type: String,
     }
   },
   documents: {
@@ -113,6 +116,10 @@ const driverSchema = new mongoose.Schema({
     },
     upiId: {
       type: String
+    },
+    passbookOrChequeImage: {
+      type: String,
+      default: null
     }
   },
   workInfo: {

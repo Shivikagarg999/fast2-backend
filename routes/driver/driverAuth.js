@@ -13,11 +13,15 @@ const { authenticateToken } = require('../../middlewares/driverAuth');
 const upload = require('../../middlewares/upload');
 
 // Public routes
-router.post('/register', 
+router.post('/register',
   upload.fields([
     { name: 'aadharFront', maxCount: 1 },
     { name: 'aadharBack', maxCount: 1 },
-    { name: 'panCard', maxCount: 1 } 
+    { name: 'panCard', maxCount: 1 },
+    { name: 'drivingLicense', maxCount: 1 },
+    { name: 'rcDocument', maxCount: 1 },
+    { name: 'insurance', maxCount: 1 },
+    { name: 'bankProof', maxCount: 1 }
   ]),
   registerDriver
 );
