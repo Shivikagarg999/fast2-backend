@@ -2118,6 +2118,19 @@ exports.generatePDFInvoice = async (invoiceData) => {
       center('No signature required.', y, { size: 6 }); y += 9;
       center('Thank you for shopping with Fast 2!', y, { size: 6 }); y += 12;
 
+      // ── PAYMENT QR ───────────────────────────────────────────
+      try {
+        const qrPath = path.join(__dirname, '../../images/qr.png');
+        if (fs.existsSync(qrPath)) {
+          dashedLine(y); y += 10;
+          center('Scan to Pay', y, { bold: true, size: 7 }); y += 10;
+          const qrWidth = Math.min(90, CONTENT_WIDTH);
+          const qrX = MARGIN + (CONTENT_WIDTH - qrWidth) / 2;
+          doc.image(qrPath, qrX, y, { width: qrWidth });
+          y += qrWidth + 10;
+        }
+      } catch (e) { /* ignore */ }
+
       doc.end();
     } catch (error) {
       reject(error);
