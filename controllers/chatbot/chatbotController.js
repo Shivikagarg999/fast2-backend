@@ -1,5 +1,6 @@
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 const GROQ_MODEL = 'llama-3.3-70b-versatile';
+const MAX_HISTORY = 20;
 
 const SYSTEM_PROMPT = `You are the Fast2 customer support assistant. Fast2 is a quick grocery and daily essentials delivery platform.
 
@@ -52,14 +53,22 @@ exports.sendMessage = async (req, res) => {
     const { messages } = req.body;
 
     if (!Array.isArray(messages) || messages.length === 0) {
-      return res.status(400).json({ success: false, message: 'messages array is required' });
+      return res.status(400).json({ success: false, message: 'messages must be a non-empty array' });
     }
 
-    const conversation = messages
-      .filter((m) => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
-      .slice(-10);
+    if (!process.env.GROQ_API_KEY) {
+      return res.status(503).json({ success: false, message: 'Chat assistant is not configured on this server.' });
+    }
 
-    if (conversation.length === 0) {
+    const trimmedHistory = messages
+      .slice(-MAX_HISTORY)
+      .filter((m) => m && typeof m.content === 'string')
+      .map((m) => ({
+        role: m.role === 'assistant' ? 'assistant' : 'user',
+        content: m.content.slice(0, 4000),
+      }));
+
+    if (trimmedHistory.length === 0) {
       return res.status(400).json({ success: false, message: 'No valid messages provided' });
     }
 
@@ -71,9 +80,9 @@ exports.sendMessage = async (req, res) => {
       },
       body: JSON.stringify({
         model: GROQ_MODEL,
-        messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...conversation],
+        messages: [{ role: 'system', content: SYSTEM_PROMPT }, ...trimmedHistory],
         temperature: 0.4,
-        max_tokens: 300
+        max_tokens: 600
       })
     });
 
