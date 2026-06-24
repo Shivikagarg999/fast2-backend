@@ -1551,30 +1551,78 @@ const getProductsByCategory = async (req, res) => {
   }
 };
 
+const deleteProductAndCleanup = async (productId) => {
+  const product = await Product.findByIdAndDelete(productId);
+  if (!product) return null;
+
+  // Remove product from seller's products array
+  await Seller.findByIdAndUpdate(
+    product.seller,
+    { $pull: { products: product._id } },
+    { new: true }
+  );
+
+  // Remove product from seller's shop
+  const Shop = require('../../models/shop');
+  const shop = await Shop.findOne({ seller: product.seller });
+  if (shop) {
+    shop.products = shop.products.filter(p => p.toString() !== product._id.toString());
+    shop.analytics.totalProductsListed = shop.products.length;
+    await shop.save();
+  }
+
+  return product;
+};
+
 const deleteProduct = async (req, res) => {
   try {
-    const product = await Product.findByIdAndDelete(req.params.id);
+    const product = await deleteProductAndCleanup(req.params.id);
     if (!product) return res.status(404).json({ message: 'Product not found' });
-
-    // Remove product from seller's products array
-    await Seller.findByIdAndUpdate(
-      product.seller,
-      { $pull: { products: product._id } },
-      { new: true }
-    );
-
-    // Remove product from seller's shop
-    const Shop = require('../../models/shop');
-    const shop = await Shop.findOne({ seller: product.seller });
-    if (shop) {
-      shop.products = shop.products.filter(p => p.toString() !== product._id.toString());
-      shop.analytics.totalProductsListed = shop.products.length;
-      await shop.save();
-    }
 
     res.json({ message: 'Product deleted successfully' });
   } catch (error) {
     res.status(500).json({ message: error.message });
+  }
+};
+
+// Bulk delete by explicit ID list (e.g. "delete all inactive" from the admin
+// table, scoped to whatever search/category/status filters are active there).
+const bulkDeleteProducts = async (req, res) => {
+  try {
+    const { productIds } = req.body;
+    if (!Array.isArray(productIds) || productIds.length === 0) {
+      return res.status(400).json({ success: false, message: 'productIds array is required' });
+    }
+
+    let deletedCount = 0;
+    const errors = [];
+
+    for (const productId of productIds) {
+      try {
+        const product = await deleteProductAndCleanup(productId);
+        if (!product) {
+          errors.push(`Product ${productId} not found`);
+          continue;
+        }
+        deletedCount++;
+      } catch (error) {
+        errors.push(`Product ${productId}: ${error.message}`);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Deleted ${deletedCount} of ${productIds.length} products`,
+      deletedCount,
+      errors: errors.length > 0 ? errors : null
+    });
+  } catch (error) {
+    console.error('Bulk delete products error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error during bulk delete',
+      error: error.message
+    });
   }
 };
 
@@ -2420,6 +2468,7 @@ module.exports = {
   getProductById,
   updateProduct,
   deleteProduct,
+  bulkDeleteProducts,
   getProductsByCategory,
   getProductOrders,
   getProductSalesAnalytics,

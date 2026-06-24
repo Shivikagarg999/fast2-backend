@@ -8,6 +8,7 @@ const {
   assignDriver,
   updatePaymentStatus,
   cancelOrder,
+  bulkDeleteOrders,
   getOrderStats,
   getFreshOrders,
   getFreshOrdersNotifications,
@@ -67,6 +68,8 @@ router.put("/:id/assign-driver", assignDriver);
 router.put("/:id/payment-status", updatePaymentStatus);
 
 router.delete("/:id", cancelOrder);
+
+router.post("/bulk-delete", bulkDeleteOrders);
 
 router.get("/admin/fresh-orders", getFreshOrders);
 

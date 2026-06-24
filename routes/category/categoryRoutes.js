@@ -6,6 +6,7 @@ const {
   getCategoryById,
   updateCategory,
   deleteCategory,
+  bulkDeleteCategories,
   downloadCategoriesCSV,
   downloadCategoryUploadTemplate,
   uploadCategoriesCSV
@@ -34,5 +35,6 @@ router.post('/upload/csv', csvUpload.single('csvFile'), uploadCategoriesCSV);
 router.get('/:id', getCategoryById);
 router.put('/update/:id', upload.single('image'), updateCategory);
 router.delete('/delete/:id', deleteCategory);
+router.post('/bulk-delete', bulkDeleteCategories);
 
 module.exports = router;

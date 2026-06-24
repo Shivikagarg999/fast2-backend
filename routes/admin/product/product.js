@@ -8,7 +8,8 @@ const {
   getOutOfStockProducts,
   downloadProductsByStatusCSV,
   downloadProductUploadTemplate,
-  uploadProductsCSV
+  uploadProductsCSV,
+  bulkDeleteProducts
 } = require('../../../controllers/product/productController');
 const scratchGiftController = require('../../../controllers/admin/product/scratchGiftController');
 // Configure multer for CSV upload
@@ -34,6 +35,7 @@ router.get('/out-of-stock', getOutOfStockProducts);
 router.get('/download/csv', downloadProductsByStatusCSV);
 router.get('/download/template', downloadProductUploadTemplate);
 router.post('/upload/csv', upload.single('csvFile'), uploadProductsCSV);
+router.post('/bulk-delete', bulkDeleteProducts);
 
 // Scratch gift routes
 router.get('/:productId/scratch-gift', scratchGiftController.getScratchGift);

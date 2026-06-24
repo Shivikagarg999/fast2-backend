@@ -147,6 +147,46 @@ exports.deleteCategory = async (req, res) => {
   }
 };
 
+// Bulk delete by explicit ID list (e.g. multi-select "Delete Selected" in the admin table).
+exports.bulkDeleteCategories = async (req, res) => {
+  try {
+    const { categoryIds } = req.body;
+    if (!Array.isArray(categoryIds) || categoryIds.length === 0) {
+      return res.status(400).json({ success: false, message: 'categoryIds array is required' });
+    }
+
+    let deletedCount = 0;
+    const errors = [];
+
+    for (const categoryId of categoryIds) {
+      try {
+        const category = await Category.findByIdAndDelete(categoryId);
+        if (!category) {
+          errors.push(`Category ${categoryId} not found`);
+          continue;
+        }
+        deletedCount++;
+      } catch (error) {
+        errors.push(`Category ${categoryId}: ${error.message}`);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Deleted ${deletedCount} of ${categoryIds.length} categories`,
+      deletedCount,
+      errors: errors.length > 0 ? errors : null
+    });
+  } catch (error) {
+    console.error('Bulk delete categories error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error during bulk delete',
+      error: error.message
+    });
+  }
+};
+
 const CATEGORY_CSV_HEADERS = [
   'Category ID',
   'Category Name',

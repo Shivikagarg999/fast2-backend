@@ -521,6 +521,63 @@ const cancelOrder = async (req, res) => {
   }
 };
 
+// Permanently deletes order documents (not the same as cancelOrder above,
+// which only sets status to "cancelled"). Also cleans up the SellerPayout/
+// PromotorPayout records created for each order and clears the order off
+// any driver it's still assigned to, so nothing is left pointing at a
+// deleted order. This is destructive and removes financial/audit history -
+// only use for genuinely unwanted records (e.g. test orders), not as a
+// substitute for cancellation.
+const bulkDeleteOrders = async (req, res) => {
+  try {
+    const { orderIds } = req.body;
+    if (!Array.isArray(orderIds) || orderIds.length === 0) {
+      return res.status(400).json({ success: false, message: "orderIds array is required" });
+    }
+
+    const SellerPayout = mongoose.model("SellerPayout");
+    const PromotorPayout = mongoose.model("PromotorPayout");
+
+    let deletedCount = 0;
+    const errors = [];
+
+    for (const orderId of orderIds) {
+      try {
+        const order = await Order.findByIdAndDelete(orderId);
+        if (!order) {
+          errors.push(`Order ${orderId} not found`);
+          continue;
+        }
+
+        await SellerPayout.deleteMany({ order: order._id });
+        await PromotorPayout.deleteMany({ order: order._id });
+        await Driver.updateMany(
+          { "workInfo.currentOrder": order._id },
+          { $set: { "workInfo.currentOrder": null } }
+        );
+
+        deletedCount++;
+      } catch (error) {
+        errors.push(`Order ${orderId}: ${error.message}`);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Deleted ${deletedCount} of ${orderIds.length} orders`,
+      deletedCount,
+      errors: errors.length > 0 ? errors : null
+    });
+  } catch (error) {
+    console.error("Bulk delete orders error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Server error during bulk delete",
+      error: error.message
+    });
+  }
+};
+
 const getOrderStats = async (req, res) => {
   try {
     const { period = "month" } = req.query; // day, week, month, year
@@ -858,6 +915,7 @@ module.exports = {
   assignDriver,
   updatePaymentStatus,
   cancelOrder,
+  bulkDeleteOrders,
   getOrderStats,
   getFreshOrders,
   getFreshOrdersNotifications,
