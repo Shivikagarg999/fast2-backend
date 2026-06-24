@@ -1534,10 +1534,10 @@ const getProductsByCategory = async (req, res) => {
     const { categoryId } = req.params;
 
     const category = await Category.findById(categoryId);
-    if (!category) {
+    if (!category || !category.isActive) {
       return res.status(404).json({ message: 'Category not found' });
     }
-    const products = await Product.find({ category: categoryId })
+    const products = await Product.find({ category: categoryId, isActive: true })
       .populate('category')
       .populate('promotor.id');
 

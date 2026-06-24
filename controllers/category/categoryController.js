@@ -63,11 +63,14 @@ exports.getCategories = async (req, res) => {
   }
 };
 
-// Get category by ID
+// Get category by ID. Only the customer-facing storefront calls this (by
+// categoryId, to show that category's name/header) - fast2-admin always
+// works off the already-fetched list, so it's safe to hide inactive
+// categories here too instead of letting them be reachable by direct link.
 exports.getCategoryById = async (req, res) => {
   try {
     const category = await Category.findById(req.params.id);
-    if (!category) return res.status(404).json({ message: 'Category not found' });
+    if (!category || !category.isActive) return res.status(404).json({ message: 'Category not found' });
     res.json(category);
   } catch (error) {
     res.status(500).json({ message: error.message });
