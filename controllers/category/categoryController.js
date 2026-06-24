@@ -110,6 +110,15 @@ exports.updateCategory = async (req, res) => {
       updateData.image = uploadedImage.url;
     }
 
+    // A category can't be Active without an image - force it inactive instead
+    // of silently allowing an image-less category to show on the storefront.
+    if (!updateData.image) {
+      const existingCategory = await Category.findById(req.params.id);
+      if (!existingCategory?.image) {
+        updateData.isActive = false;
+      }
+    }
+
     const category = await Category.findByIdAndUpdate(
       req.params.id,
       updateData,
@@ -289,6 +298,12 @@ exports.uploadCategoriesCSV = async (req, res) => {
           isActive: values[getHeaderIndex('Active Status')]?.toLowerCase() !== 'inactive',
           sortOrder: parseInt(values[getHeaderIndex('Sort Order')]) || 0
         };
+
+        // A category can't be Active without an image - force it inactive
+        // instead of silently allowing an image-less row to go live.
+        if (!categoryFields.image) {
+          categoryFields.isActive = false;
+        }
 
         const categoryId = idIndex >= 0 ? values[idIndex] : '';
 

@@ -295,8 +295,9 @@ const createProduct = async (req, res) => {
       },
       serviceablePincodes: parsedServiceablePincodes,
       variants: parsedVariants,
-      isActive: productData.isActive !== undefined ?
-        (productData.isActive === 'true' || productData.isActive === true) : true,
+      // A product can't be Active without at least one image.
+      isActive: uploadedImages.length > 0 && (productData.isActive !== undefined ?
+        (productData.isActive === 'true' || productData.isActive === true) : true),
       createdBy: 'admin',
       createdAt: new Date(),
       updatedAt: new Date()
@@ -689,8 +690,9 @@ const updateProduct = async (req, res) => {
       'delivery.availablePincodes': parsedAvailablePincodes,
       serviceablePincodes: parsedServiceablePincodes,
       variants: parsedVariants,
-      isActive: req.body.isActive !== undefined ?
-        (req.body.isActive === 'true' || req.body.isActive === true) : existingProduct.isActive,
+      // A product can't be Active without at least one image.
+      isActive: images.length > 0 && (req.body.isActive !== undefined ?
+        (req.body.isActive === 'true' || req.body.isActive === true) : existingProduct.isActive),
       updatedAt: new Date()
     };
 
@@ -1763,11 +1765,19 @@ const toggleProductActiveStatus = async (req, res) => {
       });
     }
 
+    const activating = !product.isActive;
+    if (activating && (!product.images || product.images.length === 0)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Add at least one image before activating this product'
+      });
+    }
+
     const updatedProduct = await Product.findByIdAndUpdate(
       id,
       {
-        isActive: !product.isActive,
-        ...(!product.isActive && product.quantity > 0 ? { stockStatus: 'in-stock' } : {})
+        isActive: activating,
+        ...(activating && product.quantity > 0 ? { stockStatus: 'in-stock' } : {})
       },
       { new: true, runValidators: true }
     ).populate('category').populate('promotor.id').populate('warehouse.id');
@@ -2195,7 +2205,8 @@ const uploadProductsCSV = async (req, res) => {
           unitValue: parseFloat(values[getHeaderIndex('Unit Value')]) || 1,
           quantity: parseInt(values[getHeaderIndex('Quantity')]) || 0,
           stockStatus: values[getHeaderIndex('Stock Status')] || 'out-of-stock',
-          isActive: values[getHeaderIndex('Active Status')]?.toLowerCase() === 'active',
+          // A product can't be Active without at least one image.
+          isActive: images.length > 0 && values[getHeaderIndex('Active Status')]?.toLowerCase() === 'active',
           lowStockThreshold: parseInt(values[getHeaderIndex('Low Stock Threshold')]) || 10,
           minOrderQuantity: parseInt(values[getHeaderIndex('Min Order Quantity')]) || 1,
           maxOrderQuantity: parseInt(values[getHeaderIndex('Max Order Quantity')]) || 10,
