@@ -124,27 +124,65 @@ exports.deleteCategory = async (req, res) => {
   }
 };
 
+const CATEGORY_CSV_HEADERS = [
+  'Category ID',
+  'Category Name',
+  'HSN Code',
+  'GST Percent',
+  'Tax Type',
+  'Default UOM',
+  'Sort Order',
+  'Active Status',
+  'Image URL'
+];
+
+const csvField = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+
+// Download every category as CSV (including the Category ID column) so it
+// can be edited in bulk (e.g. raise GST% across the board) and re-uploaded
+// via uploadCategoriesCSV - rows with a Category ID update that category
+// instead of creating a new one.
+exports.downloadCategoriesCSV = async (req, res) => {
+  try {
+    const categories = await Category.find().sort({ sortOrder: 1, name: 1 });
+
+    const rows = categories.map((c) => [
+      c._id.toString(),
+      c.name,
+      c.hsnCode || '',
+      c.gstPercent ?? 0,
+      c.taxType || 'inclusive',
+      c.defaultUOM || 'piece',
+      c.sortOrder ?? 0,
+      c.isActive ? 'Active' : 'Inactive',
+      c.image || ''
+    ]);
+
+    const csvContent = [CATEGORY_CSV_HEADERS, ...rows]
+      .map(row => row.map(csvField).join(','))
+      .join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="categories_${new Date().toISOString().split('T')[0]}.csv"`);
+    res.send(csvContent);
+  } catch (error) {
+    console.error('Download categories CSV error:', error);
+    res.status(500).json({ message: 'Server error generating CSV', error: error.message });
+  }
+};
+
 // Download a sample CSV template for bulk category upload
 exports.downloadCategoryUploadTemplate = async (req, res) => {
   try {
-    const templateHeaders = [
-      'Category Name',
-      'HSN Code',
-      'GST Percent',
-      'Tax Type',
-      'Default UOM',
-      'Sort Order',
-      'Active Status',
-      'Image URL'
-    ];
-
     const templateRows = [
-      ['"Atta, Rice & Dal"', '"1101"', '"5"', '"inclusive"', '"kg"', '"0"', '"Active"', '""'],
-      ['"Fruits & Vegetables"', '"0709"', '"0"', '"inclusive"', '"kg"', '"10"', '"Active"', '""'],
-      ['"Snacks & Namkeen"', '"2106"', '"12"', '"inclusive"', '"g"', '"20"', '"Active"', '""']
+      ['', 'Atta, Rice & Dal', '1101', '5', 'inclusive', 'kg', '0', 'Active', ''],
+      ['', 'Fruits & Vegetables', '0709', '0', 'inclusive', 'kg', '10', 'Active', ''],
+      ['', 'Snacks & Namkeen', '2106', '12', 'inclusive', 'g', '20', 'Active', '']
     ];
 
-    const csvContent = [templateHeaders.join(','), ...templateRows.map(row => row.join(','))].join('\n');
+    const csvContent = [CATEGORY_CSV_HEADERS, ...templateRows]
+      .map(row => row.map(csvField).join(','))
+      .join('\n');
 
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename="category_upload_template.csv"');
@@ -155,9 +193,11 @@ exports.downloadCategoryUploadTemplate = async (req, res) => {
   }
 };
 
-// Bulk-create categories from an uploaded CSV. Existing categories (matched
-// by exact, case-insensitive name) are skipped rather than overwritten, so
-// re-running an import is safe.
+// Bulk-create / bulk-edit categories from an uploaded CSV.
+// - Row has a valid, existing Category ID -> that category is updated (bulk edit).
+// - Row has no Category ID -> matched by exact, case-insensitive name; created
+//   if no match, skipped if one already exists (so re-running a create-only
+//   import is safe and never duplicates).
 exports.uploadCategoriesCSV = async (req, res) => {
   try {
     if (!req.file) {
@@ -173,6 +213,8 @@ exports.uploadCategoriesCSV = async (req, res) => {
       return res.status(400).json({ success: false, message: 'CSV file is empty or invalid' });
     }
 
+    // 'Category ID' is optional: older templates/exports without it still work
+    // (pure bulk-create), it's just never matched against an existing row.
     const expectedHeaders = [
       'Category Name',
       'HSN Code',
@@ -199,9 +241,11 @@ exports.uploadCategoriesCSV = async (req, res) => {
     const getHeaderIndex = (headerName) =>
       headers.findIndex(h => h.toLowerCase() === headerName.toLowerCase());
 
+    const idIndex = getHeaderIndex('Category ID');
     const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
     const created = [];
+    const updated = [];
     const skipped = [];
     const errors = [];
 
@@ -216,27 +260,44 @@ exports.uploadCategoriesCSV = async (req, res) => {
           continue;
         }
 
-        const existing = await Category.findOne({
-          name: { $regex: `^${escapeRegex(name)}$`, $options: 'i' }
-        });
-        if (existing) {
-          skipped.push(`Row ${rowNumber}: "${name}" already exists, skipped`);
-          continue;
-        }
-
-        const imageUrl = values[getHeaderIndex('Image URL')] || null;
-
-        const category = await Category.create({
+        const categoryFields = {
           name,
-          image: imageUrl,
+          image: values[getHeaderIndex('Image URL')] || null,
           hsnCode: values[getHeaderIndex('HSN Code')] || '',
           gstPercent: parseFloat(values[getHeaderIndex('GST Percent')]) || 0,
           taxType: values[getHeaderIndex('Tax Type')] || 'inclusive',
           defaultUOM: values[getHeaderIndex('Default UOM')] || 'piece',
           isActive: values[getHeaderIndex('Active Status')]?.toLowerCase() !== 'inactive',
           sortOrder: parseInt(values[getHeaderIndex('Sort Order')]) || 0
-        });
+        };
 
+        const categoryId = idIndex >= 0 ? values[idIndex] : '';
+
+        if (categoryId) {
+          if (!/^[0-9a-fA-F]{24}$/.test(categoryId)) {
+            errors.push(`Row ${rowNumber}: "${categoryId}" is not a valid Category ID`);
+            continue;
+          }
+
+          const updatedCategory = await Category.findByIdAndUpdate(categoryId, categoryFields, { new: true });
+          if (!updatedCategory) {
+            errors.push(`Row ${rowNumber}: Category ID "${categoryId}" not found`);
+            continue;
+          }
+
+          updated.push(updatedCategory);
+          continue;
+        }
+
+        const existing = await Category.findOne({
+          name: { $regex: `^${escapeRegex(name)}$`, $options: 'i' }
+        });
+        if (existing) {
+          skipped.push(`Row ${rowNumber}: "${name}" already exists, skipped (include its Category ID to edit it instead)`);
+          continue;
+        }
+
+        const category = await Category.create(categoryFields);
         created.push(category);
       } catch (error) {
         errors.push(`Row ${rowNumber}: ${error.message}`);
@@ -247,8 +308,9 @@ exports.uploadCategoriesCSV = async (req, res) => {
 
     res.status(200).json({
       success: true,
-      message: `Imported ${created.length} categories (${skipped.length} skipped, ${errors.length} errors)`,
+      message: `${created.length} created, ${updated.length} updated, ${skipped.length} skipped, ${errors.length} errors`,
       imported: created.length,
+      updated: updated.length,
       skipped,
       errors: errors.length > 0 ? errors : null
     });

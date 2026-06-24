@@ -6,6 +6,7 @@ const {
   getCategoryById,
   updateCategory,
   deleteCategory,
+  downloadCategoriesCSV,
   downloadCategoryUploadTemplate,
   uploadCategoriesCSV
 } = require('../../controllers/category/categoryController');
@@ -27,6 +28,7 @@ const csvUpload = multer({
 
 router.post('/create', upload.single('image'), createCategory);
 router.get('/getall', getCategories);
+router.get('/download/csv', downloadCategoriesCSV);
 router.get('/download/template', downloadCategoryUploadTemplate);
 router.post('/upload/csv', csvUpload.single('csvFile'), uploadCategoriesCSV);
 router.get('/:id', getCategoryById);
