@@ -42,10 +42,21 @@ exports.createCategory = async (req, res) => {
   }
 };
 
-// Get all categories
+// Get all categories.
+// `isActive` query param: 'true' -> active only, 'false' -> inactive only,
+// 'all' -> everything. Omitted entirely (no param) defaults to active-only,
+// which preserves existing behavior for callers that don't pass it (the
+// customer-facing storefront's nav/footer/category browsing).
 exports.getCategories = async (req, res) => {
   try {
-    const categories = await Category.find({ isActive: true }).sort({ sortOrder: 1, name: 1 });
+    const { isActive } = req.query;
+    const filter = {};
+    if (isActive === 'true') filter.isActive = true;
+    else if (isActive === 'false') filter.isActive = false;
+    else if (isActive === undefined) filter.isActive = true;
+    // isActive === 'all' (or any other value) -> no filter, return everything
+
+    const categories = await Category.find(filter).sort({ sortOrder: 1, name: 1 });
     res.json(categories);
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -138,13 +149,20 @@ const CATEGORY_CSV_HEADERS = [
 
 const csvField = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
 
-// Download every category as CSV (including the Category ID column) so it
-// can be edited in bulk (e.g. raise GST% across the board) and re-uploaded
-// via uploadCategoriesCSV - rows with a Category ID update that category
-// instead of creating a new one.
+// Download categories as CSV (including the Category ID column) so they can
+// be edited in bulk (e.g. raise GST% across the board) and re-uploaded via
+// uploadCategoriesCSV - rows with a Category ID update that category instead
+// of creating a new one. Same `isActive` query param as getCategories, but
+// defaults to 'all' here since this endpoint has no storefront caller to
+// stay backward-compatible with.
 exports.downloadCategoriesCSV = async (req, res) => {
   try {
-    const categories = await Category.find().sort({ sortOrder: 1, name: 1 });
+    const { isActive } = req.query;
+    const filter = {};
+    if (isActive === 'true') filter.isActive = true;
+    else if (isActive === 'false') filter.isActive = false;
+
+    const categories = await Category.find(filter).sort({ sortOrder: 1, name: 1 });
 
     const rows = categories.map((c) => [
       c._id.toString(),
@@ -162,8 +180,9 @@ exports.downloadCategoriesCSV = async (req, res) => {
       .map(row => row.map(csvField).join(','))
       .join('\n');
 
+    const filterLabel = isActive === 'true' ? 'active' : isActive === 'false' ? 'inactive' : 'all';
     res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename="categories_${new Date().toISOString().split('T')[0]}.csv"`);
+    res.setHeader('Content-Disposition', `attachment; filename="categories_${filterLabel}_${new Date().toISOString().split('T')[0]}.csv"`);
     res.send(csvContent);
   } catch (error) {
     console.error('Download categories CSV error:', error);
