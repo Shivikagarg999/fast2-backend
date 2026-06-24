@@ -8,6 +8,7 @@ const Warehouse = require('../../models/warehouse');
 const imagekit = require('../../utils/imagekit');
 const fs = require('fs');
 const { getActiveDiscounts, applyDiscountToProduct } = require('../../utils/discountHelper');
+const { parseCsv } = require('../../utils/csvParser');
 
 const createProduct = async (req, res) => {
   try {
@@ -2095,22 +2096,19 @@ const uploadProductsCSV = async (req, res) => {
 
     const csvFilePath = req.file.path;
     const csvContent = fs.readFileSync(csvFilePath, 'utf8');
-    const lines = csvContent.split('\n').filter(line => line.trim());
-    
-    if (lines.length < 2) {
+    const { headers, rows } = parseCsv(csvContent);
+
+    if (rows.length < 1) {
       return res.status(400).json({
         success: false,
         message: 'CSV file is empty or invalid'
       });
     }
 
-    // Parse CSV headers
-    const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-
     // Expected headers (case-insensitive)
     const expectedHeaders = [
       'Product Name',
-      'Description', 
+      'Description',
       'Brand',
       'Category',
       'Price',
@@ -2150,7 +2148,7 @@ const uploadProductsCSV = async (req, res) => {
     ];
 
     // Validate headers
-    const missingHeaders = expectedHeaders.filter(header => 
+    const missingHeaders = expectedHeaders.filter(header =>
       !headers.some(h => h.toLowerCase() === header.toLowerCase())
     );
 
@@ -2170,11 +2168,8 @@ const uploadProductsCSV = async (req, res) => {
     const errors = [];
 
     // Process each row
-    for (let i = 1; i < lines.length; i++) {
-      const row = lines[i];
-      if (!row.trim()) continue;
-
-      const values = row.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+    for (let i = 0; i < rows.length; i++) {
+      const values = rows[i];
 
       try {
         // Collect images from separate columns
@@ -2250,7 +2245,7 @@ const uploadProductsCSV = async (req, res) => {
           }
           productData.category = category._id;
         } else {
-          errors.push(`Row ${i + 1}: Category is required`);
+          errors.push(`Row ${i + 2}: Category is required`);
           continue;
         }
 
@@ -2365,7 +2360,7 @@ const uploadProductsCSV = async (req, res) => {
         results.push(productData);
 
       } catch (error) {
-        errors.push(`Row ${i + 1}: ${error.message}`);
+        errors.push(`Row ${i + 2}: ${error.message}`);
       }
     }
 
