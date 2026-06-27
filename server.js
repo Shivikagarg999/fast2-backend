@@ -125,11 +125,11 @@ app.use('/api/admin/products', adminProductRoutes);
 app.use('/api/admin/shops', adminShopRoutes);
 app.use('/api/admin/popups', adminPopupRoutes);
 app.use('/api/popups', publicPopupRouter);
+app.use('/api/admin/payment-settings', adminPaymentSettingsRoutes);
 app.use('/api/admin', adminUserRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/admin/reports', adminReportRoutes);
 app.use('/api/warehouse', warehouseRoutes);
-app.use('/api/admin/payment-settings', adminPaymentSettingsRoutes);
 
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB connected'))
