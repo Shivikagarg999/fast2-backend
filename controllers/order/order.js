@@ -9,6 +9,8 @@ const mongoose = require('mongoose');
 const Razorpay = require('razorpay');
 const imagekit = require('../../utils/imagekit');
 const Shop = require('../../models/shop');
+const PaymentSettings = require('../../models/paymentSettings');
+const cashfree = require('../../utils/cashfree');
 const {
   calculateFinalOrderAmount,
   formatOrderAmounts,
@@ -391,8 +393,23 @@ exports.createOrder = async (req, res) => {
       }
     }
 
-    let razorpayOrder = null;
+    let activeGateway = null;
     if (paymentMethod === "online") {
+      const paymentSettings = await PaymentSettings.getSettings();
+      activeGateway = paymentSettings.activeGateway;
+
+      if (activeGateway === "none") {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          error: "Online payments are currently disabled. Please choose Cash on Delivery."
+        });
+      }
+    }
+
+    let razorpayOrder = null;
+    if (paymentMethod === "online" && activeGateway === "razorpay") {
       try {
         const razorpayOptions = {
           amount: Math.round(cashOnDelivery * 100),
@@ -416,6 +433,40 @@ exports.createOrder = async (req, res) => {
           error: "Failed to create Razorpay order",
           debug: razorpayError.message,
           razorpayError: razorpayError.error || {}
+        });
+      }
+    }
+
+    let cashfreeOrder = null;
+    if (paymentMethod === "online" && activeGateway === "cashfree") {
+      try {
+        const cashfreeUser = await User.findById(userId).session(session);
+        const cashfreeRequest = {
+          order_amount: cashOnDelivery,
+          order_currency: "INR",
+          customer_details: {
+            customer_id: userId.toString(),
+            customer_phone: cashfreeUser?.phone || shippingAddress.phone || "9999999999",
+            ...(cashfreeUser?.email && { customer_email: cashfreeUser.email })
+          },
+          order_meta: {
+            ...(process.env.CASHFREE_RETURN_URL && { return_url: process.env.CASHFREE_RETURN_URL }),
+            ...(process.env.CASHFREE_NOTIFY_URL && { notify_url: process.env.CASHFREE_NOTIFY_URL })
+          }
+        };
+
+        const cashfreeResponse = await cashfree.PGCreateOrder(cashfreeRequest);
+        cashfreeOrder = cashfreeResponse.data;
+
+        paymentStatus = "pending";
+        cashOnDelivery = 0;
+      } catch (cashfreeError) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(500).json({
+          success: false,
+          error: "Failed to create Cashfree order",
+          debug: cashfreeError.response?.data || cashfreeError.message
         });
       }
     }
@@ -522,11 +573,17 @@ exports.createOrder = async (req, res) => {
       seller: primarySeller,
       orderScratchCard,
       scratchGifts,
+      ...(paymentMethod === "online" && { paymentGateway: activeGateway }),
       ...(paymentMethod === "online" && razorpayOrder && {
         razorpayOrderId: razorpayOrder.id,
         razorpayReceipt: razorpayOrder.receipt,
         razorpayAmount: razorpayOrder.amount,
         razorpayCurrency: razorpayOrder.currency
+      }),
+      ...(paymentMethod === "online" && cashfreeOrder && {
+        cashfreeOrderId: cashfreeOrder.order_id,
+        cashfreeCfOrderId: cashfreeOrder.cf_order_id,
+        cashfreePaymentSessionId: cashfreeOrder.payment_session_id
       }),
       ...(uploadedPrescription && { prescriptionImage: uploadedPrescription })
     });
@@ -600,6 +657,14 @@ exports.createOrder = async (req, res) => {
             amount: razorpayOrder.amount,
             currency: razorpayOrder.currency,
             key: process.env.RAZORPAY_KEY_ID
+          }
+        }),
+        ...(paymentMethod === "online" && cashfreeOrder && {
+          cashfree: {
+            orderId: cashfreeOrder.order_id,
+            paymentSessionId: cashfreeOrder.payment_session_id,
+            amount: cashfreeOrder.order_amount,
+            currency: cashfreeOrder.order_currency
           }
         }),
         sellerPayouts: Array.from(sellerMap.entries()).map(([sellerId, data]) => ({
@@ -895,7 +960,7 @@ exports.checkPaymentStatus = async (req, res) => {
     const { orderId } = req.params;
 
     const order = await Order.findOne({ orderId })
-      .select('paymentStatus razorpayOrderId status paidAt');
+      .select('paymentStatus paymentGateway razorpayOrderId cashfreeOrderId status paidAt');
 
     if (!order) {
       return res.status(404).json({
@@ -905,7 +970,7 @@ exports.checkPaymentStatus = async (req, res) => {
     }
 
     let razorpayDetails = null;
-    if (order.razorpayOrderId) {
+    if (order.paymentGateway === "razorpay" && order.razorpayOrderId) {
       try {
         const razorpayOrder = await razorpay.orders.fetch(order.razorpayOrderId);
         razorpayDetails = {
@@ -920,15 +985,33 @@ exports.checkPaymentStatus = async (req, res) => {
       }
     }
 
+    let cashfreeDetails = null;
+    if (order.paymentGateway === "cashfree" && order.cashfreeOrderId) {
+      try {
+        const cashfreeResponse = await cashfree.PGFetchOrder(order.cashfreeOrderId);
+        const cfOrder = cashfreeResponse.data;
+        cashfreeDetails = {
+          status: cfOrder.order_status,
+          amount: cfOrder.order_amount,
+          currency: cfOrder.order_currency
+        };
+      } catch (cashfreeError) {
+        console.error('Error fetching Cashfree order:', cashfreeError.response?.data || cashfreeError.message);
+      }
+    }
+
     res.status(200).json({
       success: true,
       order: {
         orderId: order.orderId,
         paymentStatus: order.paymentStatus,
+        paymentGateway: order.paymentGateway,
         status: order.status,
         paidAt: order.paidAt,
         razorpayOrderId: order.razorpayOrderId,
-        razorpayDetails
+        razorpayDetails,
+        cashfreeOrderId: order.cashfreeOrderId,
+        cashfreeDetails
       }
     });
 
@@ -982,13 +1065,243 @@ exports.getRazorpayOrder = async (req, res) => {
   }
 };
 
+exports.getCashfreeOrder = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+
+    const order = await Order.findOne({ orderId })
+      .select('cashfreeOrderId');
+
+    if (!order || !order.cashfreeOrderId) {
+      return res.status(404).json({
+        success: false,
+        error: "Cashfree order not found"
+      });
+    }
+
+    const cashfreeResponse = await cashfree.PGFetchOrder(order.cashfreeOrderId);
+    const cfOrder = cashfreeResponse.data;
+
+    res.status(200).json({
+      success: true,
+      order: {
+        orderId: order.orderId,
+        cashfree: {
+          orderId: cfOrder.order_id,
+          cfOrderId: cfOrder.cf_order_id,
+          amount: cfOrder.order_amount,
+          currency: cfOrder.order_currency,
+          status: cfOrder.order_status,
+          paymentSessionId: cfOrder.payment_session_id,
+          created_at: cfOrder.created_at
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Get Cashfree order error:', error.response?.data || error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch Cashfree order'
+    });
+  }
+};
+
+exports.confirmCashfreePayment = async (req, res) => {
+  try {
+    const { orderId } = req.body;
+
+    const order = await Order.findOne({ orderId });
+
+    if (!order || !order.cashfreeOrderId) {
+      return res.status(404).json({
+        success: false,
+        error: "Cashfree order not found for this order"
+      });
+    }
+
+    const cashfreeResponse = await cashfree.PGFetchOrder(order.cashfreeOrderId);
+    const cfOrder = cashfreeResponse.data;
+
+    if (cfOrder.order_status === "PAID") {
+      order.paymentStatus = "paid";
+      order.status = "confirmed";
+      order.paidAt = new Date();
+      await order.save();
+
+      try {
+        const notificationService = require('../../services/notificationService');
+        await notificationService.sendNotification(
+          order.user,
+          'Payment Successful',
+          `Payment for order #${order.orderId} verified successfully.`,
+          'payment',
+          order.orderId,
+          { orderId: order.orderId }
+        );
+      } catch (notifError) {
+        console.error('Notification error:', notifError);
+      }
+    } else if (["EXPIRED", "TERMINATED"].includes(cfOrder.order_status)) {
+      order.paymentStatus = "failed";
+      order.status = "cancelled";
+      order.paymentFailedAt = new Date();
+      await order.save();
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Payment status fetched successfully",
+      orderId: order.orderId,
+      paymentStatus: order.paymentStatus,
+      cashfreeOrderStatus: cfOrder.order_status
+    });
+
+  } catch (error) {
+    console.error('Cashfree payment confirmation error:', error.response?.data || error.message);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to confirm Cashfree payment'
+    });
+  }
+};
+
+exports.cashfreeWebhook = async (req, res) => {
+  try {
+    const signature = req.headers['x-webhook-signature'];
+    const timestamp = req.headers['x-webhook-timestamp'];
+
+    let webhookEvent;
+    try {
+      webhookEvent = cashfree.PGVerifyWebhookSignature(signature, req.rawBody, timestamp);
+    } catch (verifyError) {
+      console.error('Invalid Cashfree webhook signature:', verifyError.message);
+      return res.status(400).json({ error: 'Invalid webhook signature' });
+    }
+
+    const eventType = webhookEvent.object?.type;
+    const data = webhookEvent.object?.data || {};
+
+    console.log(`Cashfree webhook received: ${eventType}`);
+
+    if (eventType === 'PAYMENT_SUCCESS_WEBHOOK') {
+      await handleCashfreePaymentSuccess(data);
+    } else if (eventType === 'PAYMENT_FAILED_WEBHOOK' || eventType === 'PAYMENT_USER_DROPPED_WEBHOOK') {
+      await handleCashfreePaymentFailed(data);
+    } else {
+      console.log(`Unhandled Cashfree webhook event: ${eventType}`);
+    }
+
+    res.status(200).json({ status: 'ok' });
+  } catch (error) {
+    console.error('Cashfree webhook processing error:', error);
+    res.status(500).json({ error: 'Webhook processing failed' });
+  }
+};
+
+const handleCashfreePaymentSuccess = async (data) => {
+  try {
+    const cashfreeOrderId = data.order?.order_id;
+    const payment = data.payment || {};
+
+    const order = await Order.findOneAndUpdate(
+      { cashfreeOrderId },
+      {
+        paymentStatus: "paid",
+        cashfreePaymentId: payment.cf_payment_id,
+        status: "confirmed",
+        paidAt: payment.payment_time ? new Date(payment.payment_time) : new Date()
+      },
+      { new: true }
+    );
+
+    if (order) {
+      console.log(`Order ${order.orderId} marked as paid via Cashfree webhook`);
+
+      try {
+        const notificationService = require('../../services/notificationService');
+        await notificationService.sendNotification(
+          order.user,
+          'Payment Successful',
+          `We have received your payment for order #${order.orderId}.`,
+          'payment',
+          order.orderId,
+          { orderId: order.orderId }
+        );
+      } catch (notifError) {
+        console.error('Notification error:', notifError);
+      }
+    } else {
+      console.warn(`No order found for Cashfree order ${cashfreeOrderId}`);
+    }
+  } catch (error) {
+    console.error('Error handling Cashfree PAYMENT_SUCCESS_WEBHOOK:', error);
+  }
+};
+
+const handleCashfreePaymentFailed = async (data) => {
+  try {
+    const cashfreeOrderId = data.order?.order_id;
+
+    const order = await Order.findOneAndUpdate(
+      { cashfreeOrderId },
+      {
+        paymentStatus: "failed",
+        status: "cancelled",
+        paymentFailedAt: new Date()
+      },
+      { new: true }
+    );
+
+    if (order) {
+      console.log(`Order ${order.orderId} payment failed (Cashfree)`);
+
+      try {
+        const notificationService = require('../../services/notificationService');
+        await notificationService.sendNotification(
+          order.user,
+          'Payment Failed',
+          `Payment for order #${order.orderId} failed. Please try again.`,
+          'payment',
+          order.orderId,
+          { orderId: order.orderId }
+        );
+      } catch (notifError) {
+        console.error('Notification error:', notifError);
+      }
+    } else {
+      console.warn(`No order found for Cashfree order ${cashfreeOrderId}`);
+    }
+  } catch (error) {
+    console.error('Error handling Cashfree payment failure webhook:', error);
+  }
+};
+
+exports.getPaymentOptions = async (req, res) => {
+  try {
+    const settings = await PaymentSettings.getSettings();
+    res.status(200).json({
+      success: true,
+      activeGateway: settings.activeGateway,
+      onlinePaymentEnabled: settings.activeGateway !== 'none',
+      cashfreeMode: process.env.CASHFREE_ENVIRONMENT === 'SANDBOX' ? 'sandbox' : 'production'
+    });
+  } catch (error) {
+    console.error('Get payment options error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch payment options'
+    });
+  }
+};
+
 exports.refundPayment = async (req, res) => {
   try {
     const { orderId } = req.params;
     const { amount, reason = "Refund requested by customer" } = req.body;
 
     const order = await Order.findOne({ orderId })
-      .select('razorpayPaymentId finalAmount paymentStatus');
+      .select('paymentGateway razorpayPaymentId cashfreeOrderId finalAmount paymentStatus');
 
     if (!order) {
       return res.status(404).json({
@@ -1001,6 +1314,56 @@ exports.refundPayment = async (req, res) => {
       return res.status(400).json({
         success: false,
         error: "Cannot refund unpaid order"
+      });
+    }
+
+    if (order.paymentGateway === "cashfree") {
+      if (!order.cashfreeOrderId) {
+        return res.status(400).json({
+          success: false,
+          error: "No Cashfree order ID found"
+        });
+      }
+
+      const refundAmount = amount || order.finalAmount;
+
+      const refundResponse = await cashfree.PGOrderCreateRefund(
+        order.cashfreeOrderId,
+        {
+          refund_id: `rfnd_${Date.now()}`,
+          refund_amount: refundAmount,
+          refund_note: reason
+        }
+      );
+      const refund = refundResponse.data;
+
+      const refundStatusMap = {
+        SUCCESS: "processed",
+        PENDING: "pending",
+        ONHOLD: "pending",
+        CANCELLED: "failed",
+        FAILED: "failed"
+      };
+
+      await Order.findOneAndUpdate(
+        { orderId },
+        {
+          paymentStatus: "refunded",
+          refundId: refund.refund_id,
+          refundAmount: refund.refund_amount,
+          refundStatus: refundStatusMap[refund.refund_status] || "pending",
+          refundedAt: new Date()
+        }
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: "Refund initiated successfully",
+        refund: {
+          id: refund.refund_id,
+          amount: refund.refund_amount,
+          status: refund.refund_status
+        }
       });
     }
 
@@ -1050,7 +1413,7 @@ exports.refundPayment = async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Refund payment error:', error);
+    console.error('Refund payment error:', error.response?.data || error);
     res.status(500).json({
       success: false,
       error: 'Failed to process refund',

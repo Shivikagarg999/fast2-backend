@@ -153,6 +153,63 @@ const orderSchema = new mongoose.Schema(
       enum: ["pending", "paid", "failed", "refunded"],
       default: "pending"
     },
+    paymentGateway: {
+      type: String,
+      enum: ["razorpay", "cashfree", null],
+      default: null
+    },
+    paidAt: {
+      type: Date,
+      default: null
+    },
+    paymentFailedAt: {
+      type: Date,
+      default: null
+    },
+    refundId: {
+      type: String,
+      default: null
+    },
+    razorpayOrderId: {
+      type: String,
+      default: null
+    },
+    razorpayPaymentId: {
+      type: String,
+      default: null
+    },
+    razorpaySignature: {
+      type: String,
+      default: null
+    },
+    razorpayReceipt: {
+      type: String,
+      default: null
+    },
+    razorpayAmount: {
+      type: Number,
+      default: null
+    },
+    razorpayCurrency: {
+      type: String,
+      default: null
+    },
+    cashfreeOrderId: {
+      type: String,
+      default: null
+    },
+    cashfreeCfOrderId: {
+      type: String,
+      default: null
+    },
+    cashfreePaymentSessionId: {
+      type: String,
+      default: null
+    },
+    cashfreePaymentId: {
+      type: String,
+      default: null
+    },
     secretCode: {
       type: String,
     },
@@ -504,5 +561,7 @@ orderSchema.index({ status: 1 });
 orderSchema.index({ paymentStatus: 1 });
 orderSchema.index({ createdAt: -1 });
 orderSchema.index({ walletDeduction: 1 });
+orderSchema.index({ razorpayOrderId: 1 }, { sparse: true });
+orderSchema.index({ cashfreeOrderId: 1 }, { sparse: true });
 
 module.exports = mongoose.model("Order", orderSchema);

@@ -5,11 +5,15 @@ const auth = require("../../middlewares/userauth");
 const upload = require("../../middlewares/upload");
 
 router.post("/create", auth, upload.single("prescriptionImage"), orderController.createOrder);
+router.get("/payment-options", orderController.getPaymentOptions);
 router.post("/verify-payment", auth, orderController.verifyRazorpayPayment);
+router.post("/verify-cashfree-payment", auth, orderController.confirmCashfreePayment);
 router.get("/:orderId/payment-status", auth, orderController.checkPaymentStatus);
 router.get("/:orderId/razorpay-details", auth, orderController.getRazorpayOrder);
+router.get("/:orderId/cashfree-details", auth, orderController.getCashfreeOrder);
 router.post("/:orderId/refund", auth, orderController.refundPayment);
 router.post("/webhooks/razorpay", orderController.razorpayWebhook);
+router.post("/webhooks/cashfree", orderController.cashfreeWebhook);
 router.get("/my-orders", auth, orderController.getMyOrders);
 router.put("/:orderId/status", auth, orderController.updateOrderStatus);
 router.get("/my-scratch-coupons", auth, orderController.getScratchCouponHistory);

@@ -46,6 +46,7 @@ const adminPopupRoutes = require('./routes/admin/popupRoutes');
 const promotorRoutes = require('./routes/promotor/promotorRoutes');
 const adminReportRoutes = require('./routes/admin/report/report');
 const warehouseRoutes = require('./routes/warehouse/warehouseRoutes');
+const adminPaymentSettingsRoutes = require('./routes/admin/paymentSettingsRoutes');
 
 const publicPopupRouter = express.Router();
 publicPopupRouter.get('/active', require('./controllers/admin/popupController').getActivePopup);
@@ -81,7 +82,11 @@ app.use(
   })
 );
 
-app.use(express.json());
+app.use(express.json({
+  verify: (req, res, buf) => {
+    req.rawBody = buf.toString('utf8');
+  }
+}));
 
 app.use('/api/user', authRoutes);
 app.use('/api/user/profile', userProfileRoutes);
@@ -124,6 +129,7 @@ app.use('/api/admin', adminUserRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/admin/reports', adminReportRoutes);
 app.use('/api/warehouse', warehouseRoutes);
+app.use('/api/admin/payment-settings', adminPaymentSettingsRoutes);
 
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB connected'))
