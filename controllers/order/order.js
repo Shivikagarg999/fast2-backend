@@ -5,6 +5,7 @@ const Seller = require('../../models/seller');
 const Promotor = require('../../models/promotor');
 const Payout = require('../../models/payout');
 const Coupon = require('../../models/coupon');
+const OnlinePaymentIntent = require('../../models/onlinePaymentIntent');
 const mongoose = require('mongoose');
 const Razorpay = require('razorpay');
 const imagekit = require('../../utils/imagekit');
@@ -23,6 +24,151 @@ const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
   key_secret: process.env.RAZORPAY_KEY_SECRET
 });
+
+const notifyOrderPlaced = async (order, userId, title = 'Order Placed Successfully', message = null, type = 'order') => {
+  try {
+    const notificationService = require('../../services/notificationService');
+    await notificationService.sendNotification(
+      userId,
+      title,
+      message || `Your order #${order.orderId} has been placed.`,
+      type,
+      order.orderId,
+      { orderId: order.orderId }
+    );
+  } catch (notifError) {
+    console.error('Notification error:', notifError);
+  }
+};
+
+const notifyDriversForOrder = async (order, userId) => {
+  try {
+    const { notifyNearbyDrivers } = require('../../services/driverNotificationService');
+    notifyNearbyDrivers(order.shippingAddress?.lat, order.shippingAddress?.lng, order._id, order.orderId, order.shippingAddress?.pinCode)
+      .catch(e => console.error('Driver notify error:', e.message));
+  } catch (driverNotifError) {
+    console.error('Driver notification setup error:', driverNotifError.message);
+  }
+
+  try {
+    const { emitNewOrder, serverLog } = require('../../socketManager');
+    serverLog(`Order ${order.orderId} placed by user ${userId} - triggering driver notifications`, 'event');
+    emitNewOrder(order._id, order.orderId, order.shippingAddress?.lat, order.shippingAddress?.lng, order.shippingAddress?.pinCode);
+  } catch (socketError) {
+    console.error('Socket emit error:', socketError.message);
+  }
+};
+
+const createPlacedOrder = async ({
+  orderData,
+  sellerPayouts = [],
+  scratchCouponOrderId = null,
+  session,
+  paymentUpdates = {}
+}) => {
+  const userId = orderData.user;
+
+  if (orderData.walletDeduction > 0) {
+    const user = await User.findById(userId).session(session);
+    if (!user) {
+      throw new Error("User not found");
+    }
+
+    if ((user.wallet || 0) < orderData.walletDeduction) {
+      throw new Error("Insufficient wallet balance to place this paid order");
+    }
+
+    user.wallet = roundMoney((user.wallet || 0) - orderData.walletDeduction);
+    await user.save({ session });
+  }
+
+  if (scratchCouponOrderId) {
+    const redeemedScratchOrder = await Order.findOneAndUpdate(
+      {
+        _id: scratchCouponOrderId,
+        'orderScratchCard.isRedeemed': false
+      },
+      {
+        'orderScratchCard.isRedeemed': true,
+        'orderScratchCard.redeemedAt': new Date()
+      },
+      { session }
+    );
+
+    if (!redeemedScratchOrder) {
+      throw new Error("Scratch card coupon has already been redeemed");
+    }
+  }
+
+  const order = new Order({
+    ...orderData,
+    ...paymentUpdates
+  });
+
+  await order.save({ session });
+
+  const payoutPromises = sellerPayouts.map(data => {
+    const sellerId = data.seller || data.sellerId;
+    const sellerAmount = roundMoney(data.amount);
+
+    const payout = new Payout({
+      seller: sellerId,
+      order: order._id,
+      orderId: order.orderId,
+      amount: sellerAmount,
+      percentage: data.percentage || 30,
+      status: 'pending'
+    });
+
+    return Promise.all([
+      payout.save({ session }),
+      Seller.findByIdAndUpdate(
+        sellerId,
+        {
+          $inc: {
+            totalEarnings: sellerAmount,
+            totalOrders: 1
+          }
+        },
+        { session }
+      )
+    ]);
+  });
+
+  await Promise.all(payoutPromises);
+
+  return order;
+};
+
+const placePaidOnlineIntent = async (intent, paymentUpdates = {}, session) => {
+  if (intent.placedOrder) {
+    return Order.findById(intent.placedOrder).session(session);
+  }
+
+  const order = await createPlacedOrder({
+    orderData: {
+      ...intent.orderData,
+      paymentStatus: "paid",
+      status: "confirmed",
+      cashOnDelivery: 0
+    },
+    sellerPayouts: intent.sellerPayouts,
+    scratchCouponOrderId: intent.scratchCouponOrder,
+    session,
+    paymentUpdates: {
+      paidAt: new Date(),
+      ...paymentUpdates
+    }
+  });
+
+  intent.status = "placed";
+  intent.placedOrder = order._id;
+  intent.placedAt = new Date();
+  intent.paidAt = paymentUpdates.paidAt || new Date();
+  await intent.save({ session });
+
+  return order;
+};
 
 exports.createOrder = async (req, res) => {
   const session = await mongoose.startSession();
@@ -384,17 +530,23 @@ exports.createOrder = async (req, res) => {
         walletDeduction = Math.min(walletBalance, finalAmount);
         cashOnDelivery = finalAmount - walletDeduction;
 
-        user.wallet = parseFloat((walletBalance - walletDeduction).toFixed(2));
-        await user.save({ session });
+        if (paymentMethod === "cod") {
+          user.wallet = parseFloat((walletBalance - walletDeduction).toFixed(2));
+          await user.save({ session });
 
-        if (cashOnDelivery === 0 && paymentMethod === "cod") {
-          paymentStatus = "paid";
+          if (cashOnDelivery === 0) {
+            paymentStatus = "paid";
+          }
         }
       }
     }
 
+    const onlinePayableAmount = paymentMethod === "online"
+      ? roundMoney(Math.max(finalAmount - walletDeduction, 0))
+      : 0;
+
     let activeGateway = null;
-    if (paymentMethod === "online") {
+    if (paymentMethod === "online" && onlinePayableAmount > 0) {
       const paymentSettings = await PaymentSettings.getSettings();
       activeGateway = paymentSettings.activeGateway;
 
@@ -409,10 +561,10 @@ exports.createOrder = async (req, res) => {
     }
 
     let razorpayOrder = null;
-    if (paymentMethod === "online" && activeGateway === "razorpay") {
+    if (paymentMethod === "online" && activeGateway === "razorpay" && onlinePayableAmount > 0) {
       try {
         const razorpayOptions = {
-          amount: Math.round(cashOnDelivery * 100),
+          amount: Math.round(onlinePayableAmount * 100),
           currency: "INR",
           receipt: `order_${Date.now()}`,
           notes: {
@@ -438,11 +590,11 @@ exports.createOrder = async (req, res) => {
     }
 
     let cashfreeOrder = null;
-    if (paymentMethod === "online" && activeGateway === "cashfree") {
+    if (paymentMethod === "online" && activeGateway === "cashfree" && onlinePayableAmount > 0) {
       try {
         const cashfreeUser = await User.findById(userId).session(session);
         const cashfreeRequest = {
-          order_amount: cashOnDelivery,
+          order_amount: onlinePayableAmount,
           order_currency: "INR",
           customer_details: {
             customer_id: userId.toString(),
@@ -469,6 +621,32 @@ exports.createOrder = async (req, res) => {
           debug: cashfreeError.response?.data || cashfreeError.message
         });
       }
+    }
+
+    if (paymentMethod === "online" && onlinePayableAmount === 0 && walletDeduction > 0) {
+      const user = await User.findById(userId).session(session);
+
+      if (!user) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(404).json({
+          success: false,
+          error: "User not found"
+        });
+      }
+
+      if ((user.wallet || 0) < walletDeduction) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({
+          success: false,
+          error: "Insufficient wallet balance"
+        });
+      }
+
+      user.wallet = roundMoney((user.wallet || 0) - walletDeduction);
+      await user.save({ session });
+      paymentStatus = "paid";
     }
 
     const normalizedShippingAddress = {
@@ -553,7 +731,7 @@ exports.createOrder = async (req, res) => {
       });
     }
 
-    const order = new Order({
+    const orderPayload = {
       user: userId,
       items: orderItems,
       subtotal: subtotal,
@@ -586,7 +764,83 @@ exports.createOrder = async (req, res) => {
         cashfreePaymentSessionId: cashfreeOrder.payment_session_id
       }),
       ...(uploadedPrescription && { prescriptionImage: uploadedPrescription })
-    });
+    };
+
+    const sellerPayouts = Array.from(sellerMap.entries()).map(([sellerId, data]) => ({
+      seller: sellerId,
+      sellerId,
+      amount: parseFloat(data.amount.toFixed(2)),
+      percentage: 30,
+      status: 'pending'
+    }));
+
+    if (paymentMethod === "online" && onlinePayableAmount > 0) {
+      const intent = new OnlinePaymentIntent({
+        user: userId,
+        gateway: activeGateway,
+        gatewayOrderId: activeGateway === "razorpay" ? razorpayOrder.id : cashfreeOrder.order_id,
+        gatewayPaymentSessionId: activeGateway === "cashfree" ? cashfreeOrder.payment_session_id : null,
+        amount: onlinePayableAmount,
+        currency: activeGateway === "razorpay" ? razorpayOrder.currency : cashfreeOrder.order_currency,
+        orderData: orderPayload,
+        sellerPayouts,
+        scratchCouponOrder: scratchCouponOrder?._id || null
+      });
+
+      await intent.save({ session });
+      await session.commitTransaction();
+      session.endSession();
+
+      return res.status(201).json({
+        success: true,
+        message: "Payment initiated. Order will be placed after successful payment.",
+        orderPlaced: false,
+        checkoutId: intent._id,
+        order: formatOrderAmounts({
+          checkoutId: intent._id,
+          orderId: null,
+          subtotal,
+          deliveryCharges,
+          isFreeDelivery,
+          handlingCharge,
+          numberOfShops,
+          total,
+          scratchCouponDiscount,
+          finalAmount,
+          walletDeduction,
+          cashOnDelivery: 0,
+          onlinePayableAmount,
+          paymentStatus: "pending",
+          status: "payment_pending",
+          items: orderItems,
+          shippingAddress: normalizedShippingAddress,
+          ...(razorpayOrder && {
+            razorpay: {
+              orderId: razorpayOrder.id,
+              amount: razorpayOrder.amount,
+              currency: razorpayOrder.currency,
+              key: process.env.RAZORPAY_KEY_ID
+            }
+          }),
+          ...(cashfreeOrder && {
+            cashfree: {
+              orderId: cashfreeOrder.order_id,
+              paymentSessionId: cashfreeOrder.payment_session_id,
+              amount: cashfreeOrder.order_amount,
+              currency: cashfreeOrder.order_currency
+            }
+          }),
+          sellerPayouts,
+          orderScratchCard: orderScratchCard.isEligible
+            ? { isEligible: true, isScratched: false, message: 'You will receive this scratch card after successful payment.' }
+            : { isEligible: false },
+          ...(scratchCouponDetails && { scratchCouponApplied: scratchCouponDetails }),
+          createdAt: intent.createdAt
+        })
+      });
+    }
+
+    const order = new Order(orderPayload);
 
     await order.save({ session });
 
@@ -667,12 +921,7 @@ exports.createOrder = async (req, res) => {
             currency: cashfreeOrder.order_currency
           }
         }),
-        sellerPayouts: Array.from(sellerMap.entries()).map(([sellerId, data]) => ({
-          sellerId,
-          amount: parseFloat(data.amount.toFixed(2)),
-          percentage: 30,
-          status: 'pending'
-        })),
+        sellerPayouts,
         orderScratchCard: orderScratchCard.isEligible
           ? { isEligible: true, isScratched: false, message: 'You have a scratch card! Scratch after delivery to reveal your coupon.' }
           : { isEligible: false },
@@ -681,20 +930,8 @@ exports.createOrder = async (req, res) => {
       })
     };
 
-    // Send notification to customer
-    try {
-      const notificationService = require('../../services/notificationService');
-      await notificationService.sendNotification(
-        userId,
-        'Order Placed Successfully',
-        `Your order #${order.orderId} has been placed.`,
-        'order',
-        order.orderId,
-        { orderId: order.orderId }
-      );
-    } catch (notifError) {
-      console.error('Notification error:', notifError);
-    }
+    // Send notification to customer after the order document is actually placed.
+    await notifyOrderPlaced(order, userId);
 
     // FCM wake-up push to all online drivers (works even if app is killed)
     try {
@@ -755,22 +992,43 @@ exports.verifyRazorpayPayment = async (req, res) => {
       });
     }
 
-    const order = await Order.findOneAndUpdate(
-      {
-        $or: [
-          { razorpayOrderId: razorpay_order_id },
-          { orderId: orderId }
-        ]
-      },
-      {
-        paymentStatus: "paid",
-        razorpayPaymentId: razorpay_payment_id,
-        razorpaySignature: razorpay_signature,
-        status: "confirmed",
-        paidAt: new Date()
-      },
-      { new: true, session }
-    );
+    let order = null;
+    const paidAt = new Date();
+
+    const intent = await OnlinePaymentIntent.findOne({
+      gateway: "razorpay",
+      gatewayOrderId: razorpay_order_id,
+      user: req.user._id
+    }).session(session);
+
+    if (intent) {
+      order = await placePaidOnlineIntent(
+        intent,
+        {
+          razorpayPaymentId: razorpay_payment_id,
+          razorpaySignature: razorpay_signature,
+          paidAt
+        },
+        session
+      );
+    } else {
+      order = await Order.findOneAndUpdate(
+        {
+          $or: [
+            { razorpayOrderId: razorpay_order_id },
+            { orderId: orderId }
+          ]
+        },
+        {
+          paymentStatus: "paid",
+          razorpayPaymentId: razorpay_payment_id,
+          razorpaySignature: razorpay_signature,
+          status: "confirmed",
+          paidAt
+        },
+        { new: true, session }
+      );
+    }
 
     if (!order) {
       await session.abortTransaction();
@@ -784,26 +1042,23 @@ exports.verifyRazorpayPayment = async (req, res) => {
     await session.commitTransaction();
     session.endSession();
 
-    // Send Notification
-    try {
-      const notificationService = require('../../services/notificationService');
-      await notificationService.sendNotification(
-        order.user,
-        'Payment Successful',
-        `Payment for order #${order.orderId} verified successfully.`,
-        'payment',
-        order.orderId,
-        { orderId: order.orderId }
-      );
-    } catch (notifError) {
-      console.error('Notification error:', notifError);
+    await notifyOrderPlaced(
+      order,
+      order.user,
+      'Payment Successful',
+      `Payment for order #${order.orderId} verified successfully.`,
+      'payment'
+    );
+    if (intent) {
+      await notifyDriversForOrder(order, order.user);
     }
 
     res.status(200).json({
       success: true,
       message: "Payment verified successfully",
       orderId: order.orderId,
-      paymentStatus: order.paymentStatus
+      paymentStatus: order.paymentStatus,
+      orderPlaced: true
     });
 
   } catch (error) {
@@ -858,8 +1113,11 @@ exports.razorpayWebhook = async (req, res) => {
 };
 
 const handlePaymentCaptured = async (payment) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    const order = await Order.findOneAndUpdate(
+    let order = await Order.findOneAndUpdate(
       { razorpayOrderId: payment.order_id },
       {
         paymentStatus: "paid",
@@ -867,30 +1125,51 @@ const handlePaymentCaptured = async (payment) => {
         status: "confirmed",
         paidAt: new Date(payment.created_at * 1000)
       },
-      { new: true }
+      { new: true, session }
     );
+
+    let placedFromIntent = false;
+    if (!order) {
+      const intent = await OnlinePaymentIntent.findOne({
+        gateway: "razorpay",
+        gatewayOrderId: payment.order_id
+      }).session(session);
+
+      if (intent) {
+        order = await placePaidOnlineIntent(
+          intent,
+          {
+            razorpayPaymentId: payment.id,
+            paidAt: new Date(payment.created_at * 1000)
+          },
+          session
+        );
+        placedFromIntent = true;
+      }
+    }
+
+    await session.commitTransaction();
+    session.endSession();
 
     if (order) {
       console.log(`Order ${order.orderId} marked as paid via webhook`);
 
-      // Send Notification
-      try {
-        const notificationService = require('../../services/notificationService');
-        await notificationService.sendNotification(
-          order.user,
-          'Payment Successful',
-          `We have received your payment for order #${order.orderId}.`,
-          'payment',
-          order.orderId,
-          { orderId: order.orderId }
-        );
-      } catch (notifError) {
-        console.error('Notification error:', notifError);
+      await notifyOrderPlaced(
+        order,
+        order.user,
+        'Payment Successful',
+        `We have received your payment for order #${order.orderId}.`,
+        'payment'
+      );
+      if (placedFromIntent) {
+        await notifyDriversForOrder(order, order.user);
       }
     } else {
       console.warn(`No order found for payment ${payment.id}`);
     }
   } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
     console.error('Error handling payment.captured:', error);
   }
 };
@@ -926,6 +1205,17 @@ const handlePaymentFailed = async (payment) => {
         console.error('Notification error:', notifError);
       }
     } else {
+      await OnlinePaymentIntent.findOneAndUpdate(
+        {
+          gateway: "razorpay",
+          gatewayOrderId: payment.order_id,
+          status: "pending"
+        },
+        {
+          status: "failed",
+          failureReason: payment.error_description || payment.error_reason || "payment_failed"
+        }
+      );
       console.warn(`No order found for failed payment ${payment.id}`);
     }
   } catch (error) {
@@ -934,23 +1224,58 @@ const handlePaymentFailed = async (payment) => {
 };
 
 const handleOrderPaid = async (orderEntity) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    const order = await Order.findOneAndUpdate(
+    let order = await Order.findOneAndUpdate(
       { razorpayOrderId: orderEntity.id },
       {
         paymentStatus: "paid",
         status: "confirmed",
         paidAt: new Date(orderEntity.created_at * 1000)
       },
-      { new: true }
+      { new: true, session }
     );
+
+    let placedFromIntent = false;
+    if (!order) {
+      const intent = await OnlinePaymentIntent.findOne({
+        gateway: "razorpay",
+        gatewayOrderId: orderEntity.id
+      }).session(session);
+
+      if (intent) {
+        order = await placePaidOnlineIntent(
+          intent,
+          { paidAt: new Date(orderEntity.created_at * 1000) },
+          session
+        );
+        placedFromIntent = true;
+      }
+    }
+
+    await session.commitTransaction();
+    session.endSession();
 
     if (order) {
       console.log(`Order ${order.orderId} confirmed as paid via order.paid webhook`);
+      if (placedFromIntent) {
+        await notifyOrderPlaced(
+          order,
+          order.user,
+          'Payment Successful',
+          `We have received your payment for order #${order.orderId}.`,
+          'payment'
+        );
+        await notifyDriversForOrder(order, order.user);
+      }
     } else {
       console.warn(`No order found for Razorpay order ${orderEntity.id}`);
     }
   } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
     console.error('Error handling order.paid:', error);
   }
 };
@@ -1108,56 +1433,94 @@ exports.getCashfreeOrder = async (req, res) => {
 };
 
 exports.confirmCashfreePayment = async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
-    const { orderId } = req.body;
+    const { orderId, cashfreeOrderId } = req.body;
+    const gatewayOrderId = cashfreeOrderId || orderId;
 
-    const order = await Order.findOne({ orderId });
+    let order = null;
+    const intent = await OnlinePaymentIntent.findOne({
+      gateway: "cashfree",
+      gatewayOrderId,
+      user: req.user._id
+    }).session(session);
 
-    if (!order || !order.cashfreeOrderId) {
-      return res.status(404).json({
-        success: false,
-        error: "Cashfree order not found for this order"
-      });
+    if (!intent) {
+      order = await Order.findOne({ orderId }).session(session);
+
+      if (!order || !order.cashfreeOrderId) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(404).json({
+          success: false,
+          error: "Cashfree order not found for this payment"
+        });
+      }
     }
 
-    const cashfreeResponse = await cashfree.PGFetchOrder(order.cashfreeOrderId);
+    const fetchOrderId = intent ? intent.gatewayOrderId : order.cashfreeOrderId;
+    const cashfreeResponse = await cashfree.PGFetchOrder(fetchOrderId);
     const cfOrder = cashfreeResponse.data;
 
     if (cfOrder.order_status === "PAID") {
-      order.paymentStatus = "paid";
-      order.status = "confirmed";
-      order.paidAt = new Date();
-      await order.save();
-
-      try {
-        const notificationService = require('../../services/notificationService');
-        await notificationService.sendNotification(
-          order.user,
-          'Payment Successful',
-          `Payment for order #${order.orderId} verified successfully.`,
-          'payment',
-          order.orderId,
-          { orderId: order.orderId }
+      if (intent) {
+        order = await placePaidOnlineIntent(
+          intent,
+          {
+            cashfreePaymentId: cfOrder.cf_order_id,
+            paidAt: new Date()
+          },
+          session
         );
-      } catch (notifError) {
-        console.error('Notification error:', notifError);
+      } else {
+        order.paymentStatus = "paid";
+        order.status = "confirmed";
+        order.paidAt = new Date();
+        await order.save({ session });
       }
     } else if (["EXPIRED", "TERMINATED"].includes(cfOrder.order_status)) {
-      order.paymentStatus = "failed";
-      order.status = "cancelled";
-      order.paymentFailedAt = new Date();
-      await order.save();
+      if (intent) {
+        intent.status = "failed";
+        intent.failureReason = cfOrder.order_status;
+        await intent.save({ session });
+      } else {
+        order.paymentStatus = "failed";
+        order.status = "cancelled";
+        order.paymentFailedAt = new Date();
+        await order.save({ session });
+      }
+    }
+
+    await session.commitTransaction();
+    session.endSession();
+
+    if (order && cfOrder.order_status === "PAID") {
+      await notifyOrderPlaced(
+        order,
+        order.user,
+        'Payment Successful',
+        `Payment for order #${order.orderId} verified successfully.`,
+        'payment'
+      );
+      if (intent) {
+        await notifyDriversForOrder(order, order.user);
+      }
     }
 
     res.status(200).json({
       success: true,
       message: "Payment status fetched successfully",
-      orderId: order.orderId,
-      paymentStatus: order.paymentStatus,
+      orderId: order?.orderId || null,
+      paymentStatus: order?.paymentStatus || intent?.status || "pending",
+      orderPlaced: Boolean(order && cfOrder.order_status === "PAID"),
       cashfreeOrderStatus: cfOrder.order_status
     });
 
   } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
     console.error('Cashfree payment confirmation error:', error.response?.data || error.message);
     res.status(500).json({
       success: false,
@@ -1200,11 +1563,14 @@ exports.cashfreeWebhook = async (req, res) => {
 };
 
 const handleCashfreePaymentSuccess = async (data) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
   try {
     const cashfreeOrderId = data.order?.order_id;
     const payment = data.payment || {};
 
-    const order = await Order.findOneAndUpdate(
+    let order = await Order.findOneAndUpdate(
       { cashfreeOrderId },
       {
         paymentStatus: "paid",
@@ -1212,29 +1578,51 @@ const handleCashfreePaymentSuccess = async (data) => {
         status: "confirmed",
         paidAt: payment.payment_time ? new Date(payment.payment_time) : new Date()
       },
-      { new: true }
+      { new: true, session }
     );
+
+    let placedFromIntent = false;
+    if (!order) {
+      const intent = await OnlinePaymentIntent.findOne({
+        gateway: "cashfree",
+        gatewayOrderId: cashfreeOrderId
+      }).session(session);
+
+      if (intent) {
+        order = await placePaidOnlineIntent(
+          intent,
+          {
+            cashfreePaymentId: payment.cf_payment_id || data.order?.cf_order_id,
+            paidAt: payment.payment_time ? new Date(payment.payment_time) : new Date()
+          },
+          session
+        );
+        placedFromIntent = true;
+      }
+    }
+
+    await session.commitTransaction();
+    session.endSession();
 
     if (order) {
       console.log(`Order ${order.orderId} marked as paid via Cashfree webhook`);
 
-      try {
-        const notificationService = require('../../services/notificationService');
-        await notificationService.sendNotification(
-          order.user,
-          'Payment Successful',
-          `We have received your payment for order #${order.orderId}.`,
-          'payment',
-          order.orderId,
-          { orderId: order.orderId }
-        );
-      } catch (notifError) {
-        console.error('Notification error:', notifError);
+      await notifyOrderPlaced(
+        order,
+        order.user,
+        'Payment Successful',
+        `We have received your payment for order #${order.orderId}.`,
+        'payment'
+      );
+      if (placedFromIntent) {
+        await notifyDriversForOrder(order, order.user);
       }
     } else {
       console.warn(`No order found for Cashfree order ${cashfreeOrderId}`);
     }
   } catch (error) {
+    await session.abortTransaction();
+    session.endSession();
     console.error('Error handling Cashfree PAYMENT_SUCCESS_WEBHOOK:', error);
   }
 };
@@ -1270,6 +1658,17 @@ const handleCashfreePaymentFailed = async (data) => {
         console.error('Notification error:', notifError);
       }
     } else {
+      await OnlinePaymentIntent.findOneAndUpdate(
+        {
+          gateway: "cashfree",
+          gatewayOrderId: cashfreeOrderId,
+          status: "pending"
+        },
+        {
+          status: "failed",
+          failureReason: data.payment?.payment_message || data.order?.order_status || "payment_failed"
+        }
+      );
       console.warn(`No order found for Cashfree order ${cashfreeOrderId}`);
     }
   } catch (error) {

@@ -5,51 +5,8 @@ const http = require('http');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const socketManager = require('./socketManager');
+const routes = require('./routes');
 
-const authRoutes = require('./routes/user/authRoutes');
-const productRoutes = require('./routes/product/productRoutes');
-const categoryRoutes = require('./routes/category/categoryRoutes');
-const cartRoutes = require('./routes/cart/cartRoutes');
-const contactRoutes = require('./routes/contact/contact');
-const chatbotRoutes = require('./routes/chatbot/chatbotRoutes');
-const userProfileRoutes = require('./routes/user/profileRoutes');
-const orderRoutes = require('./routes/order/orderRoutes');
-const payoutRoutes = require('./routes/payout/payoutRoutes');
-const addressesRoutes = require('./routes/addresses/addressesRoutes');
-const sellerRoutes = require('./routes/seller/seller');
-const referralRoutes = require('./routes/referral/referralRoutes');
-const policyRoutes = require('./routes/policy/policyRoutes');
-const driverRoutes = require('./routes/driver/driverAuth');
-const driverEarningRoutes = require('./routes/driverEarnings/driverEarnings');
-const driverOrderRoutes = require('./routes/driver/driverRoutes');
-const driverWithdrawRoutes = require('./routes/withdraw/withdraw');
-const driverPayoutRoutes = require('./routes/driverPayout/driverPayoutRoutes');
-const adminRoutes = require('./routes/admin/adminRoutes');
-const adminDashboardRoutes = require('./routes/dashboard/dashboardRoutes');
-const adminUserRoutes = require('./routes/admin/user/adminUserRoutes');
-const adminRoleRoutes = require('./routes/admin/role/roleRoutes');
-const adminPromotorRoutes = require('./routes/admin/promotor/promotor');
-const adminWarehouseRoutes = require('./routes/admin/warehouse/warehouseRoutes');
-const adminDriverRoutes = require('./routes/admin/driver/driver');
-const adminOrderRoutes = require('./routes/admin/order/order');
-const adminBannerRoutes = require('./routes/admin/banner/banner');
-const adminCouponRoutes = require('./routes/admin/coupon/coupon');
-const adminDiscountRoutes = require('./routes/admin/discount/discount');
-const adminSellerRoutes = require('./routes/admin/seller/seller');
-const adminTermsRoutes = require('./routes/admin/termsAndConditions/terms');
-const adminProductRoutes = require('./routes/admin/product/product');
-const notificationRoutes = require('./routes/notificationRoutes');
-const sellerShopRoutes = require('./routes/seller/shopRoutes');
-const publicShopRoutes = require('./routes/public/shopRoutes');
-const adminShopRoutes = require('./routes/admin/shopRoutes');
-const adminPopupRoutes = require('./routes/admin/popupRoutes');
-const promotorRoutes = require('./routes/promotor/promotorRoutes');
-const adminReportRoutes = require('./routes/admin/report/report');
-const warehouseRoutes = require('./routes/warehouse/warehouseRoutes');
-const adminPaymentSettingsRoutes = require('./routes/admin/paymentSettingsRoutes');
-
-const publicPopupRouter = express.Router();
-publicPopupRouter.get('/active', require('./controllers/admin/popupController').getActivePopup);
 const app = express();
 
 const allowedOrigins = [
@@ -88,48 +45,7 @@ app.use(express.json({
   }
 }));
 
-app.use('/api/user', authRoutes);
-app.use('/api/user/profile', userProfileRoutes);
-app.use('/api/user/addresses', addressesRoutes);
-app.use('/api/product', productRoutes);
-app.use('/api/category', categoryRoutes);
-app.use('/api/cart', cartRoutes);
-app.use('/api/contact', contactRoutes);
-app.use('/api/chatbot', chatbotRoutes);
-app.use('/api/order', orderRoutes);
-app.use('/api/payout', payoutRoutes);
-app.use('/api/seller', sellerRoutes);
-app.use('/api/promotor', promotorRoutes);
-app.use('/api/seller/shop', sellerShopRoutes);
-app.use('/api/shops', publicShopRoutes);
-app.use('/api/referral', referralRoutes);
-app.use('/api/driver', driverRoutes);
-app.use('/api/driver', driverOrderRoutes);
-app.use('/api/driver-earnings', driverEarningRoutes);
-app.use('/api/driver/withdraw', driverWithdrawRoutes);
-app.use('/api/driver/payout', driverPayoutRoutes);
-app.use('/api/policy', policyRoutes);
-app.use('/api/notifications', notificationRoutes);
-app.use('/api/admin/roles', adminRoleRoutes);
-app.use('/api/admin/dashboard', adminDashboardRoutes);
-app.use('/api/admin/promotor', adminPromotorRoutes);
-app.use('/api/admin/warehouse', adminWarehouseRoutes);
-app.use('/api/admin/drivers', adminDriverRoutes);
-app.use('/api/admin/orders', adminOrderRoutes);
-app.use('/api/admin/banners', adminBannerRoutes);
-app.use('/api/admin/coupon', adminCouponRoutes);
-app.use('/api/admin/discount', adminDiscountRoutes);
-app.use('/api/admin/seller', adminSellerRoutes);
-app.use('/api/admin/terms', adminTermsRoutes);
-app.use('/api/admin/products', adminProductRoutes);
-app.use('/api/admin/shops', adminShopRoutes);
-app.use('/api/admin/popups', adminPopupRoutes);
-app.use('/api/popups', publicPopupRouter);
-app.use('/api/admin/payment-settings', adminPaymentSettingsRoutes);
-app.use('/api/admin', adminUserRoutes);
-app.use('/api/admin', adminRoutes);
-app.use('/api/admin/reports', adminReportRoutes);
-app.use('/api/warehouse', warehouseRoutes);
+app.use(routes);
 
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB connected'))
