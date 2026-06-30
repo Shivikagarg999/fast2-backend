@@ -258,9 +258,23 @@ exports.updateMyShop = async (req, res) => {
     try {
         const sellerId = req.seller._id || req.seller.id;
 
-        const shop = await Shop.findOne({ seller: sellerId });
+        let shop = await Shop.findOne({ seller: sellerId });
         if (!shop) {
-            return res.status(404).json({ success: false, message: 'Shop not found' });
+            const requestedShopName = String(req.body.shopName || req.seller.businessName || '').trim();
+            if (!requestedShopName) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Shop name is required to create your shop'
+                });
+            }
+
+            shop = new Shop({
+                seller: sellerId,
+                shopName: requestedShopName,
+                contactEmail: req.seller.email || '',
+                contactPhone: req.seller.phone || '',
+                address: req.seller.address || undefined
+            });
         }
 
         const allowedFields = [
@@ -342,11 +356,16 @@ exports.updateMyShop = async (req, res) => {
             }
         }
 
+        const isNewShop = shop.isNew;
         await shop.save();
+
+        if (isNewShop) {
+            await Seller.findByIdAndUpdate(sellerId, { shop: shop._id });
+        }
 
         res.status(200).json({
             success: true,
-            message: 'Shop updated successfully',
+            message: isNewShop ? 'Shop created successfully' : 'Shop updated successfully',
             data: shop,
         });
     } catch (error) {
