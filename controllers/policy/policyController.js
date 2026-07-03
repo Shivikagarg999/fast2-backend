@@ -1,4 +1,5 @@
 const Policy = require('../../models/policy');
+const TermsAndConditions = require('../../models/termsAndConditions');
 
 exports.createPolicy = async (req, res) => {
   try {
@@ -224,6 +225,115 @@ exports.getAllActivePolicies = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error fetching active policies',
+      error: error.message
+    });
+  }
+};
+
+/**
+ * @desc    Get all admin-created policies dynamically (public)
+ * @route   GET /api/policy/public/all
+ * @access  Public
+ *
+ * @queryParam {string}  [type]     Filter by policy type.
+ *                                  Allowed values: "terms", "return", "cancellation", "refund", "termsAndConditions"
+ *                                  Omit to get ALL types at once.
+ * @queryParam {string}  [status]   Filter by status: "active" | "inactive" | "all" (default: "all")
+ * @queryParam {number}  [page]     Page number for pagination (default: 1)
+ * @queryParam {number}  [limit]    Results per page (default: 10, max: 100)
+ *
+ * @returns {object} JSON response:
+ *   {
+ *     success: true,
+ *     data: {
+ *       policies: [...],          // from Policy model (return/cancellation/refund/terms types)
+ *       termsAndConditions: [...] // from TermsAndConditions model (only if type="termsAndConditions" or no type)
+ *     },
+ *     pagination: { page, limit, totalPolicies, totalTerms, totalPages }
+ *   }
+ *
+ * @example  GET /api/policy/public/all
+ *           → returns all policy types + terms
+ *
+ * @example  GET /api/policy/public/all?type=return&status=active
+ *           → returns only active return policies
+ *
+ * @example  GET /api/policy/public/all?type=termsAndConditions&status=active
+ *           → returns only the active terms & conditions document
+ *
+ * @example  GET /api/policy/public/all?status=active
+ *           → returns all active admin policies (all types grouped)
+ */
+exports.getPublicAllPolicies = async (req, res) => {
+  try {
+    const { type, status = 'all', page = 1, limit = 10 } = req.query;
+
+    const pageNum = Math.max(1, parseInt(page));
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
+    const skip = (pageNum - 1) * limitNum;
+
+    const POLICY_TYPES = ['terms', 'return', 'cancellation', 'refund'];
+
+    const wantsTermsModel = !type || type === 'termsAndConditions';
+    const wantsPolicyModel = !type || POLICY_TYPES.includes(type);
+
+    const statusFilter = status === 'active'
+      ? { isActive: true }
+      : status === 'inactive'
+        ? { isActive: false }
+        : {};
+
+    let policies = [];
+    let termsAndConditions = [];
+    let totalPolicies = 0;
+    let totalTerms = 0;
+
+    if (wantsPolicyModel) {
+      const policyFilter = { ...statusFilter };
+      if (type && POLICY_TYPES.includes(type)) policyFilter.policyType = type;
+
+      [policies, totalPolicies] = await Promise.all([
+        Policy.find(policyFilter)
+          .select('title content version effectiveDate policyType isActive metadata createdAt')
+          .sort({ policyType: 1, createdAt: -1 })
+          .skip(wantsTermsModel ? 0 : skip)
+          .limit(wantsTermsModel ? limitNum : limitNum),
+        Policy.countDocuments(policyFilter)
+      ]);
+    }
+
+    if (wantsTermsModel) {
+      [termsAndConditions, totalTerms] = await Promise.all([
+        TermsAndConditions.find(statusFilter)
+          .select('title content version effectiveDate isActive createdAt')
+          .sort({ effectiveDate: -1 })
+          .skip(wantsPolicyModel ? 0 : skip)
+          .limit(limitNum),
+        TermsAndConditions.countDocuments(statusFilter)
+      ]);
+    }
+
+    const totalRecords = totalPolicies + totalTerms;
+
+    res.status(200).json({
+      success: true,
+      data: {
+        policies,
+        termsAndConditions
+      },
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        totalPolicies,
+        totalTerms,
+        total: totalRecords,
+        totalPages: Math.ceil(totalRecords / limitNum)
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching policies',
       error: error.message
     });
   }

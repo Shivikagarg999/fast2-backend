@@ -66,6 +66,7 @@ const getOrderAreaQuery = (lat, lng, pincode) => {
     return query;
 };
 const driverSockets = new Map();        // driverId → socketId
+const sellerSockets = new Map();        // sellerId → socketId
 const orderNotifiedDrivers = new Map(); // orderId  → Set<driverId>  (who was rung)
 const orderDeclines = new Map();        // orderId  → Set<driverId>  (who declined)
 
@@ -238,6 +239,15 @@ exports.init = (httpServer) => {
             }
         });
 
+        // Seller's dashboard registers itself to receive live "new order" events (for auto-print)
+        socket.on('seller_online', (data) => {
+            const sellerId = typeof data === 'string' ? data : data?.sellerId;
+            if (!sellerId) return;
+
+            sellerSockets.set(String(sellerId), socket.id);
+            serverLog(`Seller ${sellerId} is now ONLINE (socket: ${socket.id}) | Total online: ${sellerSockets.size}`, 'success');
+        });
+
         // Driver declines an order → stop ringing on their phone; track all-declined fallback
         socket.on('decline_order', ({ orderId, driverId }) => {
             socket.emit('stop_ringing', { orderId });
@@ -334,6 +344,13 @@ exports.init = (httpServer) => {
                     break;
                 }
             }
+            for (const [sellerId, sid] of sellerSockets.entries()) {
+                if (sid === socket.id) {
+                    sellerSockets.delete(sellerId);
+                    serverLog(`Seller ${sellerId} DISCONNECTED (${reason}) | Total online: ${sellerSockets.size}`, 'warn');
+                    break;
+                }
+            }
         });
     });
 
@@ -411,6 +428,24 @@ exports.emitNewOrder = async (orderId, orderCustomId, lat = null, lng = null, de
 
     // Always push to test clients regardless of DB status
     io.to('_testers').emit('tester_new_order', payload);
+};
+
+/**
+ * Push a live "new order" event straight to a seller's dashboard socket (if connected),
+ * so it can fetch + auto-print the invoice without the seller having to refresh.
+ */
+exports.emitNewOrderToSeller = (sellerId, orderId, orderCustomId) => {
+    if (!io || !sellerId) return;
+
+    const socketId = sellerSockets.get(String(sellerId));
+    const payload = { orderId: String(orderId), orderCustomId: String(orderCustomId) };
+
+    if (socketId) {
+        io.to(socketId).emit('new_order_seller', payload);
+        serverLog(`new_order_seller → seller ${sellerId} (order ${orderCustomId})`, 'event');
+    } else {
+        serverLog(`Seller ${sellerId} not connected — skipped new_order_seller for order ${orderCustomId}`, 'warn');
+    }
 };
 
 /**

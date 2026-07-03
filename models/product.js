@@ -23,10 +23,9 @@ const productSchema = new mongoose.Schema({
     commissionType: { type: String, enum: ['percentage', 'fixed'], default: 'percentage' },
     commissionAmount: { type: Number, default: 0 }
   },
-    seller: {
+  seller: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'Seller',
-      },
+        ref: 'Seller',},
   shop: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Shop',

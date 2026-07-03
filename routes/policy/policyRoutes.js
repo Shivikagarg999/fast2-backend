@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const policyController = require('../../controllers/policy/policyController');
 
+router.get('/public/all', policyController.getPublicAllPolicies);
 router.get('/active', policyController.getAllActivePolicies);
 router.get('/active/:policyType', policyController.getActivePolicyByType);
 router.get('/', policyController.getAllPolicies);

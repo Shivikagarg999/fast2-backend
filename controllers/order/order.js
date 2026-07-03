@@ -59,6 +59,17 @@ const notifyDriversForOrder = async (order, userId) => {
   }
 };
 
+// Pushes a live "new order" event to the seller's dashboard socket so it can auto-print the invoice.
+const notifySellersForOrder = async (order) => {
+  if (!order.seller) return;
+  try {
+    const { emitNewOrderToSeller } = require('../../socketManager');
+    emitNewOrderToSeller(order.seller, order._id, order.orderId);
+  } catch (sellerNotifyError) {
+    console.error('Seller notify error:', sellerNotifyError.message);
+  }
+};
+
 const createPlacedOrder = async ({
   orderData,
   sellerPayouts = [],
@@ -951,6 +962,9 @@ exports.createOrder = async (req, res) => {
       console.error('Socket emit error:', socketError.message);
     }
 
+    // Socket: notify the seller so their dashboard can auto-print the invoice
+    await notifySellersForOrder(order);
+
     return res.status(201).json(response);
 
   } catch (err) {
@@ -1051,6 +1065,7 @@ exports.verifyRazorpayPayment = async (req, res) => {
     );
     if (intent) {
       await notifyDriversForOrder(order, order.user);
+        await notifySellersForOrder(order);
     }
 
     res.status(200).json({
@@ -1163,6 +1178,7 @@ const handlePaymentCaptured = async (payment) => {
       );
       if (placedFromIntent) {
         await notifyDriversForOrder(order, order.user);
+        await notifySellersForOrder(order);
       }
     } else {
       console.warn(`No order found for payment ${payment.id}`);
@@ -1269,6 +1285,7 @@ const handleOrderPaid = async (orderEntity) => {
           'payment'
         );
         await notifyDriversForOrder(order, order.user);
+        await notifySellersForOrder(order);
       }
     } else {
       console.warn(`No order found for Razorpay order ${orderEntity.id}`);
@@ -1506,6 +1523,7 @@ exports.confirmCashfreePayment = async (req, res) => {
       );
       if (intent) {
         await notifyDriversForOrder(order, order.user);
+        await notifySellersForOrder(order);
       }
     }
 
@@ -1616,6 +1634,7 @@ const handleCashfreePaymentSuccess = async (data) => {
       );
       if (placedFromIntent) {
         await notifyDriversForOrder(order, order.user);
+        await notifySellersForOrder(order);
       }
     } else {
       console.warn(`No order found for Cashfree order ${cashfreeOrderId}`);
