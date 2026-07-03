@@ -30,12 +30,15 @@ exports.registerSeller = async (req, res) => {
       });
     }
 
-    const promotorData = await Promotor.findById(promotor);
-    if (!promotorData) {
-      return res.status(404).json({
-        success: false,
-        message: 'Promotor not found'
-      });
+    let promotorData = null;
+    if (promotor) {
+      promotorData = await Promotor.findById(promotor);
+      if (!promotorData) {
+        return res.status(404).json({
+          success: false,
+          message: 'Promotor not found'
+        });
+      }
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
@@ -96,11 +99,11 @@ exports.registerSeller = async (req, res) => {
           businessName: newSeller.businessName,
           approvalStatus: newSeller.approvalStatus
         },
-        promotor: {
+        promotor: promotorData ? {
           id: promotorData._id,
           name: promotorData.name,
           city: promotorData.address.city
-        }
+        } : null
       }
     });
 

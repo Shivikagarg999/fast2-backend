@@ -28,7 +28,6 @@ const sellerSchema = new mongoose.Schema(
     promotor: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Promotor",
-      required: true,
     },
     password: {
       type: String,
