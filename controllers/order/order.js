@@ -2687,7 +2687,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
 
       // ── LOGO ─────────────────────────────────────────────────
       try {
-        const logoPath = path.join(__dirname, '../../images/logo.jpeg');
+        const logoPath = path.join(__dirname, '../../images/logo.png');
         if (fs.existsSync(logoPath)) {
           const logoWidth = Math.min(60, CONTENT_WIDTH);
           const logoX = MARGIN + (CONTENT_WIDTH - logoWidth) / 2;
@@ -2897,7 +2897,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
       dashedLine(y); y += 10;
       center('Computer generated invoice.', y, { size: 6 }); y += 9;
       center('No signature required.', y, { size: 6 }); y += 9;
-      center('Thank you for shopping with Fast 2!', y, { size: 6 }); y += 12;
+      center('Thank you for shopping with GMKart!', y, { size: 6 }); y += 12;
 
       // ── PAYMENT QR ───────────────────────────────────────────
       try {

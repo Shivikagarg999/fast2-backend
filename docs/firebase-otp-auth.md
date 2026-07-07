@@ -1,6 +1,6 @@
 # Firebase OTP Auth
 
-Firebase sends and verifies the OTP on the client. The backend verifies the Firebase ID token, creates or finds the Mongo user, then returns the normal Fast2 JWT used by existing protected APIs.
+Firebase sends and verifies the OTP on the client. The backend verifies the Firebase ID token, creates or finds the Mongo user, then returns the normal GMKart JWT used by existing protected APIs.
 
 ## Backend Endpoint
 
@@ -20,7 +20,7 @@ Success response:
 ```json
 {
   "message": "Login successful",
-  "token": "fast2-jwt",
+  "token": "GMKart-jwt",
   "wallet": 20,
   "referralCode": "ABCD1234",
   "user": {
@@ -36,7 +36,7 @@ Success response:
 Use `token` as:
 
 ```http
-Authorization: Bearer fast2-jwt
+Authorization: Bearer GMKart-jwt
 ```
 
 ## Firebase Admin Env Vars

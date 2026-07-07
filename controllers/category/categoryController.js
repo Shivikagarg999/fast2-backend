@@ -64,7 +64,7 @@ exports.getCategories = async (req, res) => {
 };
 
 // Get category by ID. Only the customer-facing storefront calls this (by
-// categoryId, to show that category's name/header) - fast2-admin always
+// categoryId, to show that category's name/header) - GMKart-admin always
 // works off the already-fetched list, so it's safe to hide inactive
 // categories here too instead of letting them be reachable by direct link.
 exports.getCategoryById = async (req, res) => {

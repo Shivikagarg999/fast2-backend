@@ -18,7 +18,7 @@
     "razorpay": "^2.9.6",
     "socket.io": "^4.8.3"
   },
-  "name": "fast2backend",
+  "name": "GMKartbackend",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",

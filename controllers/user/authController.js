@@ -104,7 +104,7 @@ exports.register = async (req, res) => {
             const notificationService = require("../../services/notificationService");
             await notificationService.sendNotification(
                 user._id,
-                'Welcome to Fast2!',
+                'Welcome to GMKart!',
                 'Thanks for joining us. Check out our latest products!',
                 'promo',
                 null
@@ -510,7 +510,7 @@ exports.serveResetPasswordPage = (req, res) => {
                         showMessage(data.message, 'success');
                         document.getElementById('resetPasswordForm').reset();
                         setTimeout(() => {
-                            window.location.href = 'https://fast2.in/login';
+                            window.location.href = 'https://GMKart.in/login';
                         }, 3000);
                     } else {
                         showMessage(data.error || 'Failed to reset password', 'error');

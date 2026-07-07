@@ -10,20 +10,20 @@ const routes = require('./routes');
 const app = express();
 
 const allowedOrigins = [
-  "https://fast2.in",
-  "https://www.fast2.in",
+  "https://GMKart.in",
+  "https://www.GMKart.in",
   "http://localhost:5173",
   "http://localhost:3000",
   "http://localhost:5000",
-  "https://fast2-admin.vercel.app",
+  "https://GMKart-admin.vercel.app",
   "http://localhost:5000",
-  "https://admin.fast2.in",
-  "https://www.admin.fast2.in",
-  "https://seller.fast2.in",
-  "https://www.seller.fast2.in",
+  "https://admin.GMKart.in",
+  "https://www.admin.GMKart.in",
+  "https://seller.GMKart.in",
+  "https://www.seller.GMKart.in",
   "http://localhost:5174",
-  "https://promotor.fast2.in",
-  "https://www.promotor.fast2.in"
+  "https://promotor.GMKart.in",
+  "https://www.promotor.GMKart.in"
 ];
 
 app.use(

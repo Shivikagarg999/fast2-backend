@@ -395,7 +395,7 @@ GET /api/warehouse/orders?status=delivered&paymentMethod=cod&from=2025-01-01&to=
             "stockStatus": "in_stock",
             "category": "64e1a2b3c4d5e6f7a8b9c0d7",
             "images": [
-              { "url": "https://ik.imagekit.io/fast2/products/rice.jpg", "fileId": "abc123" }
+              { "url": "https://ik.imagekit.io/GMKart/products/rice.jpg", "fileId": "abc123" }
             ]
           },
           "quantity": 2,
@@ -416,7 +416,7 @@ GET /api/warehouse/orders?status=delivered&paymentMethod=cod&from=2025-01-01&to=
             "stockStatus": "in_stock",
             "category": "64e1a2b3c4d5e6f7a8b9c0d7",
             "images": [
-              { "url": "https://ik.imagekit.io/fast2/products/dal.jpg", "fileId": "def456" }
+              { "url": "https://ik.imagekit.io/GMKart/products/dal.jpg", "fileId": "def456" }
             ]
           },
           "quantity": 1,
@@ -510,7 +510,7 @@ GET /api/warehouse/orders?status=delivered&paymentMethod=cod&from=2025-01-01&to=
           "product": {
             "_id": "64e1a2b3c4d5e6f7a8b9c0d6",
             "name": "Basmati Rice 5kg",
-            "images": [{ "url": "https://ik.imagekit.io/fast2/products/rice.jpg", "fileId": "abc123" }]
+            "images": [{ "url": "https://ik.imagekit.io/GMKart/products/rice.jpg", "fileId": "abc123" }]
           },
           "coinsAmount": 10,
           "isScratched": false,

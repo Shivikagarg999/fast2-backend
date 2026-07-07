@@ -22,7 +22,7 @@ class EmailService {
         const mailOptions = {
             from: this.emailUser,
             to: email,
-            subject: "Welcome to Fast 2",
+            subject: "Welcome to GMKart",
             html: `
                 <div>
                     <h2>Welcome</h2>

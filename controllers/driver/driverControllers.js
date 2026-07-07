@@ -802,7 +802,7 @@ exports.sendConfirmationOtp = async (req, res) => {
       await order.save();
     }
 
-    const message = `Your Fast2 Delivery Code is ${secretCode}. Please share this with the driver to receive your package.`;
+    const message = `Your GMKart Delivery Code is ${secretCode}. Please share this with the driver to receive your package.`;
 
     if (order.user) {
       await sendNotification(
