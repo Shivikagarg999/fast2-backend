@@ -9,7 +9,7 @@ Admin dwara create ki gayi saari policies (Terms, Return, Cancellation, Refund) 
 ## Base URL
 
 ```
-https://api.GMKart.in
+https://api.fast2.in
 ```
 
 ---
@@ -42,7 +42,7 @@ GET /api/policy/active
       "policyType": "terms",
       "isActive": true,
       "metadata": {
-        "contactEmail": "support@GMKart.in"
+        "contactEmail": "support@fast2.in"
       }
     },
     "return": {
@@ -55,7 +55,7 @@ GET /api/policy/active
       "isActive": true,
       "metadata": {
         "returnPeriod": 7,
-        "contactEmail": "support@GMKart.in"
+        "contactEmail": "support@fast2.in"
       }
     },
     "cancellation": {
@@ -68,7 +68,7 @@ GET /api/policy/active
       "isActive": true,
       "metadata": {
         "cancellationFee": 10,
-        "contactEmail": "support@GMKart.in"
+        "contactEmail": "support@fast2.in"
       }
     },
     "refund": {
@@ -81,7 +81,7 @@ GET /api/policy/active
       "isActive": true,
       "metadata": {
         "refundProcessingDays": 5,
-        "contactEmail": "support@GMKart.in"
+        "contactEmail": "support@fast2.in"
       }
     }
   }
@@ -131,7 +131,7 @@ GET /api/policy/active/refund
     "isActive": true,
     "metadata": {
       "returnPeriod": 7,
-      "contactEmail": "support@GMKart.in"
+      "contactEmail": "support@fast2.in"
     }
   }
 }
@@ -211,7 +211,7 @@ Agar metadata fields present hain to inhe policy content ke upar highlight box m
 | `metadata.returnPeriod`     | Return Period         | 7 days            |
 | `metadata.cancellationFee`  | Cancellation Fee      | 10%               |
 | `metadata.refundProcessingDays` | Refund Processing | 5 business days   |
-| `metadata.contactEmail`     | Contact Email         | support@GMKart.in  |
+| `metadata.contactEmail`     | Contact Email         | support@fast2.in  |
 
 ---
 
@@ -265,7 +265,7 @@ Html(
 ```js
 const fetchPolicies = async () => {
   try {
-    const response = await fetch('https://api.GMKart.in/api/policy/active');
+    const response = await fetch('https://api.fast2.in/api/policy/active');
     const data = await response.json();
 
     if (data.success) {
@@ -284,7 +284,7 @@ const fetchPolicies = async () => {
 ```dart
 Future<void> fetchPolicies() async {
   final response = await http.get(
-    Uri.parse('https://api.GMKart.in/api/policy/active'),
+    Uri.parse('https://api.fast2.in/api/policy/active'),
   );
 
   final data = jsonDecode(response.body);

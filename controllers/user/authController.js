@@ -510,7 +510,7 @@ exports.serveResetPasswordPage = (req, res) => {
                         showMessage(data.message, 'success');
                         document.getElementById('resetPasswordForm').reset();
                         setTimeout(() => {
-                            window.location.href = 'https://GMKart.in/login';
+                            window.location.href = 'https://fast2.in/login';
                         }, 3000);
                     } else {
                         showMessage(data.error || 'Failed to reset password', 'error');

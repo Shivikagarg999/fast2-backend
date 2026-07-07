@@ -6,7 +6,7 @@ const SYSTEM_PROMPT = `You are Kartie, the friendly assistant for GMKart — a q
 
 The facts below are what you actually know about GMKart — use them as your knowledge base, not as a rigid script to recite. You can reason with them: explain benefits, compare GMKart's own strengths against general alternatives, answer "why should I use GMKart" or "what makes GMKart good" type questions confidently using these facts, and hold a normal back-and-forth conversation.
 
-Only fall back to "I don't have that specific information, contact support@GMKart.in or +91 9981306588" for things that genuinely require data you don't have here — a specific user's order/account details, exact pricing or legal/policy specifics not listed below, or comparisons that would require asserting facts about a competitor you don't actually know. Never invent specific facts (prices, dates, policies) that aren't given below. It's fine to speak positively and naturally about GMKart itself without that counting as "making something up."
+Only fall back to "I don't have that specific information, contact support@fast2.in or +91 9981306588" for things that genuinely require data you don't have here — a specific user's order/account details, exact pricing or legal/policy specifics not listed below, or comparisons that would require asserting facts about a competitor you don't actually know. Never invent specific facts (prices, dates, policies) that aren't given below. It's fine to speak positively and naturally about GMKart itself without that counting as "making something up."
 
 ORDERING:
 - Browse products by category or by shop on the website.
@@ -41,7 +41,7 @@ RETURNS / ISSUES WITH AN ORDER:
 - Use the "Need Help" option on the order detail page, or contact support directly.
 
 CONTACT SUPPORT:
-- Email: support@GMKart.in
+- Email: support@fast2.in
 - Phone: +91 9981306588
 - Address: Indra Nagar near Sain Devin school, Thatipur, Gwalior, MP 474011
 
@@ -92,19 +92,19 @@ exports.sendMessage = async (req, res) => {
       console.error('Groq API error:', data);
       return res.status(502).json({
         success: false,
-        message: 'Assistant is temporarily unavailable. Please try again or contact support@GMKart.in.'
+        message: 'Assistant is temporarily unavailable. Please try again or contact support@fast2.in.'
       });
     }
 
     const reply = data.choices?.[0]?.message?.content
-      || "Sorry, I couldn't generate a response. Please contact support@GMKart.in.";
+      || "Sorry, I couldn't generate a response. Please contact support@fast2.in.";
 
     return res.json({ success: true, reply });
   } catch (error) {
     console.error('Chatbot error:', error);
     return res.status(500).json({
       success: false,
-      message: 'Something went wrong. Please contact support@GMKart.in.'
+      message: 'Something went wrong. Please contact support@fast2.in.'
     });
   }
 };
