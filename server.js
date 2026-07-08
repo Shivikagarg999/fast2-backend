@@ -12,6 +12,8 @@ const app = express();
 const allowedOrigins = [
   "https://fast2.in",
   "https://www.fast2.in",
+  "https://gmkart.com",
+  "https://www.gmkart.com",
   "http://localhost:5173",
   "http://localhost:3000",
   "http://localhost:5000",
