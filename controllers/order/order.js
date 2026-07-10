@@ -2574,7 +2574,10 @@ exports.downloadInvoice = async (req, res) => {
       }
     };
 
-    const pdfBuffer = await this.generatePDFInvoice(invoiceData);
+    const format = (req.query.format || 'thermal').toLowerCase();
+    const pdfBuffer = format === 'a4'
+      ? await this.generatePDFInvoiceA4(invoiceData)
+      : await this.generatePDFInvoice(invoiceData);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename=invoice-${order.orderId}.pdf`);
@@ -2911,6 +2914,211 @@ exports.generatePDFInvoice = async (invoiceData) => {
           y += qrWidth + 10;
         }
       } catch (e) { /* ignore */ }
+
+      doc.end();
+    } catch (error) {
+      reject(error);
+    }
+  });
+};
+
+// Full A4 tax invoice — for sellers printing on a regular A4 printer (as opposed to
+// generatePDFInvoice's 80mm layout, which targets thermal receipt printers).
+exports.generatePDFInvoiceA4 = async (invoiceData) => {
+  const PDFDocument = require('pdfkit');
+  const path = require('path');
+  const fs = require('fs');
+
+  const PAGE_WIDTH = 595.28; // A4 in points
+  const PAGE_HEIGHT = 841.89;
+  const MARGIN = 40;
+  const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2;
+
+  const money = (n) => `Rs. ${Number(n || 0).toFixed(2)}`;
+  const fmtDate = (d) => new Date(d).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ size: 'A4', margin: MARGIN, autoFirstPage: true });
+      const buffers = [];
+      doc.on('data', buffers.push.bind(buffers));
+      doc.on('end', () => resolve(Buffer.concat(buffers)));
+
+      const text = (str, x, y, opts = {}) => {
+        doc.font(opts.bold ? 'Helvetica-Bold' : 'Helvetica')
+          .fontSize(opts.size || 9)
+          .fillColor(opts.color || '#000000')
+          .text(String(str ?? ''), x, y, { width: opts.width, align: opts.align || 'left' });
+      };
+
+      const line = (x1, y1, x2, y2, opts = {}) => {
+        doc.save().moveTo(x1, y1).lineTo(x2, y2)
+          .lineWidth(opts.width || 0.75).stroke(opts.color || '#000000').restore();
+      };
+
+      let y = MARGIN;
+
+      // ── HEADER: logo + business info ──────────────────────────
+      try {
+        const logoPath = path.join(__dirname, '../../images/logo.png');
+        if (fs.existsSync(logoPath)) {
+          doc.image(logoPath, MARGIN, y, { width: 70 });
+        }
+      } catch (e) { /* ignore */ }
+
+      const seller = invoiceData.seller || {};
+      const sellerAddr = seller.address || {};
+      const addrLine = [sellerAddr.street, sellerAddr.city, sellerAddr.state, sellerAddr.pincode]
+        .filter(Boolean).join(', ');
+
+      text(seller.businessName || 'Store', MARGIN + 85, y, { bold: true, size: 14, width: CONTENT_WIDTH - 85 });
+      text(addrLine, MARGIN + 85, y + 20, { size: 9, width: CONTENT_WIDTH - 85 });
+      text(`GSTIN: ${seller.gstNumber || 'N/A'}   PAN: ${seller.panNumber || 'N/A'}`, MARGIN + 85, y + 34, { size: 9 });
+
+      y += 65;
+      text('TAX INVOICE', MARGIN, y, { bold: true, size: 16, width: CONTENT_WIDTH, align: 'center' });
+      y += 24;
+      line(MARGIN, y, PAGE_WIDTH - MARGIN, y);
+      y += 14;
+
+      // ── INVOICE DETAILS + BILL TO (two columns) ───────────────
+      const colWidth = CONTENT_WIDTH / 2 - 10;
+      const leftX = MARGIN;
+      const rightX = MARGIN + CONTENT_WIDTH / 2 + 10;
+
+      text('Invoice Details', leftX, y, { bold: true, size: 10 });
+      text('Bill To', rightX, y, { bold: true, size: 10 });
+      y += 16;
+
+      const invoiceRows = [
+        ['Invoice No', invoiceData.orderId],
+        ['Invoice Date', fmtDate(invoiceData.orderDate)],
+        ['Payment Method', (invoiceData.payment?.method || '').toUpperCase()],
+        ['Payment Status', (invoiceData.payment?.status || '').toUpperCase()],
+      ];
+      let leftY = y;
+      invoiceRows.forEach(([label, value]) => {
+        text(`${label}:`, leftX, leftY, { size: 9, width: 90 });
+        text(value, leftX + 90, leftY, { size: 9, width: colWidth - 90 });
+        leftY += 15;
+      });
+
+      const shipAddr = invoiceData.shippingAddress || {};
+      const shipAddrLine = [shipAddr.street, shipAddr.city, shipAddr.state, shipAddr.pincode]
+        .filter(Boolean).join(', ');
+      let rightY = y;
+      text(invoiceData.customer?.name || '', rightX, rightY, { size: 9, bold: true, width: colWidth });
+      rightY += 14;
+      text(shipAddrLine, rightX, rightY, { size: 9, width: colWidth });
+      rightY += doc.heightOfString(shipAddrLine, { width: colWidth }) + 4;
+      text(invoiceData.customer?.phone || '', rightX, rightY, { size: 9, width: colWidth });
+      rightY += 14;
+      text(invoiceData.customer?.email || '', rightX, rightY, { size: 9, width: colWidth });
+      rightY += 14;
+
+      y = Math.max(leftY, rightY) + 10;
+      line(MARGIN, y, PAGE_WIDTH - MARGIN, y);
+      y += 14;
+
+      // ── ITEMS TABLE ────────────────────────────────────────────
+      const cols = [
+        { key: 'sr', label: '#', width: 20, align: 'left' },
+        { key: 'name', label: 'Item', width: 165, align: 'left' },
+        { key: 'qty', label: 'Qty', width: 35, align: 'right' },
+        { key: 'rate', label: 'Rate', width: 60, align: 'right' },
+        { key: 'taxable', label: 'Taxable', width: 65, align: 'right' },
+        { key: 'gstRate', label: 'GST%', width: 40, align: 'right' },
+        { key: 'gstAmt', label: 'GST Amt', width: 60, align: 'right' },
+        { key: 'total', label: 'Total', width: 65, align: 'right' },
+      ];
+      let colX = [];
+      let cx = MARGIN;
+      cols.forEach(c => { colX.push(cx); cx += c.width; });
+
+      const drawTableHeader = (yPos) => {
+        doc.save().rect(MARGIN, yPos, CONTENT_WIDTH, 20).fill('#f0f0f0').restore();
+        cols.forEach((c, i) => {
+          text(c.label, colX[i] + 3, yPos + 5, { size: 8, bold: true, width: c.width - 6, align: c.align });
+        });
+        line(MARGIN, yPos + 20, PAGE_WIDTH - MARGIN, yPos + 20);
+        return yPos + 20;
+      };
+
+      y = drawTableHeader(y);
+
+      invoiceData.items.forEach((item, idx) => {
+        const name = item.product?.name || item.name || 'Item';
+        const rowHeight = Math.max(18, doc.font('Helvetica').fontSize(8).heightOfString(name, { width: cols[1].width - 6 }) + 6);
+
+        if (y + rowHeight > PAGE_HEIGHT - MARGIN - 100) {
+          doc.addPage();
+          y = MARGIN;
+          y = drawTableHeader(y);
+        }
+
+        const values = {
+          sr: idx + 1,
+          name,
+          qty: item.quantity,
+          rate: money(item.price),
+          taxable: money(item.taxableValue),
+          gstRate: `${item.gstRate || 0}%`,
+          gstAmt: money(item.gstAmount),
+          total: money(item.itemTotal),
+        };
+
+        cols.forEach((c, i) => {
+          text(values[c.key], colX[i] + 3, y + 3, { size: 8, width: c.width - 6, align: c.align });
+        });
+
+        y += rowHeight;
+        line(MARGIN, y, PAGE_WIDTH - MARGIN, y, { width: 0.5, color: '#cccccc' });
+      });
+
+      y += 14;
+
+      // ── TOTALS ─────────────────────────────────────────────────
+      const s = invoiceData.summary || {};
+      const totalsX = MARGIN + CONTENT_WIDTH - 220;
+      const totalsWidth = 220;
+      const totalRow = (label, value, opts = {}) => {
+        text(label, totalsX, y, { size: opts.size || 9, bold: opts.bold, width: totalsWidth - 90 });
+        text(value, totalsX + totalsWidth - 90, y, { size: opts.size || 9, bold: opts.bold, width: 90, align: 'right' });
+        y += opts.gap || 15;
+      };
+
+      totalRow('Subtotal', money(s.subtotal));
+      if (s.totalDiscount > 0) totalRow('Discount', `- ${money(s.totalDiscount)}`);
+      if (s.deliveryFee) totalRow('Delivery Fee', money(s.deliveryFee));
+      if (s.handlingFee) totalRow('Handling Fee', money(s.handlingFee));
+      if (s.couponDiscount > 0) totalRow(`Coupon (${s.couponCode || ''})`, `- ${money(s.couponDiscount)}`);
+      if (s.scratchCouponDiscount > 0) totalRow('Scratch Coupon', `- ${money(s.scratchCouponDiscount)}`);
+      if (invoiceData.gstSummary?.withinState) {
+        totalRow('CGST', money(s.totalCGST));
+        totalRow('SGST', money(s.totalSGST));
+      } else if (invoiceData.gstSummary?.interState) {
+        totalRow('IGST', money(s.totalIGST));
+      }
+      if (s.walletDeduction > 0) totalRow('Wallet Deduction', `- ${money(s.walletDeduction)}`);
+
+      line(totalsX, y, MARGIN + CONTENT_WIDTH, y);
+      y += 6;
+      totalRow('Grand Total', money(s.grandTotal), { bold: true, size: 11, gap: 18 });
+
+      if (s.amountToCollect > 0 && invoiceData.payment?.method === 'cod') {
+        totalRow('Amount to Collect (COD)', money(s.amountToCollect), { bold: true });
+      }
+
+      y += 20;
+
+      // ── FOOTER ───────────────────────────────────────────────
+      if (y < PAGE_HEIGHT - 80) {
+        line(MARGIN, y, PAGE_WIDTH - MARGIN, y);
+        y += 14;
+        text('This is a computer generated invoice and does not require a signature.', MARGIN, y, { size: 8, color: '#666666', width: CONTENT_WIDTH, align: 'center' });
+        y += 14;
+        text('Thank you for shopping with GMKart!', MARGIN, y, { size: 9, bold: true, width: CONTENT_WIDTH, align: 'center' });
+      }
 
       doc.end();
     } catch (error) {

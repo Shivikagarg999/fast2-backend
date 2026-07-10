@@ -21,6 +21,8 @@ const allowedOrigins = [
   "http://localhost:5000",
   "https://admin.fast2.in",
   "https://www.admin.fast2.in",
+  "https://admin.gmkart.com",
+  "https://www.admin.gmkart.com",
   "https://seller.fast2.in",
   "https://www.seller.fast2.in",
   "http://localhost:5174",
