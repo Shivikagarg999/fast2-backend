@@ -119,7 +119,6 @@ exports.register = async (req, res) => {
             token,
             wallet: user.wallet,
             referralCode: user.referralCode,
-            notification_debug_error: debugError, // <--- EXPOSING ERROR HERE
             user: {
                 id: user._id,
                 email: user.email
@@ -510,7 +509,7 @@ exports.serveResetPasswordPage = (req, res) => {
                         showMessage(data.message, 'success');
                         document.getElementById('resetPasswordForm').reset();
                         setTimeout(() => {
-                            window.location.href = 'https://fast2.in/login';
+                            window.location.href = 'https://gmkart.com/login';
                         }, 3000);
                     } else {
                         showMessage(data.error || 'Failed to reset password', 'error');
