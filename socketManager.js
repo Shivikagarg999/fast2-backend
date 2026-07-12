@@ -270,7 +270,7 @@ exports.init = (httpServer) => {
                     'workInfo.currentLocation.lastUpdated': new Date(),
                 });
 
-                // Resolve orderId to the FST001 custom ID so the room key always matches
+                // Resolve orderId to the GMK001 custom ID so the room key always matches
                 let canonicalOrderId = null;
                 if (orderId) {
                     const Order = require('./models/order');

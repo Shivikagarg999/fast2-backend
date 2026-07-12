@@ -312,19 +312,21 @@ orderSchema.pre('save', async function (next) {
 
   if (this.isNew) {
     try {
+      // Matches both the legacy FST-prefixed orders and the current GMK ones so the
+      // sequence keeps incrementing correctly across the rebrand instead of restarting.
       const lastOrder = await this.constructor.findOne(
-        { orderId: { $regex: /^FST\d+$/ } },
+        { orderId: { $regex: /^(FST|GMK)\d+$/ } },
         { orderId: 1 },
         { sort: { createdAt: -1 } }
       );
 
       let nextNumber = 1;
       if (lastOrder && lastOrder.orderId) {
-        const lastNumber = parseInt(lastOrder.orderId.replace('FST', ''));
+        const lastNumber = parseInt(lastOrder.orderId.replace(/^(FST|GMK)/, ''));
         nextNumber = lastNumber + 1;
       }
 
-      this.orderId = `FST${String(nextNumber).padStart(3, '0')}`;
+      this.orderId = `GMK${String(nextNumber).padStart(3, '0')}`;
 
       let secretCode;
       let isUnique = false;

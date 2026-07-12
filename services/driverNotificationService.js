@@ -135,7 +135,7 @@ exports.sendDriverNotification = async (driverId, title, body, channelType = 'ge
  * @param {number} warehouseLat
  * @param {number} warehouseLng
  * @param {string} orderId        - MongoDB _id of the order
- * @param {string} orderCustomId  - Human-readable order ID (e.g. FST042)
+ * @param {string} orderCustomId  - Human-readable order ID (e.g. GMK042)
  * @param {number} maxDistance    - metres, default 5 km
  */
 /**
