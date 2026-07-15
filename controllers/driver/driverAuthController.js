@@ -102,51 +102,33 @@ const registerDriver = async (req, res) => {
       });
     }
 
-    // Upload Aadhar images to ImageKit
+    // Upload all documents to ImageKit in parallel — sequential awaits here made this
+    // endpoint slow enough (7 uploads back-to-back) to trip reverse-proxy timeouts.
     const aadharFrontFile = req.files['aadharFront'][0];
     const aadharBackFile = req.files['aadharBack'][0];
     const panCardFile = req.files['panCard'][0];
-
-    const aadharFrontUrl = await uploadBufferToImageKit(
-      aadharFrontFile.buffer,
-      `drivers/aadhar/${phone}_front.jpg`
-    );
-
-    const aadharBackUrl = await uploadBufferToImageKit(
-      aadharBackFile.buffer,
-      `drivers/aadhar/${phone}_back.jpg`
-    );
-
-    const panCardUrl = await uploadBufferToImageKit(
-      panCardFile.buffer,
-      `drivers/pan/${phone}_pan.jpg`
-    );
-
-    // Upload driving licence, vehicle RC, insurance and bank proof
     const drivingLicenseFile = req.files['drivingLicense'][0];
     const rcDocumentFile = req.files['rcDocument'][0];
     const insuranceFile = req.files['insurance'][0];
     const bankProofFile = req.files['bankProof'][0];
 
-    const drivingLicenseUrl = await uploadBufferToImageKit(
-      drivingLicenseFile.buffer,
-      `drivers/license/${phone}_dl.jpg`
-    );
-
-    const rcDocumentUrl = await uploadBufferToImageKit(
-      rcDocumentFile.buffer,
-      `drivers/vehicle/${phone}_rc.jpg`
-    );
-
-    const insuranceUrl = await uploadBufferToImageKit(
-      insuranceFile.buffer,
-      `drivers/vehicle/${phone}_insurance.jpg`
-    );
-
-    const bankProofUrl = await uploadBufferToImageKit(
-      bankProofFile.buffer,
-      `drivers/bank/${phone}_proof.jpg`
-    );
+    const [
+      aadharFrontUrl,
+      aadharBackUrl,
+      panCardUrl,
+      drivingLicenseUrl,
+      rcDocumentUrl,
+      insuranceUrl,
+      bankProofUrl
+    ] = await Promise.all([
+      uploadBufferToImageKit(aadharFrontFile.buffer, `drivers/aadhar/${phone}_front.jpg`),
+      uploadBufferToImageKit(aadharBackFile.buffer, `drivers/aadhar/${phone}_back.jpg`),
+      uploadBufferToImageKit(panCardFile.buffer, `drivers/pan/${phone}_pan.jpg`),
+      uploadBufferToImageKit(drivingLicenseFile.buffer, `drivers/license/${phone}_dl.jpg`),
+      uploadBufferToImageKit(rcDocumentFile.buffer, `drivers/vehicle/${phone}_rc.jpg`),
+      uploadBufferToImageKit(insuranceFile.buffer, `drivers/vehicle/${phone}_insurance.jpg`),
+      uploadBufferToImageKit(bankProofFile.buffer, `drivers/bank/${phone}_proof.jpg`)
+    ]);
 
     // Create driver
     const driver = new Driver({

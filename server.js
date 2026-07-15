@@ -25,7 +25,7 @@ const allowedOrigins = [
   "https://www.admin.gmkart.com",
   "https://seller.fast2.in",
   "https://www.seller.fast2.in",
-   "https://seller.gmkart.com",
+  "https://seller.gmkart.com",
   "https://www.seller.gmkart.com",
   "http://localhost:5174",
   "https://promotor.fast2.in",
