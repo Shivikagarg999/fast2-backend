@@ -272,7 +272,7 @@ exports.getPublicAllPolicies = async (req, res) => {
     const limitNum = Math.min(100, Math.max(1, parseInt(limit)));
     const skip = (pageNum - 1) * limitNum;
 
-    const POLICY_TYPES = ['terms', 'return', 'cancellation', 'refund'];
+    const POLICY_TYPES = ['terms', 'return', 'cancellation', 'refund', 'privacy'];
 
     const wantsTermsModel = !type || type === 'termsAndConditions';
     const wantsPolicyModel = !type || POLICY_TYPES.includes(type);

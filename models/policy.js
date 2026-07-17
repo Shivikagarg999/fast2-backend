@@ -25,7 +25,7 @@ const policySchema = new mongoose.Schema({
   },
   policyType: {
     type: String,
-    enum: ['terms', 'return', 'cancellation', 'refund'],
+    enum: ['terms', 'return', 'cancellation', 'refund', 'privacy'],
     required: true,
     index: true
   },
