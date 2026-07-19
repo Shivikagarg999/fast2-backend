@@ -1,6 +1,7 @@
 const Order = require('../../models/order');
 const Product = require('../../models/product');
 const Seller = require('../../models/seller');
+const orderController = require('../order/order');
 
 exports.getSellerOrders = async (req, res) => {
   try {
@@ -210,6 +211,38 @@ exports.getOrderDetails = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error fetching order details',
+      error: error.message
+    });
+  }
+};
+
+exports.downloadInvoice = async (req, res) => {
+  try {
+    const sellerId = req.seller._id || req.seller.id;
+    const orderIdentifier = req.params.orderId;
+
+    const orderQuery = orderIdentifier.length === 24
+      ? { _id: orderIdentifier, seller: sellerId }
+      : { orderId: orderIdentifier, seller: sellerId };
+
+    const order = await Order.findOne(orderQuery).select('_id');
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: 'Order not found or access denied'
+      });
+    }
+
+    // Delegate to the shared invoice generator, scoped to this seller's own order
+    req.params.orderId = order._id.toString();
+    return orderController.downloadInvoice(req, res);
+
+  } catch (error) {
+    console.error('Seller download invoice error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error generating invoice',
       error: error.message
     });
   }

@@ -10,7 +10,8 @@ const {
   getSellerOrders,
   getOrderDetails,
   updateOrderStatus,
-  getSellerDashboard
+  getSellerDashboard,
+  downloadInvoice
 } = require('../../controllers/seller/order');
 const {
   addProduct,
@@ -33,6 +34,7 @@ router.patch('/profile', sellerAuth, updateProfile);
 // Seller Orders
 router.get('/orders', sellerAuth, getSellerOrders);
 router.get('/orders/:orderId', sellerAuth, getOrderDetails);
+router.get('/orders/:orderId/invoice', sellerAuth, downloadInvoice);
 router.put('/orders/:orderId/status', sellerAuth, updateOrderStatus);
 
 // Dashboard

@@ -118,6 +118,14 @@ const createPlacedOrder = async ({
 
   await order.save({ session });
 
+  if (order.coupon?.code) {
+    await Coupon.findOneAndUpdate(
+      { code: order.coupon.code },
+      { $inc: { usedCount: 1 } },
+      { session }
+    );
+  }
+
   const payoutPromises = sellerPayouts.map(data => {
     const sellerId = data.seller || data.sellerId;
     const sellerAmount = roundMoney(data.amount);
@@ -207,6 +215,14 @@ exports.createOrder = async (req, res) => {
         shippingAddress = JSON.parse(shippingAddress);
       } catch (e) {
         console.error("Failed to parse shippingAddress:", e);
+      }
+    }
+    if (typeof coupon === 'string') {
+      try {
+        coupon = JSON.parse(coupon);
+      } catch (e) {
+        console.error("Failed to parse coupon:", e);
+        coupon = null;
       }
     }
 
@@ -476,9 +492,31 @@ exports.createOrder = async (req, res) => {
       coupon: { discount: 0 }
     });
 
-    if (coupon && coupon.discount) {
-      discount = Math.min(coupon.discount, finalAmount);
+    let appliedCoupon = null;
+    if (coupon && coupon.code) {
+      let validCoupon;
+      try {
+        validCoupon = await Coupon.validateCoupon(coupon.code, userId, finalAmount);
+      } catch (couponErr) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ success: false, error: couponErr.message });
+      }
+
+      const userCouponUsage = await Order.countDocuments({
+        user: userId,
+        'coupon.code': validCoupon.code
+      }).session(session);
+
+      if (userCouponUsage >= validCoupon.perUserLimit) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(400).json({ success: false, error: "You have already used this coupon" });
+      }
+
+      discount = validCoupon.calculateDiscount(finalAmount);
       finalAmount = parseFloat((finalAmount - discount).toFixed(2));
+      appliedCoupon = { code: validCoupon.code, discount };
     }
 
     let scratchCouponDiscount = 0;
@@ -751,7 +789,7 @@ exports.createOrder = async (req, res) => {
       handlingCharge: handlingCharge,
       total: total,
       totalGst: totalGst,
-      coupon: coupon || {},
+      coupon: appliedCoupon || {},
       scratchCouponDiscount,
       finalAmount: finalAmount,
       shippingAddress: normalizedShippingAddress,
@@ -854,6 +892,14 @@ exports.createOrder = async (req, res) => {
     const order = new Order(orderPayload);
 
     await order.save({ session });
+
+    if (order.coupon?.code) {
+      await Coupon.findOneAndUpdate(
+        { code: order.coupon.code },
+        { $inc: { usedCount: 1 } },
+        { session }
+      );
+    }
 
     const payoutPromises = [];
 
@@ -2579,8 +2625,9 @@ exports.downloadInvoice = async (req, res) => {
       ? await this.generatePDFInvoiceA4(invoiceData)
       : await this.generatePDFInvoice(invoiceData);
 
+    const disposition = (req.query.disposition || 'attachment').toLowerCase() === 'inline' ? 'inline' : 'attachment';
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename=invoice-${order.orderId}.pdf`);
+    res.setHeader('Content-Disposition', `${disposition}; filename=invoice-${order.orderId}.pdf`);
     res.setHeader('Content-Length', pdfBuffer.length);
 
     res.send(pdfBuffer);
@@ -2861,8 +2908,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
       y = row('GRAND TOTAL:', `Rs ${invoiceData.summary.payableAmount.toFixed(2)}`, y, { bold: true, size: 8, minHeight: 12, afterGap: 2 });
 
       // 7. Wallet deduction → amount paid (only show if user explicitly used wallet)
-      const paymentMethodStr = (invoiceData.payment.method || '').toLowerCase();
-      const walletWasUsed = paymentMethodStr.includes('wallet') && (invoiceData.payment.walletDeduction || 0) > 0;
+      const walletWasUsed = (invoiceData.payment.walletDeduction || 0) > 0;
       if (walletWasUsed) {
         y = row('Wallet Deduction:', `-Rs ${invoiceData.payment.walletDeduction.toFixed(2)}`, y);
         dashedLine(y); y += 6;
@@ -3251,9 +3297,8 @@ exports.redeemScratchCoupon = async (req, res) => {
     const discount = coupon.calculateDiscount(orderAmount);
     const finalAmount = orderAmount - discount;
 
-    scratchOrder.orderScratchCard.isRedeemed = true;
-    scratchOrder.orderScratchCard.redeemedAt = new Date();
-    await scratchOrder.save();
+    // Preview only — actual redemption happens when the order is placed (see createOrder),
+    // so the coupon isn't burned until checkout actually completes.
 
     return res.status(200).json({
       success: true,
