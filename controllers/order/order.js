@@ -19,6 +19,7 @@ const {
   getDisplayFinalAmount,
   roundMoney
 } = require('../../utils/orderAmounts');
+const { calculateOrderPricing } = require('../../utils/orderPricing');
 
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID,
@@ -402,169 +403,10 @@ exports.createOrder = async (req, res) => {
       });
     }
 
-    let subtotal = 0;
-    let totalGst = 0;
-    let deliveryCharges = 0;
-    let isFreeDelivery = false;
-
-    const sellerDeliveryMap = new Map();
-
-    for (const item of items) {
-      const product = products.find(p => p._id.toString() === item.product.toString());
-      const itemTotal = item.price * item.quantity;
-      subtotal += itemTotal;
-
-      const itemGstPercent = product.category?.gstPercent || 0;
-      totalGst += parseFloat(((itemTotal * itemGstPercent) / 100).toFixed(2));
-
-      const productDelivery = product.delivery || {};
-      const productDeliveryCharges = productDelivery.deliveryCharges || 0;
-      const productFreeThreshold = productDelivery.freeDeliveryThreshold || 0;
-
-      if (product.seller) {
-        const sellerId = product.seller._id.toString();
-
-        if (sellerDeliveryMap.has(sellerId)) {
-          const existing = sellerDeliveryMap.get(sellerId);
-          sellerDeliveryMap.set(sellerId, {
-            ...existing,
-            subtotal: existing.subtotal + itemTotal,
-            highestDeliveryCharge: Math.max(existing.highestDeliveryCharge, productDeliveryCharges),
-            lowestFreeThreshold: existing.lowestFreeThreshold > 0 ?
-              Math.min(existing.lowestFreeThreshold, productFreeThreshold) :
-              productFreeThreshold,
-            items: [...existing.items, { productId: product._id, itemTotal }]
-          });
-        } else {
-          sellerDeliveryMap.set(sellerId, {
-            sellerId: sellerId,
-            sellerName: product.seller.name,
-            subtotal: itemTotal,
-            highestDeliveryCharge: productDeliveryCharges,
-            lowestFreeThreshold: productFreeThreshold,
-            items: [{ productId: product._id, itemTotal }]
-          });
-        }
-      } else {
-        deliveryCharges += productDeliveryCharges;
-
-        if (productFreeThreshold > 0 && itemTotal >= productFreeThreshold) {
-          isFreeDelivery = true;
-        }
-      }
-    }
-
-    for (const [sellerId, sellerData] of sellerDeliveryMap.entries()) {
-      if (sellerData.lowestFreeThreshold > 0 && sellerData.subtotal >= sellerData.lowestFreeThreshold) {
-        continue;
-      }
-
-      deliveryCharges += sellerData.highestDeliveryCharge;
-    }
-
-    const anySellerFreeDelivery = Array.from(sellerDeliveryMap.values()).some(seller =>
-      seller.lowestFreeThreshold > 0 && seller.subtotal >= seller.lowestFreeThreshold
-    );
-
-    if (anySellerFreeDelivery) {
-      deliveryCharges = 0;
-      isFreeDelivery = true;
-    }
-
-    // Global Free Delivery Threshold
-    if (subtotal > 199) {
-      deliveryCharges = 0;
-      isFreeDelivery = true;
-    }
-
-    const HANDLING_CHARGE_PER_SHOP = 2;
-    const numberOfShops = sellerDeliveryMap.size;
-    const handlingCharge = numberOfShops * HANDLING_CHARGE_PER_SHOP;
-
-    let total = parseFloat((subtotal + deliveryCharges).toFixed(2));
-    totalGst = parseFloat(totalGst.toFixed(2));
-
-    let discount = 0;
-    let finalAmount = calculateFinalOrderAmount({
-      total,
-      handlingCharge,
-      totalGst,
-      coupon: { discount: 0 }
-    });
-
-    let appliedCoupon = null;
-    if (coupon && coupon.code) {
-      let validCoupon;
-      try {
-        validCoupon = await Coupon.validateCoupon(coupon.code, userId, finalAmount);
-      } catch (couponErr) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({ success: false, error: couponErr.message });
-      }
-
-      const userCouponUsage = await Order.countDocuments({
-        user: userId,
-        'coupon.code': validCoupon.code
-      }).session(session);
-
-      if (userCouponUsage >= validCoupon.perUserLimit) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({ success: false, error: "You have already used this coupon" });
-      }
-
-      discount = validCoupon.calculateDiscount(finalAmount);
-      finalAmount = parseFloat((finalAmount - discount).toFixed(2));
-      appliedCoupon = { code: validCoupon.code, discount };
-    }
-
-    let scratchCouponDiscount = 0;
-    let scratchCouponOrder = null;
-    let scratchCouponDetails = null;
-
-    if (scratchCouponCode) {
-      scratchCouponOrder = await Order.findOne({
-        user: userId,
-        'orderScratchCard.couponCode': scratchCouponCode.toUpperCase(),
-        'orderScratchCard.isScratched': true,
-        'orderScratchCard.isRedeemed': false
-      });
-
-      if (!scratchCouponOrder) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({
-          success: false,
-          error: 'Invalid or already redeemed scratch card coupon'
-        });
-      }
-
-      try {
-        const scratchCoupon = await Coupon.validateCoupon(scratchCouponCode, userId, finalAmount);
-        scratchCouponDiscount = scratchCoupon.calculateDiscount(finalAmount);
-        finalAmount = parseFloat((finalAmount - scratchCouponDiscount).toFixed(2));
-        scratchCouponDetails = {
-          code: scratchCoupon.code,
-          discountType: scratchCoupon.discountType,
-          discountValue: scratchCoupon.discountValue,
-          discountAmount: scratchCouponDiscount
-        };
-      } catch (err) {
-        await session.abortTransaction();
-        session.endSession();
-        return res.status(400).json({ success: false, error: err.message });
-      }
-    }
-
-    let walletDeduction = 0;
-    let cashOnDelivery = finalAmount;
-    let paymentStatus = "pending";
-
+    let walletUser = null;
     if (useWallet) {
-      const user = await User.findById(userId).session(session);
-
-      if (!user) {
+      walletUser = await User.findById(userId).session(session);
+      if (!walletUser) {
         await session.abortTransaction();
         session.endSession();
         return res.status(404).json({
@@ -572,27 +414,59 @@ exports.createOrder = async (req, res) => {
           error: "User not found"
         });
       }
+    }
+    const walletBalance = walletUser?.wallet || 0;
 
-      const walletBalance = user.wallet || 0;
+    let pricing;
+    try {
+      pricing = await calculateOrderPricing({
+        items,
+        products,
+        coupon,
+        scratchCouponCode,
+        paymentMethod,
+        useWallet,
+        userId,
+        walletBalance,
+        session
+      });
+    } catch (pricingError) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({ success: false, error: pricingError.message });
+    }
 
-      if (walletBalance > 0) {
-        walletDeduction = Math.min(walletBalance, finalAmount);
-        cashOnDelivery = finalAmount - walletDeduction;
+    const {
+      subtotal,
+      deliveryCharges,
+      isFreeDelivery,
+      handlingCharge,
+      totalGst,
+      total,
+      appliedCoupon,
+      scratchCouponDiscount,
+      scratchCouponDetails,
+      scratchCouponOrder,
+      walletDeduction,
+      finalAmount,
+      onlinePayableAmount
+    } = pricing;
 
-        if (paymentMethod === "cod") {
-          user.wallet = parseFloat((walletBalance - walletDeduction).toFixed(2));
-          await user.save({ session });
+    let cashOnDelivery = finalAmount;
+    let paymentStatus = "pending";
 
-          if (cashOnDelivery === 0) {
-            paymentStatus = "paid";
-          }
+    if (useWallet && walletDeduction > 0) {
+      cashOnDelivery = finalAmount - walletDeduction;
+
+      if (paymentMethod === "cod") {
+        walletUser.wallet = parseFloat((walletBalance - walletDeduction).toFixed(2));
+        await walletUser.save({ session });
+
+        if (cashOnDelivery === 0) {
+          paymentStatus = "paid";
         }
       }
     }
-
-    const onlinePayableAmount = paymentMethod === "online"
-      ? roundMoney(Math.max(finalAmount - walletDeduction, 0))
-      : 0;
 
     let activeGateway = null;
     if (paymentMethod === "online" && onlinePayableAmount > 0) {
@@ -1022,6 +896,65 @@ exports.createOrder = async (req, res) => {
       error: "Internal server error",
       debug: err.message
     });
+  }
+};
+
+// Read-only preview of the exact pricing createOrder would charge — no DB writes,
+// no payment gateway order created. Lets the app show the checkout screen the same
+// total it will actually be charged, instead of recomputing delivery/discount rules
+// client-side (which drift out of sync with the backend over time).
+exports.calculateOrderTotal = async (req, res) => {
+  try {
+    let { items, paymentMethod = "cod", useWallet = false, coupon, scratchCouponCode } = req.body;
+
+    if (typeof items === 'string') {
+      try { items = JSON.parse(items); } catch (e) { /* leave as-is, validated below */ }
+    }
+    if (typeof coupon === 'string') {
+      try { coupon = JSON.parse(coupon); } catch (e) { coupon = null; }
+    }
+
+    if (!items || !items.length) {
+      return res.status(400).json({ success: false, error: "Order items are required" });
+    }
+
+    const userId = req.user._id;
+    const productIds = items.map(item => item.product);
+
+    const products = await Product.find({ _id: { $in: productIds } })
+      .populate('seller')
+      .populate('category');
+
+    if (products.length !== items.length) {
+      return res.status(404).json({
+        success: false,
+        error: "Some products not found",
+        requested: items.length,
+        found: products.length
+      });
+    }
+
+    let walletBalance = 0;
+    if (useWallet) {
+      const user = await User.findById(userId);
+      walletBalance = user?.wallet || 0;
+    }
+
+    const pricing = await calculateOrderPricing({
+      items,
+      products,
+      coupon,
+      scratchCouponCode,
+      paymentMethod,
+      useWallet,
+      userId,
+      walletBalance
+    });
+
+    return res.status(200).json({ success: true, data: pricing });
+  } catch (error) {
+    console.error('Calculate order total error:', error);
+    return res.status(400).json({ success: false, error: error.message });
   }
 };
 

@@ -5,6 +5,7 @@ const auth = require("../../middlewares/userauth");
 const upload = require("../../middlewares/upload");
 
 router.post("/create", auth, upload.single("prescriptionImage"), orderController.createOrder);
+router.post("/calculate-total", auth, orderController.calculateOrderTotal);
 router.get("/payment-options", orderController.getPaymentOptions);
 router.post("/verify-payment", auth, orderController.verifyRazorpayPayment);
 router.post("/verify-cashfree-payment", auth, orderController.confirmCashfreePayment);
