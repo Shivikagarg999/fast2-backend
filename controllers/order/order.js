@@ -440,6 +440,7 @@ exports.createOrder = async (req, res) => {
       subtotal,
       deliveryCharges,
       isFreeDelivery,
+      numberOfShops,
       handlingCharge,
       totalGst,
       total,

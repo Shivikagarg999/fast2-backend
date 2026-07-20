@@ -170,6 +170,7 @@ async function calculateOrderPricing({
     subtotal: roundMoney(subtotal),
     deliveryCharges: roundMoney(deliveryCharges),
     isFreeDelivery,
+    numberOfShops,
     handlingCharge: roundMoney(handlingCharge),
     totalGst: roundMoney(totalGst),
     total: roundMoney(total),
