@@ -2563,6 +2563,11 @@ exports.downloadInvoice = async (req, res) => {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `${disposition}; filename=invoice-${order.orderId}.pdf`);
     res.setHeader('Content-Length', pdfBuffer.length);
+    // Invoices are regenerated from live order data each time — never let a browser,
+    // proxy, or CDN cache a response and later serve a stale invoice for this same URL.
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
 
     res.send(pdfBuffer);
 
@@ -2623,7 +2628,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
 
       // Draw text blocks using their measured height so wrapped invoice text does not overlap.
       const measuredText = (text, x, y, width, opts = {}) => {
-        const font = opts.bold ? 'Courier-Bold' : 'Courier';
+        const font = 'Courier-Bold';
         const size = opts.size || 7;
         const value = String(text ?? '');
         const textOptions = { width, align: opts.align || 'left' };
@@ -2634,7 +2639,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
       };
 
       const row = (label, value, y, opts = {}) => {
-        const f = opts.bold ? 'Courier-Bold' : 'Courier';
+        const f = 'Courier-Bold';
         const sz = opts.size || 7;
         const gap = opts.gap ?? 3;
         const labelWidth = opts.labelWidth || 108;
@@ -2662,7 +2667,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
       };
 
       const center = (text, y, opts = {}) => {
-        doc.font(opts.bold ? 'Courier-Bold' : 'Courier')
+        doc.font('Courier-Bold')
           .fontSize(opts.size || 7).fillColor('#000000')
           .text(text, MARGIN, y, { width: CONTENT_WIDTH, align: 'center' });
       };
@@ -2765,7 +2770,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
         const priceLine = item.itemTotal.toFixed(2);
 
         // Row 1: Item cols
-        doc.font('Courier').fontSize(6).fillColor('#000000');
+        doc.font('Courier-Bold').fontSize(6).fillColor('#000000');
         const itemOptions = { width: WI };
         const itemNameHeight = doc.heightOfString(name, itemOptions);
         doc.text(name,              CI, y, itemOptions);
@@ -2789,7 +2794,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
       dashedLine(y); y += 8;
 
       // ── TOTALS (checkout sequence) ────────────────────────────
-      doc.font('Courier').fontSize(7).fillColor('#000000');
+      doc.font('Courier-Bold').fontSize(7).fillColor('#000000');
 
       // 1. MRP → Discount → Discounted subtotal
       const totalDiscount = invoiceData.summary.totalDiscount || 0;
@@ -2803,7 +2808,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
       // 2. GST breakdown
       dashedLine(y); y += 6;
       doc.font('Courier-Bold').fontSize(6.5).text('GST BREAKDOWN:', MARGIN, y); y += 9;
-      doc.font('Courier').fontSize(7);
+      doc.font('Courier-Bold').fontSize(7);
       if ((invoiceData.summary.totalCGST || 0) > 0 || (invoiceData.summary.totalSGST || 0) > 0) {
         y = row('CGST:', `Rs ${(invoiceData.summary.totalCGST || 0).toFixed(2)}`, y);
         y = row('SGST:', `Rs ${(invoiceData.summary.totalSGST || 0).toFixed(2)}`, y);
@@ -2854,13 +2859,13 @@ exports.generatePDFInvoice = async (invoiceData) => {
 
       // ── PAYMENT ──────────────────────────────────────────────
       doc.font('Courier-Bold').fontSize(7).text('PAYMENT:', MARGIN, y); y += 10;
-      doc.font('Courier').fontSize(7);
+      doc.font('Courier-Bold').fontSize(7);
       y = row('Method:', (invoiceData.payment.method || '').toUpperCase(), y);
       y = row('Status:', (invoiceData.payment.status || '').toUpperCase(), y);
       // ── GST SUPPLY NOTE ──────────────────────────────────────
       if ((invoiceData.summary.totalGST || 0) > 0) {
         dashedLine(y); y += 8;
-        doc.font('Courier').fontSize(6).fillColor('#000000');
+        doc.font('Courier-Bold').fontSize(6).fillColor('#000000');
         if (invoiceData.gstSummary.withinState) {
           y = measuredText(
             `Within-state supply: CGST Rs ${(invoiceData.summary.totalCGST || 0).toFixed(2)} + SGST Rs ${(invoiceData.summary.totalSGST || 0).toFixed(2)}`,
@@ -2925,7 +2930,7 @@ exports.generatePDFInvoiceA4 = async (invoiceData) => {
       doc.on('end', () => resolve(Buffer.concat(buffers)));
 
       const text = (str, x, y, opts = {}) => {
-        doc.font(opts.bold ? 'Helvetica-Bold' : 'Helvetica')
+        doc.font('Helvetica-Bold')
           .fontSize(opts.size || 9)
           .fillColor(opts.color || '#000000')
           .text(String(str ?? ''), x, y, { width: opts.width, align: opts.align || 'left' });
@@ -3028,7 +3033,7 @@ exports.generatePDFInvoiceA4 = async (invoiceData) => {
 
       invoiceData.items.forEach((item, idx) => {
         const name = item.product?.name || item.name || 'Item';
-        const rowHeight = Math.max(18, doc.font('Helvetica').fontSize(8).heightOfString(name, { width: cols[1].width - 6 }) + 6);
+        const rowHeight = Math.max(18, doc.font('Helvetica-Bold').fontSize(8).heightOfString(name, { width: cols[1].width - 6 }) + 6);
 
         if (y + rowHeight > PAGE_HEIGHT - MARGIN - 100) {
           doc.addPage();
