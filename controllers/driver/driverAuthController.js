@@ -502,6 +502,51 @@ const completeDriverProfile = async (req, res) => {
   }
 };
 
+// @desc    Delete driver account
+// @route   DELETE /api/driver/delete-account
+// @access  Private
+const deleteAccount = async (req, res) => {
+  try {
+    const { password } = req.body;
+
+    if (!password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Password is required to delete your account'
+      });
+    }
+
+    const driver = await Driver.findById(req.driver.driverId);
+    if (!driver) {
+      return res.status(404).json({
+        success: false,
+        message: 'Driver not found'
+      });
+    }
+
+    const isPasswordValid = await driver.comparePassword(password);
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        message: 'Incorrect password'
+      });
+    }
+
+    await Driver.findByIdAndDelete(req.driver.driverId);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Account deleted successfully'
+    });
+  } catch (error) {
+    console.error('Delete account error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
 // @desc    Get ImageKit authentication
 // @route   GET /api/driver/auth/imagekit-auth
 // @access  Private
@@ -528,5 +573,6 @@ module.exports = {
   uploadDocuments,
   updateProfilePhoto,
   completeDriverProfile,
+  deleteAccount,
   getImageKitAuth
 };

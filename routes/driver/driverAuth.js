@@ -7,6 +7,7 @@ const {
   uploadDocuments,
   updateProfilePhoto,
   completeDriverProfile,
+  deleteAccount,
   getImageKitAuth
 } = require('../../controllers/driver/driverAuthController');
 const { authenticateToken } = require('../../middlewares/driverAuth');
@@ -50,5 +51,6 @@ router.put('/profile-photo',
 
 router.post('/complete-profile', authenticateToken, completeDriverProfile);
 router.get('/imagekit-auth', authenticateToken, getImageKitAuth);
+router.delete('/delete-account', authenticateToken, deleteAccount);
 
 module.exports = router;
