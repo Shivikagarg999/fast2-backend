@@ -2514,9 +2514,9 @@ exports.downloadInvoice = async (req, res) => {
       orderId: order.orderId,
       orderDate: order.createdAt,
       customer: {
-        name: order.user.name,
+        name: order.shippingAddress?.name || order.user.name,
         email: order.user.email,
-        phone: order.user.phone
+        phone: order.shippingAddress?.phone || order.user.phone
       },
       seller: order.seller,
       shippingAddress: order.shippingAddress,
