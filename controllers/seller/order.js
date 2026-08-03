@@ -218,14 +218,23 @@ exports.getOrderDetails = async (req, res) => {
 
 exports.downloadInvoice = async (req, res) => {
   try {
-    const sellerId = req.seller._id || req.seller.id;
+    const sellerId = (req.seller._id || req.seller.id).toString();
     const orderIdentifier = req.params.orderId;
 
-    const orderQuery = orderIdentifier.length === 24
-      ? { _id: orderIdentifier, seller: sellerId }
-      : { orderId: orderIdentifier, seller: sellerId };
+    // Match on item-level product ownership, not the order's "primary seller" field —
+    // an order can contain items from several sellers, and this seller should be able
+    // to get an invoice for their own items even if another seller is listed as primary.
+    const sellerProducts = await Product.find({ seller: sellerId }).select('_id');
+    const productIds = sellerProducts.map(p => p._id);
 
-    const order = await Order.findOne(orderQuery).select('_id');
+    const baseQuery = orderIdentifier.length === 24
+      ? { _id: orderIdentifier }
+      : { orderId: orderIdentifier };
+
+    const order = await Order.findOne({
+      ...baseQuery,
+      'items.product': { $in: productIds }
+    }).select('_id');
 
     if (!order) {
       return res.status(404).json({
@@ -234,8 +243,9 @@ exports.downloadInvoice = async (req, res) => {
       });
     }
 
-    // Delegate to the shared invoice generator, scoped to this seller's own order
+    // Delegate to the shared invoice generator, scoped to just this seller's own items
     req.params.orderId = order._id.toString();
+    req.sellerScopeId = sellerId;
     return orderController.downloadInvoice(req, res);
 
   } catch (error) {

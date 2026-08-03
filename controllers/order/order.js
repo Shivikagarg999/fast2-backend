@@ -2381,6 +2381,152 @@ exports.getMyOrders = async (req, res) => {
   }
 };
 
+// Builds the invoiceData object (GST-correct) for a specific subset of an order's
+// items, attributed to a specific seller. Used both for single-seller orders (all
+// items, order-level charges included) and for one section of a multi-seller order
+// (that seller's items only; order-level charges like delivery/handling are platform-
+// level, not this seller's, so they're zeroed out here — matching how marketplaces
+// like Amazon/Flipkart issue separate per-seller tax invoices for the items sold,
+// while shipping/platform fees are handled separately from the seller's own invoice).
+const buildInvoiceDataForSeller = (order, items, sellerInfo, { includeOrderLevelCharges }) => {
+  const shippingState = order.shippingAddress.state;
+  let totalCGST = 0;
+  let totalSGST = 0;
+  let totalIGST = 0;
+
+  const itemsWithGST = items.map(item => {
+    const itemTotal = item.price * item.quantity;
+    const gstRate = item.gstPercent || item.product?.category?.gstPercent || 0;
+    const gstAmount = item.gstAmount != null ? item.gstAmount : parseFloat(((itemTotal * gstRate) / 100).toFixed(2));
+    const taxableValue = gstRate > 0 ? itemTotal - gstAmount : itemTotal;
+
+    // MRP from product.oldPrice; if not set, MRP equals selling price
+    const mrp = item.product?.oldPrice || item.price;
+    const discountPerUnit = parseFloat(Math.max(0, mrp - item.price).toFixed(2));
+    const mrpTotal = parseFloat((mrp * item.quantity).toFixed(2));
+    const discountTotal = parseFloat((discountPerUnit * item.quantity).toFixed(2));
+
+    const sellerState = (item.product?.seller?.address?.state || '').trim().toLowerCase();
+    const buyerState = (shippingState || '').trim().toLowerCase();
+    const isWithinState = sellerState && buyerState && sellerState === buyerState;
+
+    let cgstAmount = 0;
+    let sgstAmount = 0;
+    let igstAmount = 0;
+    if (gstAmount > 0) {
+      if (isWithinState) {
+        cgstAmount = parseFloat((gstAmount / 2).toFixed(2));
+        sgstAmount = parseFloat((gstAmount / 2).toFixed(2));
+      } else {
+        igstAmount = gstAmount;
+      }
+    }
+
+    totalCGST += cgstAmount;
+    totalSGST += sgstAmount;
+    totalIGST += igstAmount;
+
+    return {
+      ...item.toObject(),
+      itemTotal,
+      taxableValue,
+      gstRate,
+      gstAmount,
+      cgstAmount,
+      sgstAmount,
+      igstAmount,
+      isWithinState,
+      mrp,
+      discountPerUnit,
+      mrpTotal,
+      discountTotal
+    };
+  });
+
+  const totalMRP = parseFloat(itemsWithGST.reduce((s, i) => s + i.mrpTotal, 0).toFixed(2));
+  const totalDiscount = parseFloat(itemsWithGST.reduce((s, i) => s + i.discountTotal, 0).toFixed(2));
+  const itemsSubtotal = parseFloat(itemsWithGST.reduce((s, i) => s + i.itemTotal, 0).toFixed(2));
+  const itemsGST = parseFloat((totalCGST + totalSGST + totalIGST).toFixed(2));
+
+  // Order-level values (only meaningful/shown when this invoice covers the WHOLE order)
+  const orderSubtotal = order.subtotal || order.items.reduce((s, i) => s + i.price * i.quantity, 0);
+  const deliveryFee = includeOrderLevelCharges ? (order.deliveryCharges || 0) : 0;
+  const handlingFee = includeOrderLevelCharges ? (order.handlingCharge || 0) : 0;
+  const couponDiscount = includeOrderLevelCharges ? roundMoney(order.coupon?.discount) : 0;
+  const scratchCouponDiscount = includeOrderLevelCharges ? roundMoney(order.scratchCouponDiscount) : 0;
+  const couponCode = includeOrderLevelCharges ? (order.coupon?.code || null) : null;
+  const correctedFinalAmount = getDisplayFinalAmount(order);
+
+  const subtotal = includeOrderLevelCharges ? orderSubtotal : itemsSubtotal;
+  const totalGST = includeOrderLevelCharges ? (order.totalGst || 0) : itemsGST;
+  const grandTotal = includeOrderLevelCharges
+    ? correctedFinalAmount
+    : roundMoney(itemsSubtotal + itemsGST);
+  const amountToCollect = includeOrderLevelCharges
+    ? (order.cashOnDelivery > 0
+      ? roundMoney(order.cashOnDelivery)
+      : Math.max(correctedFinalAmount - roundMoney(order.walletDeduction), 0))
+    : grandTotal;
+
+  return {
+    orderId: order.orderId,
+    orderDate: order.createdAt,
+    customer: {
+      name: order.shippingAddress?.name || order.user.name,
+      email: order.user.email,
+      phone: order.shippingAddress?.phone || order.user.phone
+    },
+    seller: sellerInfo,
+    shippingAddress: order.shippingAddress,
+    items: itemsWithGST,
+    payment: {
+      method: order.paymentMethod,
+      status: order.paymentStatus,
+      walletDeduction: includeOrderLevelCharges ? order.walletDeduction : 0,
+      cashOnDelivery: includeOrderLevelCharges ? order.cashOnDelivery : 0,
+      amountToCollect,
+      finalAmount: grandTotal
+    },
+    summary: {
+      totalMRP,
+      totalDiscount,
+      subtotal,
+      deliveryFee,
+      handlingFee,
+      couponDiscount,
+      scratchCouponDiscount,
+      couponCode,
+      totalBeforeGST: roundMoney(subtotal + deliveryFee + handlingFee - couponDiscount - scratchCouponDiscount),
+      totalGST,
+      totalCGST: includeOrderLevelCharges ? totalCGST : totalCGST,
+      totalSGST,
+      totalIGST,
+      grandTotal,
+      walletDeduction: includeOrderLevelCharges ? order.walletDeduction : 0,
+      payableAmount: grandTotal,
+      amountToCollect
+    },
+    gstSummary: {
+      withinState: totalCGST > 0 || totalSGST > 0,
+      interState: totalIGST > 0
+    }
+  };
+};
+
+// Groups an order's populated items by the seller that actually owns each product.
+const groupItemsBySeller = (order) => {
+  const groups = new Map();
+  for (const item of order.items) {
+    const seller = item.product?.seller;
+    const sellerId = seller?._id ? seller._id.toString() : 'unknown';
+    if (!groups.has(sellerId)) {
+      groups.set(sellerId, { seller: seller || null, items: [] });
+    }
+    groups.get(sellerId).items.push(item);
+  }
+  return Array.from(groups.values());
+};
+
 exports.downloadInvoice = async (req, res) => {
   try {
     const orderIdentifier = req.params.orderId || req.params.id;
@@ -2421,143 +2567,71 @@ exports.downloadInvoice = async (req, res) => {
       });
     }
 
-    if (!order.seller) {
-      const firstProduct = order.items[0]?.product;
-      if (firstProduct?.seller) {
-        order.seller = firstProduct.seller;
-      } else {
-        order.seller = {
-          businessName: 'Default Store',
-          gstNumber: 'Not Available',
-          address: {
-            street: 'Not Available',
-            city: 'Not Available',
-            state: 'Not Available',
-            pincode: 'Not Available'
-          }
-        };
-      }
-    }
-
-    // Use values already saved on the order — do NOT recalculate
-    const orderSubtotal = order.subtotal || order.items.reduce((s, i) => s + i.price * i.quantity, 0);
-    const deliveryFee = order.deliveryCharges || 0;
-    const handlingFee = order.handlingCharge || 0;
-    const savedTotalGST = order.totalGst || 0;
-    const couponDiscount = roundMoney(order.coupon?.discount);
-    const scratchCouponDiscount = roundMoney(order.scratchCouponDiscount);
-    const couponCode = order.coupon?.code || null;
-    const correctedFinalAmount = getDisplayFinalAmount(order);
-
-    const shippingState = order.shippingAddress.state;
-    let totalCGST = 0;
-    let totalSGST = 0;
-    let totalIGST = 0;
-
-    const itemsWithGST = order.items.map(item => {
-      const itemTotal = item.price * item.quantity;
-      const gstRate = item.gstPercent || item.product?.category?.gstPercent || 0;
-      const gstAmount = item.gstAmount != null ? item.gstAmount : parseFloat(((itemTotal * gstRate) / 100).toFixed(2));
-      const taxableValue = gstRate > 0 ? itemTotal - gstAmount : itemTotal;
-
-      // MRP from product.oldPrice; if not set, MRP equals selling price
-      const mrp = item.product?.oldPrice || item.price;
-      const discountPerUnit = parseFloat(Math.max(0, mrp - item.price).toFixed(2));
-      const mrpTotal = parseFloat((mrp * item.quantity).toFixed(2));
-      const discountTotal = parseFloat((discountPerUnit * item.quantity).toFixed(2));
-
-      const sellerState = (item.product?.seller?.address?.state || '').trim().toLowerCase();
-      const buyerState = (shippingState || '').trim().toLowerCase();
-      const isWithinState = sellerState && buyerState && sellerState === buyerState;
-
-      let cgstAmount = 0;
-      let sgstAmount = 0;
-      let igstAmount = 0;
-      if (gstAmount > 0) {
-        if (isWithinState) {
-          cgstAmount = parseFloat((gstAmount / 2).toFixed(2));
-          sgstAmount = parseFloat((gstAmount / 2).toFixed(2));
-        } else {
-          igstAmount = gstAmount;
-        }
-      }
-
-      totalCGST += cgstAmount;
-      totalSGST += sgstAmount;
-      totalIGST += igstAmount;
-
-      return {
-        ...item.toObject(),
-        itemTotal,
-        taxableValue,
-        gstRate,
-        gstAmount,
-        cgstAmount,
-        sgstAmount,
-        igstAmount,
-        isWithinState,
-        mrp,
-        discountPerUnit,
-        mrpTotal,
-        discountTotal
-      };
-    });
-
-    const totalMRP = parseFloat(itemsWithGST.reduce((s, i) => s + i.mrpTotal, 0).toFixed(2));
-    const totalDiscount = parseFloat(itemsWithGST.reduce((s, i) => s + i.discountTotal, 0).toFixed(2));
-    const totalGST = savedTotalGST;
-    const amountToCollect = order.cashOnDelivery > 0
-      ? roundMoney(order.cashOnDelivery)
-      : Math.max(correctedFinalAmount - roundMoney(order.walletDeduction), 0);
-
-    const invoiceData = {
-      orderId: order.orderId,
-      orderDate: order.createdAt,
-      customer: {
-        name: order.shippingAddress?.name || order.user.name,
-        email: order.user.email,
-        phone: order.shippingAddress?.phone || order.user.phone
-      },
-      seller: order.seller,
-      shippingAddress: order.shippingAddress,
-      items: itemsWithGST,
-      payment: {
-        method: order.paymentMethod,
-        status: order.paymentStatus,
-        walletDeduction: order.walletDeduction,
-        cashOnDelivery: order.cashOnDelivery,
-        amountToCollect,
-        finalAmount: correctedFinalAmount
-      },
-      summary: {
-        totalMRP,
-        totalDiscount,
-        subtotal: orderSubtotal,
-        deliveryFee,
-        handlingFee,
-        couponDiscount,
-        scratchCouponDiscount,
-        couponCode,
-        totalBeforeGST: roundMoney(orderSubtotal + deliveryFee + handlingFee - couponDiscount - scratchCouponDiscount),
-        totalGST,
-        totalCGST,
-        totalSGST,
-        totalIGST,
-        grandTotal: correctedFinalAmount,
-        walletDeduction: order.walletDeduction,
-        payableAmount: correctedFinalAmount,
-        amountToCollect
-      },
-      gstSummary: {
-        withinState: totalCGST > 0 || totalSGST > 0,
-        interState: totalIGST > 0
+    const defaultSellerInfo = {
+      businessName: 'Default Store',
+      gstNumber: 'Not Available',
+      address: {
+        street: 'Not Available',
+        city: 'Not Available',
+        state: 'Not Available',
+        pincode: 'Not Available'
       }
     };
 
+    // req.sellerScopeId is set by the seller-portal route wrapper so a seller only
+    // ever gets an invoice for their own items in a shared order, never anyone else's.
+    const scopeSellerId = req.sellerScopeId || null;
+
+    const sellerGroups = groupItemsBySeller(order);
+    const distinctSellerIds = new Set(sellerGroups.map(g => g.seller?._id?.toString() || 'unknown'));
+
     const format = (req.query.format || 'thermal').toLowerCase();
-    const pdfBuffer = format === 'a4'
-      ? await this.generatePDFInvoiceA4(invoiceData)
-      : await this.generatePDFInvoice(invoiceData);
+    const generate = format === 'a4' ? this.generatePDFInvoiceA4 : this.generatePDFInvoice;
+
+    let pdfBuffer;
+
+    if (scopeSellerId) {
+      // Seller portal: exactly one seller's own items, regardless of who else is on the order.
+      const group = sellerGroups.find(g => g.seller?._id?.toString() === scopeSellerId);
+      if (!group) {
+        return res.status(404).json({
+          success: false,
+          error: "No items belonging to this seller were found on this order"
+        });
+      }
+      const invoiceData = buildInvoiceDataForSeller(
+        order,
+        group.items,
+        group.seller || defaultSellerInfo,
+        { includeOrderLevelCharges: distinctSellerIds.size === 1 }
+      );
+      pdfBuffer = await generate(invoiceData);
+    } else if (distinctSellerIds.size <= 1) {
+      // Common case: single-seller order — one full invoice, unchanged from before.
+      const sellerInfo = order.seller || sellerGroups[0]?.seller || defaultSellerInfo;
+      const invoiceData = buildInvoiceDataForSeller(order, order.items, sellerInfo, { includeOrderLevelCharges: true });
+      pdfBuffer = await generate(invoiceData);
+    } else {
+      // Multi-seller order, customer-facing: one GST-correct section per seller,
+      // merged into a single PDF so it's still one download.
+      const { PDFDocument } = require('pdf-lib');
+      const merged = await PDFDocument.create();
+
+      for (const group of sellerGroups) {
+        const invoiceData = buildInvoiceDataForSeller(
+          order,
+          group.items,
+          group.seller || defaultSellerInfo,
+          { includeOrderLevelCharges: false }
+        );
+        const sectionBuffer = await generate(invoiceData);
+        const sectionDoc = await PDFDocument.load(sectionBuffer);
+        const copiedPages = await merged.copyPages(sectionDoc, sectionDoc.getPageIndices());
+        copiedPages.forEach(page => merged.addPage(page));
+      }
+
+      pdfBuffer = Buffer.from(await merged.save());
+    }
 
     const disposition = (req.query.disposition || 'attachment').toLowerCase() === 'inline' ? 'inline' : 'attachment';
     res.setHeader('Content-Type', 'application/pdf');
