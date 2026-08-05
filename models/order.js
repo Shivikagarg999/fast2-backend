@@ -296,7 +296,16 @@ const orderSchema = new mongoose.Schema(
       coinsAmount: { type: Number, default: 0 },
       isScratched: { type: Boolean, default: false },
       scratchedAt: { type: Date, default: null }
-    }]
+    }],
+
+    // Invoice number generated once per seller (keyed by sellerId string, "unknown"
+    // for items with no seller) and reused on every subsequent invoice download —
+    // a GST invoice number must stay fixed once issued, not regenerate per request.
+    invoiceNumbers: {
+      type: Map,
+      of: String,
+      default: {}
+    }
   },
   { timestamps: true }
 );

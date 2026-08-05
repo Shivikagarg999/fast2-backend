@@ -12,6 +12,7 @@ const imagekit = require('../../utils/imagekit');
 const Shop = require('../../models/shop');
 const PaymentSettings = require('../../models/paymentSettings');
 const cashfree = require('../../utils/cashfree');
+const InvoiceCounter = require('../../models/invoiceCounter');
 const {
   calculateFinalOrderAmount,
   formatOrderAmounts,
@@ -2388,7 +2389,7 @@ exports.getMyOrders = async (req, res) => {
 // level, not this seller's, so they're zeroed out here — matching how marketplaces
 // like Amazon/Flipkart issue separate per-seller tax invoices for the items sold,
 // while shipping/platform fees are handled separately from the seller's own invoice).
-const buildInvoiceDataForSeller = (order, items, sellerInfo, { includeOrderLevelCharges }) => {
+const buildInvoiceDataForSeller = (order, items, sellerInfo, { includeOrderLevelCharges, invoiceNumber }) => {
   const shippingState = order.shippingAddress.state;
   let totalCGST = 0;
   let totalSGST = 0;
@@ -2470,6 +2471,9 @@ const buildInvoiceDataForSeller = (order, items, sellerInfo, { includeOrderLevel
 
   return {
     orderId: order.orderId,
+    // Same order, but each seller gets their own invoice number (GMK-XXXX-XXXX-NNNNNN)
+    // while the underlying Order ID stays identical across all of their sections.
+    invoiceNumber: invoiceNumber || order.orderId,
     orderDate: order.createdAt,
     customer: {
       name: order.shippingAddress?.name || order.user.name,
@@ -2511,6 +2515,34 @@ const buildInvoiceDataForSeller = (order, items, sellerInfo, { includeOrderLevel
       interState: totalIGST > 0
     }
   };
+};
+
+// Returns the persisted invoice number for this order+seller, generating and
+// saving a new one (GMK-<orderHex>-<sellerHex>-<sequence>) the first time it's
+// requested. Reused on every subsequent download so the number never changes
+// once an invoice has been issued.
+const getOrCreateInvoiceNumber = async (order, sellerId) => {
+  const sellerKey = sellerId ? sellerId.toString() : 'unknown';
+
+  const existing = order.invoiceNumbers?.get ? order.invoiceNumbers.get(sellerKey) : null;
+  if (existing) return existing;
+
+  const counter = await InvoiceCounter.findOneAndUpdate(
+    { _id: 'invoice' },
+    { $inc: { seq: 1 } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
+
+  const seq = counter.seq.toString().padStart(6, '0');
+  const orderHex = order._id.toString().slice(-4).toUpperCase();
+  const sellerHex = sellerId ? sellerId.toString().slice(-4).toUpperCase() : 'XXXX';
+  const invoiceNumber = `GMK-${orderHex}-${sellerHex}-${seq}`;
+
+  if (!order.invoiceNumbers) order.invoiceNumbers = new Map();
+  order.invoiceNumbers.set(sellerKey, invoiceNumber);
+  await order.save();
+
+  return invoiceNumber;
 };
 
 // Groups an order's populated items by the seller that actually owns each product.
@@ -2592,37 +2624,44 @@ exports.downloadInvoice = async (req, res) => {
 
     if (scopeSellerId) {
       // Seller portal: exactly one seller's own items, regardless of who else is on the order.
-      const group = sellerGroups.find(g => g.seller?._id?.toString() === scopeSellerId);
+      const groupIndex = sellerGroups.findIndex(g => g.seller?._id?.toString() === scopeSellerId);
+      const group = groupIndex !== -1 ? sellerGroups[groupIndex] : null;
       if (!group) {
         return res.status(404).json({
           success: false,
           error: "No items belonging to this seller were found on this order"
         });
       }
+      const isSingleSeller = distinctSellerIds.size === 1;
+      const invoiceNumber = await getOrCreateInvoiceNumber(order, group.seller?._id || scopeSellerId);
       const invoiceData = buildInvoiceDataForSeller(
         order,
         group.items,
         group.seller || defaultSellerInfo,
-        { includeOrderLevelCharges: distinctSellerIds.size === 1 }
+        { includeOrderLevelCharges: isSingleSeller, invoiceNumber }
       );
       pdfBuffer = await generate(invoiceData);
     } else if (distinctSellerIds.size <= 1) {
       // Common case: single-seller order — one full invoice, unchanged from before.
       const sellerInfo = order.seller || sellerGroups[0]?.seller || defaultSellerInfo;
-      const invoiceData = buildInvoiceDataForSeller(order, order.items, sellerInfo, { includeOrderLevelCharges: true });
+      const invoiceNumber = await getOrCreateInvoiceNumber(order, sellerInfo?._id);
+      const invoiceData = buildInvoiceDataForSeller(order, order.items, sellerInfo, { includeOrderLevelCharges: true, invoiceNumber });
       pdfBuffer = await generate(invoiceData);
     } else {
       // Multi-seller order, customer-facing: one GST-correct section per seller,
-      // merged into a single PDF so it's still one download.
+      // merged into a single PDF so it's still one download. Each section gets its
+      // own persisted invoice number (same Order ID, distinct Invoice No per seller).
       const { PDFDocument } = require('pdf-lib');
       const merged = await PDFDocument.create();
 
-      for (const group of sellerGroups) {
+      for (let i = 0; i < sellerGroups.length; i++) {
+        const group = sellerGroups[i];
+        const invoiceNumber = await getOrCreateInvoiceNumber(order, group.seller?._id);
         const invoiceData = buildInvoiceDataForSeller(
           order,
           group.items,
           group.seller || defaultSellerInfo,
-          { includeOrderLevelCharges: false }
+          { includeOrderLevelCharges: false, invoiceNumber }
         );
         const sectionBuffer = await generate(invoiceData);
         const sectionDoc = await PDFDocument.load(sectionBuffer);
@@ -2771,7 +2810,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
       const orderDate = new Date(invoiceData.orderDate).toLocaleDateString('en-IN', {
         day: '2-digit', month: 'short', year: 'numeric'
       });
-      y = twoColRow('Invoice No:', invoiceData.orderId, 'Date:', orderDate, y, 7);
+      y = twoColRow('Invoice No:', invoiceData.invoiceNumber || invoiceData.orderId, 'Date:', orderDate, y, 7);
       y = row('Order ID:', invoiceData.orderId, y);
 
       const buyerState = invoiceData.shippingAddress.state || '';
@@ -3050,7 +3089,8 @@ exports.generatePDFInvoiceA4 = async (invoiceData) => {
       y += 16;
 
       const invoiceRows = [
-        ['Invoice No', invoiceData.orderId],
+        ['Invoice No', invoiceData.invoiceNumber || invoiceData.orderId],
+        ['Order ID', invoiceData.orderId],
         ['Invoice Date', fmtDate(invoiceData.orderDate)],
         ['Payment Method', (invoiceData.payment?.method || '').toUpperCase()],
         ['Payment Status', (invoiceData.payment?.status || '').toUpperCase()],
