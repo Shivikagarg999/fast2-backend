@@ -153,13 +153,18 @@ exports.getShopProducts = async (req, res) => {
             sortOrder = 'desc',
         } = req.query;
 
-        const shop = await Shop.findOne({ _id: shopId, isActive: true }).select('products isOpen');
+        const shop = await Shop.findOne({ _id: shopId, isActive: true }).select('seller isOpen');
         if (!shop) {
             return res.status(404).json({ success: false, message: 'Shop not found' });
         }
 
+        // Match on the seller relationship directly rather than the shop's own
+        // `products` array — that array can drift out of sync (products added
+        // without being pushed into it), silently hiding real, active products
+        // from the shop page. This way every active product actually owned by
+        // the seller shows up, in-stock or out-of-stock alike.
         const filter = {
-            _id: { $in: shop.products },
+            seller: shop.seller,
             isActive: true,
         };
 
