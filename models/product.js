@@ -35,7 +35,7 @@ const productSchema = new mongoose.Schema({
   maxOrderQuantity: { type: Number, default: 10 },
   stockStatus: { type: String, enum: ['in-stock', 'out-of-stock'], default: 'out-of-stock' },
   lowStockThreshold: { type: Number, default: 10 },
-  
+
   weight: { type: Number },
   weightUnit: { type: String, default: 'g' },
   dimensions: {
