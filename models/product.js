@@ -5,18 +5,18 @@ const productSchema = new mongoose.Schema({
   description: { type: String },
   brand: { type: String },
   category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },
-  
+
   price: { type: Number, required: true },
   oldPrice: { type: Number, default: 0 },
   discountPercentage: { type: Number, default: 0 },
-  
+
   hsnCode: { type: String },
   gstPercent: { type: Number, default: 0 },
   taxType: { type: String, enum: ['inclusive', 'exclusive'], default: 'inclusive' },
-  
+
   unit: { type: String },
   unitValue: { type: Number },
-  
+
   promotor: {
     id: { type: mongoose.Schema.Types.ObjectId, ref: 'Promotor' },
     commissionRate: { type: Number, default: 0 },
@@ -44,34 +44,34 @@ const productSchema = new mongoose.Schema({
     height: { type: Number },
     unit: { type: String, default: 'cm' }
   },
-  
+
   images: [{
     url: { type: String, required: true },
     altText: { type: String },
     isPrimary: { type: Boolean, default: false },
     order: { type: Number, default: 0 }
   }],
-  
+
   video: {
     url: { type: String },
     thumbnail: { type: String },
     duration: { type: Number },
     fileSize: { type: Number }
   },
-  
+
   warehouse: {
     id: { type: mongoose.Schema.Types.ObjectId, ref: 'Warehouse' },
     code: { type: String },
     storageType: { type: String }
   },
-  
+
   delivery: {
     estimatedDeliveryTime: { type: String },
     deliveryCharges: { type: Number, default: 0 },
     freeDeliveryThreshold: { type: Number, default: 0 },
     availablePincodes: [{ type: String }]
   },
-  
+
   variants: [
     {
       name: { type: String },
@@ -85,7 +85,7 @@ const productSchema = new mongoose.Schema({
       ]
     }
   ],
-  
+
   serviceablePincodes: [{ type: String }],
 
   isActive: { type: Boolean, default: true },
