@@ -78,14 +78,14 @@ exports.register = async (req, res) => {
         const user = await User.create({
             email,
             password: hashedPassword,
-            wallet: 20,
+            wallet: referrer ? 40 : 20,
             referralCode: newReferralCode,
             referredBy: referrer ? referrer._id : null,
             isVerified: true
         });
 
         if (referrer) {
-            referrer.wallet += 200;
+            referrer.wallet += 50;
             referrer.referralCount += 1;
             await referrer.save();
         }
@@ -213,14 +213,14 @@ exports.firebaseOtpLogin = async (req, res) => {
                 phone,
                 firebaseUid,
                 fcmToken,
-                wallet: 20,
+                wallet: referrer ? 40 : 20,
                 referralCode: newReferralCode,
                 referredBy: referrer ? referrer._id : null,
                 isVerified: true
             });
 
             if (referrer) {
-                referrer.wallet += 200;
+                referrer.wallet += 50;
                 referrer.referralCount += 1;
                 await referrer.save();
             }

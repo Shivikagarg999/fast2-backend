@@ -29,13 +29,14 @@ exports.applyReferral = async (req, res) => {
     session.startTransaction();
 
     try {
-      const referralBonus = 50;
+      const referredUserBonus = 20;
+      const referrerBonus = 50;
 
-      currentUser.wallet += referralBonus;
+      currentUser.wallet += referredUserBonus;
       currentUser.referredBy = referrerUser._id;
       await currentUser.save({ session });
 
-      referrerUser.wallet += referralBonus;
+      referrerUser.wallet += referrerBonus;
       referrerUser.referralCount += 1;
       await referrerUser.save({ session });
 
@@ -44,7 +45,7 @@ exports.applyReferral = async (req, res) => {
 
       return res.json({
         message: "Referral applied successfully",
-        bonusReceived: referralBonus,
+        bonusReceived: referredUserBonus,
         referredBy: referrerUser.name || referrerUser.phone,
         yourWallet: currentUser.wallet
       });
