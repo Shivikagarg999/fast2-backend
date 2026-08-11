@@ -1,4 +1,40 @@
 const User = require("../../../models/user");
+const Order = require("../../../models/order");
+
+// For every user who has referred at least one signup, how many people signed
+// up with their code and how many of those actually placed an order — computed
+// live from the referredBy relationship (not the referralCount counter, which
+// only tracks signups and can't tell you about orders anyway).
+exports.getReferralOverview = async (req, res) => {
+  try {
+    const referralAgg = await User.aggregate([
+      { $match: { referredBy: { $ne: null } } },
+      { $group: { _id: '$referredBy', totalSignups: { $sum: 1 }, referredUserIds: { $push: '$_id' } } }
+    ]);
+
+    const results = await Promise.all(referralAgg.map(async (r) => {
+      const orderedUserIds = await Order.distinct('user', { user: { $in: r.referredUserIds } });
+      const referrer = await User.findById(r._id).select('name email phone referralCode wallet');
+      return {
+        referrerId: r._id,
+        name: referrer?.name || '',
+        email: referrer?.email || '',
+        phone: referrer?.phone || '',
+        referralCode: referrer?.referralCode || '',
+        wallet: referrer?.wallet || 0,
+        totalSignups: r.totalSignups,
+        totalOrdered: orderedUserIds.length
+      };
+    }));
+
+    results.sort((a, b) => b.totalSignups - a.totalSignups);
+
+    res.status(200).json({ success: true, data: results, total: results.length });
+  } catch (err) {
+    console.error('Get referral overview error:', err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
 
 exports.createUser = async (req, res) => {
   try {

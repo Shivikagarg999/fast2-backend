@@ -6,13 +6,15 @@ const {
   updateUser,
   deleteUser,
   addMoneyToWallet,
-  downloadUsersByStatusCSV
+  downloadUsersByStatusCSV,
+  getReferralOverview
 } = require("../../../controllers/admin/user/adminUserController");
 
 const router = express.Router();
 
 router.post("/users", createUser);
 router.get("/users", getAllUsers);
+router.get("/users/referrals", getReferralOverview);
 router.get("/users/:id", getUserById);
 router.put("/users/:id", updateUser);
 router.delete("/users/:id", deleteUser);

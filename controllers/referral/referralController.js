@@ -1,4 +1,5 @@
 const User = require("../../models/user");
+const Order = require("../../models/order");
 const mongoose= require("mongoose");
 
 exports.applyReferral = async (req, res) => {
@@ -62,15 +63,25 @@ exports.applyReferral = async (req, res) => {
 exports.getReferralStats = async (req, res) => {
   try {
     const userId = req.user.id;
-    
+
     const user = await User.findById(userId)
       .populate('referredBy', 'name phone')
       .select('referralCode referralCount wallet referredBy');
 
+    // Computed live from the referredBy relationship rather than trusting the
+    // referralCount counter, which only tracks signups and can drift out of
+    // sync — this also lets us report how many referred users actually ordered.
+    const referredUsers = await User.find({ referredBy: userId }).select('_id');
+    const referredUserIds = referredUsers.map(u => u._id);
+    const orderedUserIds = referredUserIds.length
+      ? await Order.distinct('user', { user: { $in: referredUserIds } })
+      : [];
+
     const referralStats = {
       yourReferralCode: user.referralCode,
-      totalReferrals: user.referralCount,
-      totalEarnings: user.referralCount * 50, 
+      totalReferrals: referredUsers.length,
+      totalOrdered: orderedUserIds.length,
+      totalEarnings: user.referralCount * 50,
       currentWallet: user.wallet,
       referredBy: user.referredBy ? {
         name: user.referredBy.name,

@@ -80,7 +80,7 @@ exports.register = async (req, res) => {
             password: hashedPassword,
             wallet: 20,
             referralCode: newReferralCode,
-            referredBy: referralCode || null,
+            referredBy: referrer ? referrer._id : null,
             isVerified: true
         });
 
