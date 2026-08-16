@@ -180,6 +180,7 @@ exports.init = (httpServer) => {
                     status: 'pending',
                     driver: null,
                     createdAt: { $gte: since },
+                    declinedByDrivers: { $ne: driverId },
                 };
 
                 const orderAreaQuery = [];
@@ -454,6 +455,17 @@ exports.emitNewOrderToSeller = (sellerId, orderId, orderCustomId) => {
  * Also exported so the HTTP decline endpoint can call it.
  */
 exports.recordDecline = (orderId, driverId) => {
+    // Persisted to the order itself (not just this in-memory map, which is wiped
+    // on every server restart/deploy) so a decline is never forgotten — going
+    // offline/online again must never re-ring an order this driver turned down.
+    try {
+        const Order = require('./models/order');
+        Order.findByIdAndUpdate(orderId, { $addToSet: { declinedByDrivers: driverId } })
+            .catch(err => serverLog(`Persist decline error for order ${orderId}: ${err.message}`, 'error'));
+    } catch (err) {
+        serverLog(`Persist decline error for order ${orderId}: ${err.message}`, 'error');
+    }
+
     const notified = orderNotifiedDrivers.get(orderId);
     const declines = orderDeclines.get(orderId);
 

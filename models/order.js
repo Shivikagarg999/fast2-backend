@@ -45,6 +45,12 @@ const orderSchema = new mongoose.Schema(
       unique: true,
       sparse: true
     },
+    // Drivers who declined/ignored this order — persisted (not just in-memory)
+    // so going offline/online again never re-rings an order they already turned down.
+    declinedByDrivers: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Driver'
+    }],
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
