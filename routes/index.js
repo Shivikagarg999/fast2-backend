@@ -43,7 +43,7 @@ const adminReportRoutes = require('./admin/report/report');
 const warehouseRoutes = require('./warehouse/warehouseRoutes');
 const adminPaymentSettingsRoutes = require('./admin/paymentSettingsRoutes');
 const appConfigRoutes = require('./appConfig/appConfigRoutes');
-const qzRoutes = require('./qz/qzRoutes');
+const whatsappRoutes = require('./whatsapp/whatsappRoutes');
 
 const publicPopupRouter = express.Router();
 publicPopupRouter.get('/active', require('../controllers/admin/popupController').getActivePopup);
@@ -91,6 +91,6 @@ router.use('/api/admin', adminRoutes);
 router.use('/api/admin/reports', adminReportRoutes);
 router.use('/api/warehouse', warehouseRoutes);
 router.use('/api/app-config', appConfigRoutes);
-router.use('/api/qz', qzRoutes);
+router.use('/api/whatsapp', whatsappRoutes);
 
 module.exports = router;

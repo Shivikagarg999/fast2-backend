@@ -72,6 +72,9 @@ const notifySellersForOrder = async (order) => {
   }
 };
 
+exports.notifyDriversForOrder = notifyDriversForOrder;
+exports.notifySellersForOrder = notifySellersForOrder;
+
 const createPlacedOrder = async ({
   orderData,
   sellerPayouts = [],
@@ -1096,6 +1099,10 @@ exports.razorpayWebhook = async (req, res) => {
     }
     else if (event === 'order.paid') {
       await handleOrderPaid(payload.order.entity);
+    }
+    else if (event === 'payment_link.paid') {
+      const { handleWhatsappPaymentLinkPaid } = require('../whatsapp/whatsappController');
+      await handleWhatsappPaymentLinkPaid(payload.payment_link.entity, payload.payment.entity);
     }
     else {
       console.log(`Unhandled webhook event: ${event}`);
