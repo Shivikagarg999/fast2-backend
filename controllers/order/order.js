@@ -61,6 +61,49 @@ const notifyDriversForOrder = async (order, userId) => {
   }
 };
 
+const sendSellerOrderInvoiceEmail = async (order, sellerId) => {
+  try {
+    const targetSellerId = sellerId?._id || sellerId || order.seller?._id || order.seller;
+    const seller = await Seller.findById(targetSellerId).select('name businessName email').lean();
+    if (!seller?.email) return;
+
+    const emailState = await Order.findById(order._id).select('sellerInvoiceEmailSentAt').lean();
+    if (emailState?.sellerInvoiceEmailSentAt) return;
+
+    const { pdfBuffer, filename } = await generateInvoicePdfBuffer({
+      orderIdentifier: order._id,
+      sellerScopeId: seller._id.toString(),
+      format: 'thermal'
+    });
+
+    const emailService = require('../../services/emailServices');
+    await emailService.sendEmail({
+      from: process.env.EMAIL_USER,
+      to: seller.email,
+      subject: `New order received: ${order.orderId}`,
+      html: `
+        <div style="font-family: Arial, sans-serif; color: #111827;">
+          <h2 style="margin: 0 0 12px;">New order received</h2>
+          <p style="margin: 0 0 8px;">Hi ${seller.businessName || seller.name || 'Seller'},</p>
+          <p style="margin: 0 0 12px;">You have received a new order <strong>${order.orderId}</strong>.</p>
+          <p style="margin: 0;">The invoice PDF is attached with this email.</p>
+        </div>
+      `,
+      attachments: [
+        {
+          filename,
+          content: pdfBuffer,
+          contentType: 'application/pdf'
+        }
+      ]
+    });
+
+    await Order.findByIdAndUpdate(order._id, { sellerInvoiceEmailSentAt: new Date() });
+  } catch (emailError) {
+    console.error('Seller invoice email error:', emailError.message);
+  }
+};
+
 // Pushes a live "new order" event to the seller's dashboard socket so it can auto-print the invoice.
 const notifySellersForOrder = async (order) => {
   if (!order.seller) return;
@@ -70,6 +113,10 @@ const notifySellersForOrder = async (order) => {
   } catch (sellerNotifyError) {
     console.error('Seller notify error:', sellerNotifyError.message);
   }
+
+  sendSellerOrderInvoiceEmail(order, order.seller).catch((emailError) => {
+    console.error('Seller invoice email queue error:', emailError.message);
+  });
 };
 
 exports.notifyDriversForOrder = notifyDriversForOrder;
@@ -2564,6 +2611,116 @@ const groupItemsBySeller = (order) => {
     groups.get(sellerId).items.push(item);
   }
   return Array.from(groups.values());
+};
+
+const generateInvoicePdfBuffer = async ({ orderIdentifier, sellerScopeId = null, format = 'thermal' }) => {
+  const orderQuery = mongoose.Types.ObjectId.isValid(orderIdentifier)
+    ? { _id: orderIdentifier }
+    : { orderId: orderIdentifier };
+
+  const order = await Order.findOne(orderQuery)
+    .populate('user', 'name email phone')
+    .populate('seller', 'name businessName gstNumber panNumber address bankDetails')
+    .populate({
+      path: 'items.product',
+      populate: [
+        {
+          path: 'seller',
+          model: 'Seller',
+          select: 'name businessName gstNumber panNumber address'
+        },
+        {
+          path: 'category',
+          model: 'Category',
+          select: 'name hsnCode gstPercent'
+        }
+      ]
+    });
+
+  if (!order) {
+    const error = new Error('Order not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  if (!order.user) {
+    const error = new Error('Order customer not found');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const defaultSellerInfo = {
+    businessName: 'Default Store',
+    gstNumber: 'Not Available',
+    address: {
+      street: 'Not Available',
+      city: 'Not Available',
+      state: 'Not Available',
+      pincode: 'Not Available'
+    }
+  };
+
+  const scopeSellerId = sellerScopeId ? sellerScopeId.toString() : null;
+  const sellerGroups = groupItemsBySeller(order);
+  const distinctSellerIds = new Set(sellerGroups.map(g => g.seller?._id?.toString() || 'unknown'));
+  const invoiceFormat = (format || 'thermal').toLowerCase();
+  const generate = invoiceFormat === 'a4' ? exports.generatePDFInvoiceA4 : exports.generatePDFInvoice;
+
+  let pdfBuffer;
+
+  if (scopeSellerId) {
+    const group = sellerGroups.find(g => g.seller?._id?.toString() === scopeSellerId);
+    if (!group) {
+      const error = new Error('No items belonging to this seller were found on this order');
+      error.statusCode = 404;
+      throw error;
+    }
+
+    const isSingleSeller = distinctSellerIds.size === 1;
+    const invoiceNumber = await getOrCreateInvoiceNumber(order, group.seller?._id || scopeSellerId);
+    const invoiceData = buildInvoiceDataForSeller(
+      order,
+      group.items,
+      group.seller || defaultSellerInfo,
+      { includeOrderLevelCharges: isSingleSeller, invoiceNumber }
+    );
+    pdfBuffer = await generate(invoiceData);
+  } else if (distinctSellerIds.size <= 1) {
+    const sellerInfo = order.seller || sellerGroups[0]?.seller || defaultSellerInfo;
+    const invoiceNumber = await getOrCreateInvoiceNumber(order, sellerInfo?._id);
+    const invoiceData = buildInvoiceDataForSeller(
+      order,
+      order.items,
+      sellerInfo,
+      { includeOrderLevelCharges: true, invoiceNumber }
+    );
+    pdfBuffer = await generate(invoiceData);
+  } else {
+    const { PDFDocument } = require('pdf-lib');
+    const merged = await PDFDocument.create();
+
+    for (const group of sellerGroups) {
+      const invoiceNumber = await getOrCreateInvoiceNumber(order, group.seller?._id);
+      const invoiceData = buildInvoiceDataForSeller(
+        order,
+        group.items,
+        group.seller || defaultSellerInfo,
+        { includeOrderLevelCharges: false, invoiceNumber }
+      );
+      const sectionBuffer = await generate(invoiceData);
+      const sectionDoc = await PDFDocument.load(sectionBuffer);
+      const copiedPages = await merged.copyPages(sectionDoc, sectionDoc.getPageIndices());
+      copiedPages.forEach(page => merged.addPage(page));
+    }
+
+    pdfBuffer = Buffer.from(await merged.save());
+  }
+
+  return {
+    pdfBuffer,
+    order,
+    filename: `invoice-${order.orderId}.pdf`
+  };
 };
 
 exports.downloadInvoice = async (req, res) => {

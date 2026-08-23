@@ -287,6 +287,10 @@ const orderSchema = new mongoose.Schema(
       url: { type: String, default: '' },
       fileId: { type: String, default: '' }
     },
+    sellerInvoiceEmailSentAt: {
+      type: Date,
+      default: null
+    },
 
     orderScratchCard: {
       isEligible: { type: Boolean, default: false },
