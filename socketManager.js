@@ -241,12 +241,39 @@ exports.init = (httpServer) => {
         });
 
         // Seller's dashboard registers itself to receive live "new order" events (for auto-print)
-        socket.on('seller_online', (data) => {
+        socket.on('seller_online', async (data) => {
             const sellerId = typeof data === 'string' ? data : data?.sellerId;
             if (!sellerId) return;
 
             sellerSockets.set(String(sellerId), socket.id);
             serverLog(`Seller ${sellerId} is now ONLINE (socket: ${socket.id}) | Total online: ${sellerSockets.size}`, 'success');
+
+            try {
+                const Order = require('./models/order');
+                const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+                const recentOrders = await Order.find({
+                    seller: sellerId,
+                    status: { $in: ['pending', 'confirmed'] },
+                    createdAt: { $gte: since },
+                })
+                    .select('_id orderId')
+                    .sort({ createdAt: -1 })
+                    .limit(5)
+                    .lean();
+
+                if (recentOrders.length) {
+                    serverLog(`Seller ${sellerId} reconnected — pushing ${recentOrders.length} recent order(s)`, 'warn');
+                    for (const order of recentOrders) {
+                        socket.emit('new_order_seller', {
+                            orderId: String(order._id),
+                            orderCustomId: String(order.orderId),
+                        });
+                        serverLog(`  ↳ Sent missed seller order ${order.orderId} to seller ${sellerId}`, 'event');
+                    }
+                }
+            } catch (err) {
+                serverLog(`Error fetching seller pending orders on reconnect: ${err.message}`, 'error');
+            }
         });
 
         // Driver declines an order → stop ringing on their phone; track all-declined fallback
