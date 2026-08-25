@@ -336,7 +336,7 @@ exports.catalogFeed = async (req, res) => {
     const header = ["id", "title", "description", "availability", "condition", "price", "link", "image_link"];
     const rows = products.map((p) => {
       const image = p.images?.[0]?.url || "";
-      const link = `https://www.gmkart.com/product/${p.slug || p._id}`;
+      const link = `https://www.gmkart.com/product/${Product.slugifyProductName(p.name) || p.slug || p._id}`;
       const availability = p.stockStatus === "in-stock" ? "in stock" : "out of stock";
       const description = (p.description || p.name || "").replace(/[\r\n\t]/g, " ").slice(0, 500);
       return [
