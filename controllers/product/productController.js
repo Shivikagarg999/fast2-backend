@@ -1517,7 +1517,12 @@ const getBestSellingProducts = async (req, res) => {
 
 const getProductById = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id)
+    const { id } = req.params;
+    const query = mongoose.Types.ObjectId.isValid(id)
+      ? { $or: [{ _id: id }, { slug: id }] }
+      : { slug: id };
+
+    const product = await Product.findOne(query)
       .populate('category')
       .populate('promotor.id')
       .select('-__v');
