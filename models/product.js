@@ -132,6 +132,8 @@ productSchema.statics.createUniqueSlug = function (name, productId) {
   return buildUniqueSlug(this, name, productId);
 };
 
+productSchema.statics.slugifyProductName = slugify;
+
 productSchema.pre('save', function (next) {
   if (this.scratchGift && this.scratchGift.isEnabled && this.price <= 200) {
     return next(new Error('Scratch gift can only be attached to products with price above 200'));

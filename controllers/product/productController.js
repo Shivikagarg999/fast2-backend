@@ -1518,14 +1518,37 @@ const getBestSellingProducts = async (req, res) => {
 const getProductById = async (req, res) => {
   try {
     const { id } = req.params;
-    const query = mongoose.Types.ObjectId.isValid(id)
+    const isObjectId = mongoose.Types.ObjectId.isValid(id);
+    const query = isObjectId
       ? { $or: [{ _id: id }, { slug: id }] }
       : { slug: id };
 
-    const product = await Product.findOne(query)
+    let product = await Product.findOne(query)
       .populate('category')
       .populate('promotor.id')
       .select('-__v');
+
+    if (!product && !isObjectId) {
+      const firstSlugWord = id.split('-').find(Boolean);
+      const candidateQuery = firstSlugWord
+        ? { name: { $regex: firstSlugWord.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' } }
+        : {};
+
+      const candidates = await Product.find(candidateQuery)
+        .select('_id name')
+        .limit(100)
+        .lean();
+
+      const matchedCandidate = candidates.find((candidate) => Product.slugifyProductName(candidate.name) === id);
+
+      if (matchedCandidate) {
+        product = await Product.findById(matchedCandidate._id)
+          .populate('category')
+          .populate('promotor.id')
+          .select('-__v');
+      }
+    }
+
     if (!product) return res.status(404).json({ message: 'Product not found' });
     const discounts = await getActiveDiscounts();
     res.json(applyDiscountToProduct(product.toObject(), discounts));
