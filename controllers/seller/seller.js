@@ -30,6 +30,17 @@ exports.registerSeller = async (req, res) => {
       });
     }
 
+    const rawLat = address?.coordinates?.lat;
+    const rawLng = address?.coordinates?.lng;
+    const lat = Number(rawLat);
+    const lng = Number(rawLng);
+    if (rawLat == null || rawLng == null || !Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+      return res.status(400).json({
+        success: false,
+        message: 'Valid shop latitude and longitude are required'
+      });
+    }
+
     let promotorData = null;
     if (promotor) {
       promotorData = await Promotor.findById(promotor);
@@ -84,8 +95,9 @@ exports.registerSeller = async (req, res) => {
       newSeller.shop = newShop._id;
       await newSeller.save();
     } catch (shopError) {
-      // Shop creation failure shouldn't block seller registration
-      console.error('Auto shop creation error:', shopError);
+      // Avoid leaving a seller without the shop required for product discovery.
+      await Seller.findByIdAndDelete(newSeller._id);
+      throw shopError;
     }
 
     res.status(201).json({

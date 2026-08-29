@@ -25,6 +25,12 @@ const appConfigSchema = new mongoose.Schema({
   updateMessage: {
     type: String,
     default: 'A new version of the app is available. Please update to continue.'
+  },
+  productServiceRadiusKm: {
+    type: Number,
+    min: 0.1,
+    max: 100,
+    default: 5
   }
 }, { timestamps: true });
 

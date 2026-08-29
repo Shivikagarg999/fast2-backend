@@ -15,7 +15,8 @@ exports.getAppConfig = async (req, res) => {
         minVersionCode: 1,
         latestVersionCode: 1,
         playStoreUrl: '',
-        updateMessage: ''
+        updateMessage: '',
+        productServiceRadiusKm: 5
       });
     }
 
@@ -24,7 +25,8 @@ exports.getAppConfig = async (req, res) => {
       minVersionCode: config.minVersionCode,
       latestVersionCode: config.latestVersionCode,
       playStoreUrl: config.playStoreUrl,
-      updateMessage: config.updateMessage
+      updateMessage: config.updateMessage,
+      productServiceRadiusKm: config.productServiceRadiusKm || 5
     });
   } catch (error) {
     console.error('Get app config error:', error);
@@ -37,23 +39,25 @@ exports.getAppConfig = async (req, res) => {
 // @access  Private (admin)
 exports.upsertAppConfig = async (req, res) => {
   try {
-    const { app, minVersionCode, latestVersionCode, playStoreUrl, updateMessage } = req.body;
+    const { app, minVersionCode, latestVersionCode, playStoreUrl, updateMessage, productServiceRadiusKm } = req.body;
 
     if (!app || !['customer', 'driver'].includes(app)) {
       return res.status(400).json({ success: false, error: "app must be 'customer' or 'driver'" });
     }
-    if (minVersionCode === undefined) {
-      return res.status(400).json({ success: false, error: 'minVersionCode is required' });
+    if (productServiceRadiusKm !== undefined &&
+        (!Number.isFinite(Number(productServiceRadiusKm)) || Number(productServiceRadiusKm) < 0.1 || Number(productServiceRadiusKm) > 100)) {
+      return res.status(400).json({ success: false, error: 'productServiceRadiusKm must be between 0.1 and 100' });
     }
 
     const config = await AppConfig.findOneAndUpdate(
       { app },
       {
         app,
-        minVersionCode,
+        ...(minVersionCode !== undefined && { minVersionCode }),
         ...(latestVersionCode !== undefined && { latestVersionCode }),
         ...(playStoreUrl !== undefined && { playStoreUrl }),
-        ...(updateMessage !== undefined && { updateMessage })
+        ...(updateMessage !== undefined && { updateMessage }),
+        ...(productServiceRadiusKm !== undefined && { productServiceRadiusKm: Number(productServiceRadiusKm) })
       },
       { new: true, upsert: true, setDefaultsOnInsert: true }
     );

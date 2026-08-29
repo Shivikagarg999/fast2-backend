@@ -1,5 +1,17 @@
 const mongoose = require('mongoose');
 
+const pointSchema = new mongoose.Schema({
+    type: { type: String, enum: ['Point'], required: true },
+    coordinates: {
+        type: [Number],
+        required: true,
+        validate: {
+            validator: value => value?.length === 2,
+            message: 'Shop location must contain [longitude, latitude]'
+        }
+    }
+}, { _id: false });
+
 const shopSchema = new mongoose.Schema(
     {
         // ─── Identity ─────────────────────────────────────────────────────────────
@@ -61,6 +73,8 @@ const shopSchema = new mongoose.Schema(
                 lat: Number,
                 lng: Number,
             },
+            // GeoJSON is used by MongoDB's 2dsphere index for radius searches.
+            location: { type: pointSchema, default: undefined },
         },
 
         // ─── Products ─────────────────────────────────────────────────────────────
@@ -166,10 +180,19 @@ shopSchema.index({ shopSlug: 1 });
 shopSchema.index({ 'rating.average': -1 });
 shopSchema.index({ 'analytics.totalOrders': -1 });
 shopSchema.index({ 'address.pincode': 1 });
+shopSchema.index({ 'address.location': '2dsphere' });
 shopSchema.index({ isActive: 1, isOpen: 1 });
 
 // ── Auto-generate slug from shopName ─────────────────────────────────────────
 shopSchema.pre('save', async function (next) {
+    const rawLat = this.address?.coordinates?.lat;
+    const rawLng = this.address?.coordinates?.lng;
+    const lat = Number(rawLat);
+    const lng = Number(rawLng);
+    if (rawLat != null && rawLng != null && Number.isFinite(lat) && Number.isFinite(lng)) {
+        this.address.location = { type: 'Point', coordinates: [lng, lat] };
+    }
+
     if (this.isModified('shopName') || this.isNew) {
         let baseSlug = this.shopName
             .toLowerCase()

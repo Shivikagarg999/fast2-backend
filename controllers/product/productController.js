@@ -5,10 +5,50 @@ const Product = require('../../models/product');
 const Order = require('../../models/order');
 const Seller = require('../../models/seller');
 const Warehouse = require('../../models/warehouse');
+const Shop = require('../../models/shop');
+const AppConfig = require('../../models/appConfig');
 const imagekit = require('../../utils/imagekit');
 const fs = require('fs');
 const { getActiveDiscounts, applyDiscountToProduct } = require('../../utils/discountHelper');
 const { parseCsv } = require('../../utils/csvParser');
+
+const getNearbyShopProductFilter = async (latitude, longitude) => {
+  if (latitude === undefined || longitude === undefined || latitude === '' || longitude === '') {
+    const error = new Error('Valid latitude and longitude are required to fetch nearby products');
+    error.statusCode = 400;
+    throw error;
+  }
+  const lat = Number(latitude);
+  const lng = Number(longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+    const error = new Error('Valid latitude and longitude are required to fetch nearby products');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const config = await AppConfig.findOne({ app: 'customer' }).select('productServiceRadiusKm').lean();
+  const serviceRadiusKm = config?.productServiceRadiusKm || 5;
+  const shops = await Shop.find({
+    isActive: true,
+    isOpen: true,
+    'address.location': {
+      $near: {
+        $geometry: { type: 'Point', coordinates: [lng, lat] },
+        $maxDistance: serviceRadiusKm * 1000
+      }
+    }
+  }).select('_id seller').lean();
+
+  return {
+    serviceRadiusKm,
+    productFilter: {
+      $or: [
+        { shop: { $in: shops.map(shop => shop._id) } },
+        { seller: { $in: shops.map(shop => shop.seller) } }
+      ]
+    }
+  };
+};
 
 const createProduct = async (req, res) => {
   try {
@@ -812,36 +852,31 @@ const getProducts = async (req, res) => {
       sortOrder = 'desc',
       page = 1,
       limit = 20,
-      pincode
+      latitude,
+      longitude
     } = req.query;
 
     const filter = { isActive: true };
+
+    const { productFilter, serviceRadiusKm } = await getNearbyShopProductFilter(latitude, longitude);
+    Object.assign(filter, productFilter);
 
     if (category) {
       filter.category = category;
     }
 
     if (search) {
-      filter.$or = [
+      filter.$and = [{ $or: [
         { name: { $regex: search, $options: 'i' } },
         { description: { $regex: search, $options: 'i' } },
         { brand: { $regex: search, $options: 'i' } }
-      ];
+      ] }];
     }
 
     if (minPrice || maxPrice) {
       filter.price = {};
       if (minPrice) filter.price.$gte = parseFloat(minPrice);
       if (maxPrice) filter.price.$lte = parseFloat(maxPrice);
-    }
-
-    if (pincode) {
-      filter.$or = [
-        { 'delivery.availablePincodes': pincode },
-        { serviceablePincodes: pincode },
-        { 'delivery.availablePincodes': { $in: [pincode.substring(0, 3)] } },
-        { serviceablePincodes: { $in: [pincode.substring(0, 3)] } }
-      ];
     }
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
@@ -863,6 +898,7 @@ const getProducts = async (req, res) => {
 
     res.json({
       products: productsWithDiscount,
+      serviceRadiusKm,
       pagination: {
         currentPage: parseInt(page),
         totalPages,
@@ -873,7 +909,7 @@ const getProducts = async (req, res) => {
     });
   } catch (error) {
     console.error('Get products error:', error);
-    res.status(500).json({ message: error.message });
+    res.status(error.statusCode || 500).json({ message: error.message });
   }
 };
 
@@ -1560,22 +1596,24 @@ const getProductById = async (req, res) => {
 const getProductsByCategory = async (req, res) => {
   try {
     const { categoryId } = req.params;
+    const { latitude, longitude } = req.query;
 
     const category = await Category.findById(categoryId);
     if (!category || !category.isActive) {
       return res.status(404).json({ message: 'Category not found' });
     }
-    const products = await Product.find({ category: categoryId, isActive: true })
+    const { productFilter, serviceRadiusKm } = await getNearbyShopProductFilter(latitude, longitude);
+    const products = await Product.find({ category: categoryId, isActive: true, ...productFilter })
       .populate('category')
       .populate('promotor.id');
 
     const discounts = await getActiveDiscounts();
     const productsWithDiscount = products.map(p => applyDiscountToProduct(p.toObject(), discounts));
 
-    res.json({ category: category.name, products: productsWithDiscount });
+    res.json({ category: category.name, products: productsWithDiscount, serviceRadiusKm });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: error.message });
+    res.status(error.statusCode || 500).json({ message: error.message });
   }
 };
 

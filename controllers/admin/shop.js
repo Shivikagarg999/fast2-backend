@@ -105,6 +105,17 @@ exports.createShop = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Seller ID and Shop Name are required' });
         }
 
+        const rawLat = address?.coordinates?.lat;
+        const rawLng = address?.coordinates?.lng;
+        const lat = Number(rawLat);
+        const lng = Number(rawLng);
+        if (rawLat == null || rawLng == null || !Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+            return res.status(400).json({
+                success: false,
+                message: 'Valid shop latitude and longitude are required'
+            });
+        }
+
         // Check if seller already has a shop
         const existingShop = await Shop.findOne({ seller });
         if (existingShop) {
@@ -329,6 +340,17 @@ exports.updateShop = async (req, res) => {
                     shop[field] = req.body[field];
                 }
             }
+        }
+
+        const rawLat = shop.address?.coordinates?.lat;
+        const rawLng = shop.address?.coordinates?.lng;
+        const lat = Number(rawLat);
+        const lng = Number(rawLng);
+        if (rawLat == null || rawLng == null || !Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) {
+            return res.status(400).json({
+                success: false,
+                message: 'Valid shop latitude and longitude are required'
+            });
         }
 
         // --- Seller Transfer Logic ---
