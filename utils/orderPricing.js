@@ -122,9 +122,24 @@ async function calculateOrderPricing({
       throw new Error('You have already used this coupon');
     }
 
-    discount = validCoupon.calculateDiscount(finalAmount);
+    if (validCoupon.benefitType === 'free_quantity') {
+      const result = validCoupon.calculateFreeQuantityDiscount(items, products);
+      discount = result.discount;
+
+      if (discount <= 0) {
+        throw new Error('Coupon is not applicable on selected products');
+      }
+    } else {
+      discount = validCoupon.calculateDiscount(finalAmount);
+    }
+
     finalAmount = parseFloat((finalAmount - discount).toFixed(2));
-    appliedCoupon = { code: validCoupon.code, discount };
+    appliedCoupon = {
+      code: validCoupon.code,
+      discount,
+      benefitType: validCoupon.benefitType,
+      ...(validCoupon.benefitType === 'free_quantity' && { freebieRule: validCoupon.freebieRule })
+    };
   }
 
   let scratchCouponDiscount = 0;

@@ -13,14 +13,23 @@ const couponSchema = new mongoose.Schema(
       type: String,
       required: true
     },
+    benefitType: {
+      type: String,
+      enum: ["amount_discount", "free_quantity"],
+      default: "amount_discount"
+    },
     discountType: {
       type: String,
       enum: ["percentage", "fixed"],
-      required: true
+      required: function () {
+        return this.benefitType !== "free_quantity";
+      }
     },
     discountValue: {
       type: Number,
-      required: true,
+      required: function () {
+        return this.benefitType !== "free_quantity";
+      },
       min: 0
     },
     minOrderAmount: {
@@ -59,6 +68,16 @@ const couponSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "Category"
     }],
+    applicableProducts: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Product"
+    }],
+    freebieRule: {
+      buyQuantity: { type: Number, min: 0 },
+      buyUnit: { type: String, enum: ["g", "kg", "ml", "l", "piece"], default: "kg" },
+      freeQuantity: { type: Number, min: 0 },
+      freeUnit: { type: String, enum: ["g", "kg", "ml", "l", "piece"], default: "kg" }
+    },
     excludedProducts: [{
       type: mongoose.Schema.Types.ObjectId,
       ref: "Product"
@@ -70,6 +89,24 @@ const couponSchema = new mongoose.Schema(
 
 couponSchema.index({ startDate: 1, endDate: 1 });
 couponSchema.index({ isActive: 1 });
+couponSchema.index({ benefitType: 1 });
+
+const toId = (value) => value?._id?.toString?.() || value?.toString?.() || "";
+
+const unitGroup = (unit) => {
+  const normalized = String(unit || "").toLowerCase();
+  if (["kg", "g", "gram", "grams", "kilogram", "kilograms"].includes(normalized)) return "weight";
+  if (["l", "ml", "liter", "litre", "liters", "litres"].includes(normalized)) return "volume";
+  return "piece";
+};
+
+const toBaseQuantity = (quantity, unit) => {
+  const value = Number(quantity) || 0;
+  const normalized = String(unit || "").toLowerCase();
+  if (["kg", "kilogram", "kilograms"].includes(normalized)) return value * 1000;
+  if (["l", "liter", "litre", "liters", "litres"].includes(normalized)) return value * 1000;
+  return value;
+};
 
 couponSchema.statics.validateCoupon = async function (code, userId, orderAmount) {
   const coupon = await this.findOne({
@@ -98,6 +135,10 @@ couponSchema.statics.validateCoupon = async function (code, userId, orderAmount)
 };
 
 couponSchema.methods.calculateDiscount = function (orderAmount) {
+  if (this.benefitType === "free_quantity") {
+    return 0;
+  }
+
   let discount = 0;
 
   if (this.discountType === "percentage") {
@@ -110,6 +151,75 @@ couponSchema.methods.calculateDiscount = function (orderAmount) {
   }
 
   return Math.min(discount, orderAmount);
+};
+
+couponSchema.methods.matchesProduct = function (product) {
+  const productId = toId(product);
+  const categoryId = toId(product?.category);
+
+  const isExcluded = this.excludedProducts?.some((id) => toId(id) === productId);
+  if (isExcluded) return false;
+
+  const hasProductScope = this.applicableProducts?.length > 0;
+  const hasCategoryScope = this.applicableCategories?.length > 0;
+
+  if (!hasProductScope && !hasCategoryScope) return true;
+
+  return (
+    this.applicableProducts?.some((id) => toId(id) === productId) ||
+    this.applicableCategories?.some((id) => toId(id) === categoryId)
+  );
+};
+
+couponSchema.methods.calculateFreeQuantityDiscount = function (items, products) {
+  if (this.benefitType !== "free_quantity") {
+    return { discount: this.calculateDiscount(0), appliedItems: [] };
+  }
+
+  const rule = this.freebieRule || {};
+  const buyBase = toBaseQuantity(rule.buyQuantity, rule.buyUnit);
+  const freeBase = toBaseQuantity(rule.freeQuantity, rule.freeUnit);
+  const buyGroup = unitGroup(rule.buyUnit);
+  const freeGroup = unitGroup(rule.freeUnit);
+
+  if (!buyBase || !freeBase || buyGroup !== freeGroup) {
+    throw new Error("Invalid free quantity coupon rule");
+  }
+
+  let discount = 0;
+  const appliedItems = [];
+
+  for (const item of items || []) {
+    const product = (products || []).find((p) => toId(p) === toId(item.product));
+    if (!product || !this.matchesProduct(product)) continue;
+
+    const productUnit = product.unit || rule.buyUnit;
+    if (unitGroup(productUnit) !== buyGroup) continue;
+
+    const itemQuantity = Number(item.quantity) || 0;
+    const itemPrice = Number(item.price) || Number(product.effectivePrice) || Number(product.price) || 0;
+    const unitValueBase = toBaseQuantity(product.unitValue || 1, productUnit);
+    const purchasedBase = unitValueBase * itemQuantity;
+    const freeSets = Math.floor(purchasedBase / buyBase);
+    if (!freeSets) continue;
+
+    const freeBaseForItem = freeSets * freeBase;
+    const discountForItem = Math.min((itemPrice / unitValueBase) * freeBaseForItem, itemPrice * itemQuantity);
+    const roundedDiscount = Number(discountForItem.toFixed(2));
+    discount += roundedDiscount;
+    appliedItems.push({
+      product: product._id,
+      name: product.name,
+      freeQuantity: freeBaseForItem,
+      freeUnit: buyGroup === "weight" ? "g" : buyGroup === "volume" ? "ml" : "piece",
+      discount: roundedDiscount
+    });
+  }
+
+  return {
+    discount: Number(discount.toFixed(2)),
+    appliedItems
+  };
 };
 
 module.exports = mongoose.model("Coupon", couponSchema);

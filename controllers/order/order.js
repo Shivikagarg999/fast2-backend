@@ -683,6 +683,7 @@ exports.createOrder = async (req, res) => {
       const now = new Date();
       const availableCoupons = await Coupon.find({
         isActive: true,
+        benefitType: { $ne: 'free_quantity' },
         startDate: { $lte: now },
         endDate: { $gte: now },
         $or: [{ usageLimit: null }, { $expr: { $lt: ['$usedCount', '$usageLimit'] } }]
@@ -3511,6 +3512,10 @@ exports.redeemScratchCoupon = async (req, res) => {
     }
 
     const coupon = await Coupon.validateCoupon(couponCode, userId, orderAmount);
+    if (coupon.benefitType === 'free_quantity') {
+      return res.status(400).json({ success: false, message: 'This coupon can only be applied at checkout with matching products' });
+    }
+
     const discount = coupon.calculateDiscount(orderAmount);
     const finalAmount = orderAmount - discount;
 

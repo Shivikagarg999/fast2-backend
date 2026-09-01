@@ -116,9 +116,16 @@ const orderSchema = new mongoose.Schema(
     },
     coupon: {
       code: String,
+      benefitType: String,
       discount: {
         type: Number,
         default: 0
+      },
+      freebieRule: {
+        buyQuantity: Number,
+        buyUnit: String,
+        freeQuantity: Number,
+        freeUnit: String
       }
     },
     scratchCouponDiscount: {

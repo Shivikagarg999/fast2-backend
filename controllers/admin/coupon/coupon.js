@@ -1,5 +1,65 @@
 const Coupon = require("../../../models/coupon");
 const Order = require("../../../models/order");
+const Product = require("../../../models/product");
+
+const normalizeCouponPayload = (body) => {
+  const benefitType = body.benefitType || "amount_discount";
+  const payload = {
+    code: body.code?.toUpperCase(),
+    description: body.description,
+    benefitType,
+    minOrderAmount: body.minOrderAmount || 0,
+    maxDiscountAmount: benefitType === "amount_discount" ? body.maxDiscountAmount || null : null,
+    startDate: new Date(body.startDate),
+    endDate: new Date(body.endDate),
+    usageLimit: body.usageLimit || null,
+    perUserLimit: body.perUserLimit || 1,
+    isActive: body.isActive !== undefined ? body.isActive : true,
+    applicableCategories: body.applicableCategories || [],
+    applicableProducts: body.applicableProducts || [],
+    excludedProducts: body.excludedProducts || []
+  };
+
+  if (benefitType === "free_quantity") {
+    payload.discountType = "fixed";
+    payload.discountValue = 0;
+    payload.freebieRule = {
+      buyQuantity: Number(body.freebieRule?.buyQuantity),
+      buyUnit: body.freebieRule?.buyUnit || "kg",
+      freeQuantity: Number(body.freebieRule?.freeQuantity),
+      freeUnit: body.freebieRule?.freeUnit || "kg"
+    };
+
+    if (!payload.freebieRule.buyQuantity || !payload.freebieRule.freeQuantity) {
+      throw new Error("Buy quantity and free quantity are required");
+    }
+  } else {
+    payload.discountType = body.discountType;
+    payload.discountValue = Number(body.discountValue);
+    payload.freebieRule = undefined;
+
+    if (!payload.discountType || !Number.isFinite(payload.discountValue) || payload.discountValue <= 0) {
+      throw new Error("Discount type and discount value are required");
+    }
+  }
+
+  return payload;
+};
+
+const getCouponResponse = (coupon, discount = 0, extra = {}) => ({
+  code: coupon.code,
+  description: coupon.description,
+  benefitType: coupon.benefitType,
+  discountType: coupon.discountType,
+  discountValue: coupon.discountValue,
+  discountAmount: discount,
+  minOrderAmount: coupon.minOrderAmount,
+  maxDiscountAmount: coupon.maxDiscountAmount,
+  applicableCategories: coupon.applicableCategories,
+  applicableProducts: coupon.applicableProducts,
+  freebieRule: coupon.freebieRule,
+  ...extra
+});
 
 exports.createCoupon = async (req, res) => {
   try {
@@ -7,6 +67,7 @@ exports.createCoupon = async (req, res) => {
     const {
       code,
       description,
+      benefitType,
       discountType,
       discountValue,
       minOrderAmount,
@@ -16,6 +77,8 @@ exports.createCoupon = async (req, res) => {
       usageLimit,
       perUserLimit,
       applicableCategories,
+      applicableProducts,
+      freebieRule,
       excludedProducts
     } = req.body;
 
@@ -24,20 +87,23 @@ exports.createCoupon = async (req, res) => {
       return res.status(400).json({ message: "Coupon code already exists" });
     }
 
-    const coupon = new Coupon({
-      code: code.toUpperCase(),
+    const coupon = new Coupon(normalizeCouponPayload({
+      code,
       description,
+      benefitType,
       discountType,
       discountValue,
-      minOrderAmount: minOrderAmount || 0,
-      maxDiscountAmount: maxDiscountAmount || null,
-      startDate: new Date(startDate),
-      endDate: new Date(endDate),
-      usageLimit: usageLimit || null,
-      perUserLimit: perUserLimit || 1,
-      applicableCategories: applicableCategories || [],
-      excludedProducts: excludedProducts || []
-    });
+      minOrderAmount,
+      maxDiscountAmount,
+      startDate,
+      endDate,
+      usageLimit,
+      perUserLimit,
+      applicableCategories,
+      applicableProducts,
+      freebieRule,
+      excludedProducts
+    }));
 
     await coupon.save();
     res.status(201).json({
@@ -46,7 +112,7 @@ exports.createCoupon = async (req, res) => {
     });
   } catch (err) {
     console.error("Create coupon error:", err);
-    res.status(500).json({ message: "Server error" });
+    res.status(400).json({ message: err.message || "Server error" });
   }
 };
 
@@ -54,7 +120,10 @@ exports.getAllCoupons = async (req, res) => {
   try {
   
 
-    const coupons = await Coupon.find().sort({ createdAt: -1 });
+    const coupons = await Coupon.find()
+      .populate("applicableCategories", "name")
+      .populate("applicableProducts", "name unit unitValue")
+      .sort({ createdAt: -1 });
     res.json(coupons);
   } catch (err) {
     console.error("Get coupons error:", err);
@@ -66,9 +135,12 @@ exports.updateCoupon = async (req, res) => {
   try {
    
 
+    const updatePayload = normalizeCouponPayload(req.body);
+    delete updatePayload.code;
+
     const coupon = await Coupon.findByIdAndUpdate(
       req.params.couponId,
-      req.body,
+      updatePayload,
       { new: true, runValidators: true }
     );
 
@@ -82,7 +154,7 @@ exports.updateCoupon = async (req, res) => {
     });
   } catch (err) {
     console.error("Update coupon error:", err);
-    res.status(500).json({ message: "Server error" });
+    res.status(400).json({ message: err.message || "Server error" });
   }
 };
 
@@ -125,7 +197,7 @@ exports.toggleCouponStatus = async (req, res) => {
 
 exports.applyCoupon = async (req, res) => {
   try {
-    const { code, orderAmount } = req.body;
+    const { code, orderAmount, items = [] } = req.body;
     const userId = req.user._id;
 
     if (!code || !orderAmount) {
@@ -143,20 +215,26 @@ exports.applyCoupon = async (req, res) => {
       return res.status(400).json({ message: "You have already used this coupon" });
     }
 
-    const discount = coupon.calculateDiscount(orderAmount);
+    let discount = coupon.calculateDiscount(orderAmount);
+    let freebieDetails = null;
+
+    if (coupon.benefitType === "free_quantity") {
+      const productIds = items.map((item) => item.product).filter(Boolean);
+      const products = await Product.find({ _id: { $in: productIds } }).populate("category");
+      const result = coupon.calculateFreeQuantityDiscount(items, products);
+      discount = result.discount;
+      freebieDetails = { appliedItems: result.appliedItems };
+
+      if (discount <= 0) {
+        return res.status(400).json({ message: "Coupon is not applicable on selected products" });
+      }
+    }
+
     const finalAmount = orderAmount - discount;
 
     res.json({
       valid: true,
-      coupon: {
-        code: coupon.code,
-        description: coupon.description,
-        discountType: coupon.discountType,
-        discountValue: coupon.discountValue,
-        discountAmount: discount,
-        minOrderAmount: coupon.minOrderAmount,
-        maxDiscountAmount: coupon.maxDiscountAmount
-      },
+      coupon: getCouponResponse(coupon, discount, freebieDetails || {}),
       orderAmount,
       discount,
       finalAmount
@@ -180,7 +258,7 @@ exports.getActiveCoupons = async (req, res) => {
         { usageLimit: null },
         { usageLimit: { $gt: { $expr: "$usedCount" } } }
       ]
-    }).select('code description discountType discountValue minOrderAmount maxDiscountAmount endDate');
+    }).select('code description benefitType discountType discountValue minOrderAmount maxDiscountAmount endDate applicableCategories applicableProducts freebieRule');
 
     res.json(coupons);
   } catch (err) {
