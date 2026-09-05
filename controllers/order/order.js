@@ -2864,9 +2864,9 @@ exports.generatePDFInvoice = async (invoiceData) => {
   const fs = require('fs');
 
   // 80mm thermal printer: 230pt wide, 8pt side margins → 214pt content
-  const PAGE_WIDTH = 230;
-  const MARGIN = 8;
-  const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2; // 214pt
+  const PAGE_WIDTH = 204;
+  const MARGIN = 6;
+  const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2; // 192pt
 
   // Indian GST state codes
   const STATE_CODES = {
@@ -2920,7 +2920,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
         const f = 'Courier-Bold';
         const sz = opts.size || 7;
         const gap = opts.gap ?? 3;
-        const labelWidth = opts.labelWidth || 108;
+        const labelWidth = opts.labelWidth || 92;
         const valueX = MARGIN + labelWidth + gap;
         const valueWidth = CONTENT_WIDTH - labelWidth - gap;
         const labelText = String(label ?? '');
@@ -3022,12 +3022,12 @@ exports.generatePDFInvoice = async (invoiceData) => {
       //   DISC: x=126,w=28  (right-aligned)
       //   PRICE:x=154,w=60  (right-aligned, to right edge 214)
       const CI = MARGIN;           // Item
-      const CQ = MARGIN + 70;      // Qty
-      const CM = MARGIN + 88;      // MRP
-      const CD = MARGIN + 118;     // Disc
-      const CP = MARGIN + 146;     // Price (after disc, pre-GST)
-      const WI = 70, WQ = 18, WM = 30, WD = 28;
-      const WP = CONTENT_WIDTH - 146; // 68
+      const CQ = MARGIN + 64;      // Qty
+      const CM = MARGIN + 80;      // MRP
+      const CD = MARGIN + 106;     // Disc
+      const CP = MARGIN + 130;     // Price (after disc, pre-GST)
+      const WI = 64, WQ = 16, WM = 26, WD = 24;
+      const WP = CONTENT_WIDTH - 130; // 62
 
       doc.font('Courier-Bold').fontSize(6).fillColor('#000000');
       doc.text('ITEM',  CI, y, { width: WI });
