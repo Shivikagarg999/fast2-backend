@@ -2950,20 +2950,10 @@ exports.generatePDFInvoice = async (invoiceData) => {
           .text(text, MARGIN, y, { width: CONTENT_WIDTH, align: 'center' });
       };
 
-      let y = MARGIN + 12; // extra top padding before logo
-
-      // ── LOGO ─────────────────────────────────────────────────
-      try {
-        const logoPath = path.join(__dirname, '../../images/logo.png');
-        if (fs.existsSync(logoPath)) {
-          const logoWidth = Math.min(60, CONTENT_WIDTH);
-          const logoX = MARGIN + (CONTENT_WIDTH - logoWidth) / 2;
-          doc.image(logoPath, logoX, y, { width: logoWidth });
-          y += Math.round(logoWidth * 0.9) + 10;
-        }
-      } catch (e) { /* ignore */ }
+      let y = MARGIN + 12;
 
       // ── HEADER ───────────────────────────────────────────────
+      y = measuredText('GMKart', MARGIN, y, CONTENT_WIDTH, { align: 'center', size: 16, minHeight: 20, gap: 4 });
       y = measuredText('TAX INVOICE', MARGIN, y, CONTENT_WIDTH, { align: 'center', size: 8, minHeight: 12, gap: 2 });
       y = measuredText('Indra Nagar near Sain Devin school,', MARGIN, y, CONTENT_WIDTH, { align: 'center', size: 6, minHeight: 9, gap: 3 });
       y = measuredText('Thatipur, Gwalior, MP 474011', MARGIN, y, CONTENT_WIDTH, { align: 'center', size: 6, minHeight: 9, gap: 3 });
