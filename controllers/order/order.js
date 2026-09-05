@@ -2964,11 +2964,11 @@ exports.generatePDFInvoice = async (invoiceData) => {
       } catch (e) { /* ignore */ }
 
       // ── HEADER ───────────────────────────────────────────────
-      center('TAX INVOICE', y, { bold: true, size: 8 }); y += 12;
-      center('Indra Nagar near Sain Devin school,', y, { size: 6 }); y += 8;
-      center('Thatipur, Gwalior, MP 474011', y, { size: 6 }); y += 9;
-      center('GSTIN: 23LQZPK8550M1ZO', y, { size: 6 }); y += 9;
-      center('PAN: LQZPK8550M', y, { size: 6 }); y += 10;
+      y = measuredText('TAX INVOICE', MARGIN, y, CONTENT_WIDTH, { align: 'center', size: 8, minHeight: 12, gap: 2 });
+      y = measuredText('Indra Nagar near Sain Devin school,', MARGIN, y, CONTENT_WIDTH, { align: 'center', size: 6, minHeight: 9, gap: 3 });
+      y = measuredText('Thatipur, Gwalior, MP 474011', MARGIN, y, CONTENT_WIDTH, { align: 'center', size: 6, minHeight: 9, gap: 3 });
+      y = measuredText('GSTIN: 23LQZPK8550M1ZO', MARGIN, y, CONTENT_WIDTH, { align: 'center', size: 6, minHeight: 9, gap: 2 });
+      y = measuredText('PAN: LQZPK8550M', MARGIN, y, CONTENT_WIDTH, { align: 'center', size: 6, minHeight: 9, gap: 2 });
       dashedLine(y); y += 10;
 
       // ── ORDER INFO ───────────────────────────────────────────
