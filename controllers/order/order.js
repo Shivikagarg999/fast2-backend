@@ -2864,9 +2864,9 @@ exports.generatePDFInvoice = async (invoiceData) => {
   const fs = require('fs');
 
   // 80mm thermal printer: 230pt wide, 8pt side margins → 214pt content
-  const PAGE_WIDTH = 204;
-  const MARGIN = 6;
-  const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2; // 192pt
+  const PAGE_WIDTH = 164;
+  const MARGIN = 4;
+  const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2; // 156pt
 
   // Indian GST state codes
   const STATE_CODES = {
@@ -2920,7 +2920,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
         const f = 'Courier-Bold';
         const sz = opts.size || 7;
         const gap = opts.gap ?? 3;
-        const labelWidth = opts.labelWidth || 92;
+        const labelWidth = opts.labelWidth || 76;
         const valueX = MARGIN + labelWidth + gap;
         const valueWidth = CONTENT_WIDTH - labelWidth - gap;
         const labelText = String(label ?? '');
@@ -2980,7 +2980,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
 
       const buyerState = invoiceData.shippingAddress.state || '';
       const buyerStateCode = getStateCode(buyerState);
-      y = row('Place of Supply:', `${buyerState} (Code: ${buyerStateCode})`, y, { labelWidth: 98 });
+      y = row('Place:', `${buyerState} (${buyerStateCode})`, y);
       dashedLine(y); y += 10;
 
       // ── SELLER ───────────────────────────────────────────────
@@ -2997,7 +2997,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
       y = measuredText('SOLD BY:', MARGIN, y, CONTENT_WIDTH, { bold: true, size: 7, minHeight: 8 });
       y = measuredText(sellerName, MARGIN, y, CONTENT_WIDTH, { size: 7, minHeight: 8 });
       y = measuredText(`GSTIN: ${sellerGST}`, MARGIN, y, CONTENT_WIDTH, { size: 6, minHeight: 7 });
-      y = measuredText(`State: ${sellerState}  |  State Code: ${sellerStateCode}`, MARGIN, y, CONTENT_WIDTH, { size: 6, minHeight: 7 });
+      y = measuredText(`State: ${sellerState} (${sellerStateCode})`, MARGIN, y, CONTENT_WIDTH, { size: 6, minHeight: 7 });
       y = measuredText(sellerAddress, MARGIN, y, CONTENT_WIDTH, { size: 6, minHeight: 7, gap: 8 });
       dashedLine(y); y += 10;
 
@@ -3022,14 +3022,14 @@ exports.generatePDFInvoice = async (invoiceData) => {
       //   DISC: x=126,w=28  (right-aligned)
       //   PRICE:x=154,w=60  (right-aligned, to right edge 214)
       const CI = MARGIN;           // Item
-      const CQ = MARGIN + 64;      // Qty
-      const CM = MARGIN + 80;      // MRP
-      const CD = MARGIN + 106;     // Disc
-      const CP = MARGIN + 130;     // Price (after disc, pre-GST)
-      const WI = 64, WQ = 16, WM = 26, WD = 24;
-      const WP = CONTENT_WIDTH - 130; // 62
+      const CQ = MARGIN + 52;      // Qty
+      const CM = MARGIN + 66;      // MRP
+      const CD = MARGIN + 88;      // Disc
+      const CP = MARGIN + 108;     // Price
+      const WI = 52, WQ = 14, WM = 22, WD = 20;
+      const WP = CONTENT_WIDTH - 108; // 48
 
-      doc.font('Courier-Bold').fontSize(6).fillColor('#000000');
+      doc.font('Courier-Bold').fontSize(5.5).fillColor('#000000');
       doc.text('ITEM',  CI, y, { width: WI });
       doc.text('QTY',   CQ, y, { width: WQ, align: 'right' });
       doc.text('MRP',   CM, y, { width: WM, align: 'right' });
@@ -3048,7 +3048,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
         const priceLine = item.itemTotal.toFixed(2);
 
         // Row 1: Item cols
-        doc.font('Courier-Bold').fontSize(6).fillColor('#000000');
+        doc.font('Courier-Bold').fontSize(5.5).fillColor('#000000');
         const itemOptions = { width: WI };
         const itemNameHeight = doc.heightOfString(name, itemOptions);
         doc.text(name,              CI, y, itemOptions);
@@ -3066,7 +3066,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
               : `IGST ${item.gstRate}% =Rs${item.gstAmount.toFixed(2)}`)
           : 'GST: Nil';
         const detail = [hsn ? `HSN:${hsn}` : '', gstLabel].filter(Boolean).join('  ');
-        y = measuredText(detail, MARGIN, y, CONTENT_WIDTH, { size: 5.5, color: '#555555', minHeight: 7, gap: 2 });
+        y = measuredText(detail, MARGIN, y, CONTENT_WIDTH, { size: 5, color: '#555555', minHeight: 7, gap: 2 });
       });
 
       dashedLine(y); y += 8;
