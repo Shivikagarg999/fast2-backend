@@ -2863,10 +2863,10 @@ exports.generatePDFInvoice = async (invoiceData) => {
   const path = require('path');
   const fs = require('fs');
 
-  // 80mm thermal printer: 230pt wide, 8pt side margins → 214pt content
+  // Thermal printers often crop the right edge, so keep content inside a safe printable width.
   const PAGE_WIDTH = 164;
   const MARGIN = 4;
-  const CONTENT_WIDTH = PAGE_WIDTH - MARGIN * 2; // 156pt
+  const CONTENT_WIDTH = 116;
 
   // Indian GST state codes
   const STATE_CODES = {
@@ -2899,7 +2899,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
       // ── HELPERS ──────────────────────────────────────────────
       const dashedLine = (y) => {
         doc.save()
-          .moveTo(MARGIN, y).lineTo(PAGE_WIDTH - MARGIN, y)
+          .moveTo(MARGIN, y).lineTo(MARGIN + CONTENT_WIDTH, y)
           .dash(2, { space: 2 }).lineWidth(0.5).stroke('#000000')
           .undash().restore();
       };
@@ -2920,7 +2920,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
         const f = 'Courier-Bold';
         const sz = opts.size || 7;
         const gap = opts.gap ?? 3;
-        const labelWidth = opts.labelWidth || 76;
+        const labelWidth = opts.labelWidth || 52;
         const valueX = MARGIN + labelWidth + gap;
         const valueWidth = CONTENT_WIDTH - labelWidth - gap;
         const labelText = String(label ?? '');
@@ -3022,14 +3022,14 @@ exports.generatePDFInvoice = async (invoiceData) => {
       //   DISC: x=126,w=28  (right-aligned)
       //   PRICE:x=154,w=60  (right-aligned, to right edge 214)
       const CI = MARGIN;           // Item
-      const CQ = MARGIN + 52;      // Qty
-      const CM = MARGIN + 66;      // MRP
-      const CD = MARGIN + 88;      // Disc
-      const CP = MARGIN + 108;     // Price
-      const WI = 52, WQ = 14, WM = 22, WD = 20;
-      const WP = CONTENT_WIDTH - 108; // 48
+      const CQ = MARGIN + 38;      // Qty
+      const CM = MARGIN + 48;      // MRP
+      const CD = MARGIN + 66;      // Disc
+      const CP = MARGIN + 82;      // Price
+      const WI = 38, WQ = 10, WM = 18, WD = 16;
+      const WP = CONTENT_WIDTH - 82; // 34
 
-      doc.font('Courier-Bold').fontSize(5.5).fillColor('#000000');
+      doc.font('Courier-Bold').fontSize(5).fillColor('#000000');
       doc.text('ITEM',  CI, y, { width: WI });
       doc.text('QTY',   CQ, y, { width: WQ, align: 'right' });
       doc.text('MRP',   CM, y, { width: WM, align: 'right' });
@@ -3048,7 +3048,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
         const priceLine = item.itemTotal.toFixed(2);
 
         // Row 1: Item cols
-        doc.font('Courier-Bold').fontSize(5.5).fillColor('#000000');
+        doc.font('Courier-Bold').fontSize(5).fillColor('#000000');
         const itemOptions = { width: WI };
         const itemNameHeight = doc.heightOfString(name, itemOptions);
         doc.text(name,              CI, y, itemOptions);
@@ -3171,7 +3171,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
         if (fs.existsSync(qrPath)) {
           dashedLine(y); y += 10;
           center('Scan to Pay', y, { bold: true, size: 7 }); y += 10;
-          const qrWidth = Math.min(90, CONTENT_WIDTH);
+          const qrWidth = Math.min(56, CONTENT_WIDTH);
           const qrX = MARGIN + (CONTENT_WIDTH - qrWidth) / 2;
           doc.image(qrPath, qrX, y, { width: qrWidth });
           y += qrWidth + 10;
