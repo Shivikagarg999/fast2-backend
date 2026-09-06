@@ -25,7 +25,21 @@ async function calculateOrderPricing({
   let deliveryCharges = 0;
   let isFreeDelivery = false;
 
-  const sellerDeliveryMap = new Map();
+  const shopDeliveryMap = new Map();
+
+  const toId = (value) => value?._id?.toString?.() || value?.toString?.() || '';
+  const getShopDeliveryKey = (product) => {
+    const shopId = toId(product.shop);
+    if (shopId) return `shop:${shopId}`;
+
+    const sellerId = toId(product.seller);
+    if (sellerId) return `seller:${sellerId}`;
+
+    return `product:${toId(product._id)}`;
+  };
+
+  const getShopName = (product) =>
+    product.shop?.shopName || product.seller?.businessName || product.seller?.name || 'Shop';
 
   for (const item of items) {
     const product = products.find(p => p._id.toString() === item.product.toString());
@@ -39,63 +53,52 @@ async function calculateOrderPricing({
     const productDeliveryCharges = productDelivery.deliveryCharges || 0;
     const productFreeThreshold = productDelivery.freeDeliveryThreshold || 0;
 
-    if (product.seller) {
-      const sellerId = product.seller._id.toString();
+    const shopKey = getShopDeliveryKey(product);
 
-      if (sellerDeliveryMap.has(sellerId)) {
-        const existing = sellerDeliveryMap.get(sellerId);
-        sellerDeliveryMap.set(sellerId, {
-          ...existing,
-          subtotal: existing.subtotal + itemTotal,
-          highestDeliveryCharge: Math.max(existing.highestDeliveryCharge, productDeliveryCharges),
-          lowestFreeThreshold: existing.lowestFreeThreshold > 0 ?
-            Math.min(existing.lowestFreeThreshold, productFreeThreshold) :
-            productFreeThreshold,
-          items: [...existing.items, { productId: product._id, itemTotal }]
-        });
-      } else {
-        sellerDeliveryMap.set(sellerId, {
-          sellerId: sellerId,
-          sellerName: product.seller.name,
-          subtotal: itemTotal,
-          highestDeliveryCharge: productDeliveryCharges,
-          lowestFreeThreshold: productFreeThreshold,
-          items: [{ productId: product._id, itemTotal }]
-        });
-      }
+    if (shopDeliveryMap.has(shopKey)) {
+      const existing = shopDeliveryMap.get(shopKey);
+      shopDeliveryMap.set(shopKey, {
+        ...existing,
+        subtotal: existing.subtotal + itemTotal,
+        highestDeliveryCharge: Math.max(existing.highestDeliveryCharge, productDeliveryCharges),
+        lowestFreeThreshold: existing.lowestFreeThreshold > 0 ?
+          Math.min(existing.lowestFreeThreshold, productFreeThreshold) :
+          productFreeThreshold,
+        items: [...existing.items, { productId: product._id, itemTotal }]
+      });
     } else {
-      deliveryCharges += productDeliveryCharges;
-
-      if (productFreeThreshold > 0 && itemTotal >= productFreeThreshold) {
-        isFreeDelivery = true;
-      }
+      shopDeliveryMap.set(shopKey, {
+        shopKey,
+        shopName: getShopName(product),
+        subtotal: itemTotal,
+        highestDeliveryCharge: productDeliveryCharges,
+        lowestFreeThreshold: productFreeThreshold,
+        items: [{ productId: product._id, itemTotal }]
+      });
     }
   }
 
-  for (const [, sellerData] of sellerDeliveryMap.entries()) {
-    if (sellerData.lowestFreeThreshold > 0 && sellerData.subtotal >= sellerData.lowestFreeThreshold) {
+  const DEFAULT_FREE_DELIVERY_THRESHOLD_PER_SHOP = 199;
+
+  for (const [, shopData] of shopDeliveryMap.entries()) {
+    const hasCustomFreeThreshold = shopData.lowestFreeThreshold > 0;
+    const freeThreshold = hasCustomFreeThreshold
+      ? shopData.lowestFreeThreshold
+      : DEFAULT_FREE_DELIVERY_THRESHOLD_PER_SHOP;
+
+    if (
+      freeThreshold > 0 &&
+      (hasCustomFreeThreshold ? shopData.subtotal >= freeThreshold : shopData.subtotal > freeThreshold)
+    ) {
       continue;
     }
-    deliveryCharges += sellerData.highestDeliveryCharge;
+    deliveryCharges += shopData.highestDeliveryCharge;
   }
 
-  const anySellerFreeDelivery = Array.from(sellerDeliveryMap.values()).some(seller =>
-    seller.lowestFreeThreshold > 0 && seller.subtotal >= seller.lowestFreeThreshold
-  );
-
-  if (anySellerFreeDelivery) {
-    deliveryCharges = 0;
-    isFreeDelivery = true;
-  }
-
-  // Global Free Delivery Threshold
-  if (subtotal > 199) {
-    deliveryCharges = 0;
-    isFreeDelivery = true;
-  }
+  isFreeDelivery = deliveryCharges === 0;
 
   const HANDLING_CHARGE_PER_SHOP = 2;
-  const numberOfShops = sellerDeliveryMap.size;
+  const numberOfShops = shopDeliveryMap.size;
   const handlingCharge = numberOfShops * HANDLING_CHARGE_PER_SHOP;
 
   const total = parseFloat((subtotal + deliveryCharges).toFixed(2));
@@ -130,7 +133,11 @@ async function calculateOrderPricing({
         throw new Error('Coupon is not applicable on selected products');
       }
     } else {
-      discount = validCoupon.calculateDiscount(finalAmount);
+      discount = validCoupon.calculateScopedDiscount(items, products, finalAmount);
+
+      if (discount <= 0) {
+        throw new Error('Coupon is not applicable on selected products');
+      }
     }
 
     finalAmount = parseFloat((finalAmount - discount).toFixed(2));

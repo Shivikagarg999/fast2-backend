@@ -215,19 +215,22 @@ exports.applyCoupon = async (req, res) => {
       return res.status(400).json({ message: "You have already used this coupon" });
     }
 
-    let discount = coupon.calculateDiscount(orderAmount);
+    const productIds = items.map((item) => item.product).filter(Boolean);
+    const products = productIds.length
+      ? await Product.find({ _id: { $in: productIds } }).populate("category")
+      : [];
+
+    let discount = coupon.calculateScopedDiscount(items, products, orderAmount);
     let freebieDetails = null;
 
     if (coupon.benefitType === "free_quantity") {
-      const productIds = items.map((item) => item.product).filter(Boolean);
-      const products = await Product.find({ _id: { $in: productIds } }).populate("category");
       const result = coupon.calculateFreeQuantityDiscount(items, products);
       discount = result.discount;
       freebieDetails = { appliedItems: result.appliedItems };
+    }
 
-      if (discount <= 0) {
-        return res.status(400).json({ message: "Coupon is not applicable on selected products" });
-      }
+    if (discount <= 0) {
+      return res.status(400).json({ message: "Coupon is not applicable on selected products" });
     }
 
     const finalAmount = orderAmount - discount;

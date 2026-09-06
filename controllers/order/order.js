@@ -976,6 +976,7 @@ exports.calculateOrderTotal = async (req, res) => {
 
     const products = await Product.find({ _id: { $in: productIds } })
       .populate('seller')
+      .populate('shop')
       .populate('category');
 
     if (products.length !== items.length) {

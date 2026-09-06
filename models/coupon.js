@@ -154,7 +154,7 @@ couponSchema.methods.calculateDiscount = function (orderAmount) {
 };
 
 couponSchema.methods.matchesProduct = function (product) {
-  const productId = toId(product);
+  const productId = toId(product?._id || product);
   const categoryId = toId(product?.category);
 
   const isExcluded = this.excludedProducts?.some((id) => toId(id) === productId);
@@ -169,6 +169,29 @@ couponSchema.methods.matchesProduct = function (product) {
     this.applicableProducts?.some((id) => toId(id) === productId) ||
     this.applicableCategories?.some((id) => toId(id) === categoryId)
   );
+};
+
+couponSchema.methods.calculateScopedDiscount = function (items, products, fallbackAmount) {
+  if (this.benefitType === "free_quantity") {
+    return 0;
+  }
+
+  const hasProductScope = this.applicableProducts?.length > 0;
+  const hasCategoryScope = this.applicableCategories?.length > 0;
+  if (!hasProductScope && !hasCategoryScope && !this.excludedProducts?.length) {
+    return this.calculateDiscount(fallbackAmount);
+  }
+
+  const eligibleAmount = (items || []).reduce((sum, item) => {
+    const product = (products || []).find((p) => toId(p?._id || p) === toId(item.product));
+    if (!product || !this.matchesProduct(product)) return sum;
+
+    const itemPrice = Number(item.price) || Number(product.effectivePrice) || Number(product.price) || 0;
+    const itemQuantity = Number(item.quantity) || 0;
+    return sum + (itemPrice * itemQuantity);
+  }, 0);
+
+  return this.calculateDiscount(Number(eligibleAmount.toFixed(2)));
 };
 
 couponSchema.methods.calculateFreeQuantityDiscount = function (items, products) {
