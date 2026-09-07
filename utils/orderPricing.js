@@ -1,5 +1,6 @@
 const Coupon = require('../models/coupon');
 const Order = require('../models/order');
+const AppConfig = require('../models/appConfig');
 const { calculateFinalOrderAmount, roundMoney } = require('./orderAmounts');
 
 // Single source of truth for order pricing (subtotal, per-seller delivery charges,
@@ -18,6 +19,7 @@ async function calculateOrderPricing({
   useWallet = false,
   userId,
   walletBalance = 0,
+  freeDeliveryThreshold,
   session
 }) {
   let subtotal = 0;
@@ -78,21 +80,41 @@ async function calculateOrderPricing({
     }
   }
 
-  const DEFAULT_FREE_DELIVERY_THRESHOLD_PER_SHOP = 199;
+  let defaultFreeDeliveryThreshold = Number(freeDeliveryThreshold);
+  if (!Number.isFinite(defaultFreeDeliveryThreshold)) {
+    const appConfig = await AppConfig.findOne({ app: 'customer' })
+      .select('freeDeliveryThreshold')
+      .session(session || null)
+      .lean();
+    defaultFreeDeliveryThreshold = appConfig?.freeDeliveryThreshold ?? 199;
+  }
 
-  for (const [, shopData] of shopDeliveryMap.entries()) {
+  const shopDeliveryBreakdown = [];
+
+  for (const [shopKey, shopData] of shopDeliveryMap.entries()) {
     const hasCustomFreeThreshold = shopData.lowestFreeThreshold > 0;
     const freeThreshold = hasCustomFreeThreshold
       ? shopData.lowestFreeThreshold
-      : DEFAULT_FREE_DELIVERY_THRESHOLD_PER_SHOP;
+      : defaultFreeDeliveryThreshold;
+    let appliedDeliveryCharge = 0;
 
     if (
-      freeThreshold > 0 &&
-      (hasCustomFreeThreshold ? shopData.subtotal >= freeThreshold : shopData.subtotal > freeThreshold)
+      !freeThreshold ||
+      (hasCustomFreeThreshold ? shopData.subtotal < freeThreshold : shopData.subtotal <= freeThreshold)
     ) {
-      continue;
+      appliedDeliveryCharge = shopData.highestDeliveryCharge;
+      deliveryCharges += appliedDeliveryCharge;
     }
-    deliveryCharges += shopData.highestDeliveryCharge;
+
+    shopDeliveryBreakdown.push({
+      shopKey,
+      shopName: shopData.shopName,
+      subtotal: roundMoney(shopData.subtotal),
+      deliveryCharge: roundMoney(appliedDeliveryCharge),
+      isFreeDelivery: appliedDeliveryCharge === 0,
+      freeDeliveryThreshold: roundMoney(freeThreshold),
+      items: shopData.items
+    });
   }
 
   isFreeDelivery = deliveryCharges === 0;
@@ -105,6 +127,7 @@ async function calculateOrderPricing({
   totalGst = parseFloat(totalGst.toFixed(2));
 
   let discount = 0;
+  let couponAppliedItems = [];
   let finalAmount = calculateFinalOrderAmount({
     total,
     handlingCharge,
@@ -128,6 +151,7 @@ async function calculateOrderPricing({
     if (validCoupon.benefitType === 'free_quantity') {
       const result = validCoupon.calculateFreeQuantityDiscount(items, products);
       discount = result.discount;
+      couponAppliedItems = result.appliedItems || [];
 
       if (discount <= 0) {
         throw new Error('Coupon is not applicable on selected products');
@@ -145,6 +169,7 @@ async function calculateOrderPricing({
       code: validCoupon.code,
       discount,
       benefitType: validCoupon.benefitType,
+      appliedItems: couponAppliedItems,
       ...(validCoupon.benefitType === 'free_quantity' && { freebieRule: validCoupon.freebieRule })
     };
   }
@@ -192,6 +217,7 @@ async function calculateOrderPricing({
     subtotal: roundMoney(subtotal),
     deliveryCharges: roundMoney(deliveryCharges),
     isFreeDelivery,
+    shopDeliveryBreakdown,
     numberOfShops,
     handlingCharge: roundMoney(handlingCharge),
     totalGst: roundMoney(totalGst),

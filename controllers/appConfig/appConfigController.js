@@ -16,7 +16,8 @@ exports.getAppConfig = async (req, res) => {
         latestVersionCode: 1,
         playStoreUrl: '',
         updateMessage: '',
-        productServiceRadiusKm: 5
+        productServiceRadiusKm: 5,
+        freeDeliveryThreshold: 199
       });
     }
 
@@ -26,7 +27,8 @@ exports.getAppConfig = async (req, res) => {
       latestVersionCode: config.latestVersionCode,
       playStoreUrl: config.playStoreUrl,
       updateMessage: config.updateMessage,
-      productServiceRadiusKm: config.productServiceRadiusKm || 5
+      productServiceRadiusKm: config.productServiceRadiusKm || 5,
+      freeDeliveryThreshold: config.freeDeliveryThreshold ?? 199
     });
   } catch (error) {
     console.error('Get app config error:', error);
@@ -39,7 +41,7 @@ exports.getAppConfig = async (req, res) => {
 // @access  Private (admin)
 exports.upsertAppConfig = async (req, res) => {
   try {
-    const { app, minVersionCode, latestVersionCode, playStoreUrl, updateMessage, productServiceRadiusKm } = req.body;
+    const { app, minVersionCode, latestVersionCode, playStoreUrl, updateMessage, productServiceRadiusKm, freeDeliveryThreshold } = req.body;
 
     if (!app || !['customer', 'driver'].includes(app)) {
       return res.status(400).json({ success: false, error: "app must be 'customer' or 'driver'" });
@@ -47,6 +49,10 @@ exports.upsertAppConfig = async (req, res) => {
     if (productServiceRadiusKm !== undefined &&
         (!Number.isFinite(Number(productServiceRadiusKm)) || Number(productServiceRadiusKm) < 0.1 || Number(productServiceRadiusKm) > 100)) {
       return res.status(400).json({ success: false, error: 'productServiceRadiusKm must be between 0.1 and 100' });
+    }
+    if (freeDeliveryThreshold !== undefined &&
+        (!Number.isFinite(Number(freeDeliveryThreshold)) || Number(freeDeliveryThreshold) < 0)) {
+      return res.status(400).json({ success: false, error: 'freeDeliveryThreshold must be 0 or greater' });
     }
 
     const config = await AppConfig.findOneAndUpdate(
@@ -57,7 +63,8 @@ exports.upsertAppConfig = async (req, res) => {
         ...(latestVersionCode !== undefined && { latestVersionCode }),
         ...(playStoreUrl !== undefined && { playStoreUrl }),
         ...(updateMessage !== undefined && { updateMessage }),
-        ...(productServiceRadiusKm !== undefined && { productServiceRadiusKm: Number(productServiceRadiusKm) })
+        ...(productServiceRadiusKm !== undefined && { productServiceRadiusKm: Number(productServiceRadiusKm) }),
+        ...(freeDeliveryThreshold !== undefined && { freeDeliveryThreshold: Number(freeDeliveryThreshold) })
       },
       { new: true, upsert: true, setDefaultsOnInsert: true }
     );

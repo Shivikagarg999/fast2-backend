@@ -31,6 +31,11 @@ const appConfigSchema = new mongoose.Schema({
     min: 0.1,
     max: 100,
     default: 5
+  },
+  freeDeliveryThreshold: {
+    type: Number,
+    min: 0,
+    default: 199
   }
 }, { timestamps: true });
 
