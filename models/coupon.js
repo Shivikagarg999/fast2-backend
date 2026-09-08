@@ -155,7 +155,7 @@ couponSchema.methods.calculateDiscount = function (orderAmount) {
 
 couponSchema.methods.matchesProduct = function (product) {
   const productId = toId(product?._id || product);
-  const categoryId = toId(product?.category);
+  const categoryId = toId(product?.category?._id || product?.category);
 
   const isExcluded = this.excludedProducts?.some((id) => toId(id) === productId);
   if (isExcluded) return false;
@@ -199,6 +199,12 @@ couponSchema.methods.calculateFreeQuantityDiscount = function (items, products) 
     return { discount: this.calculateDiscount(0), appliedItems: [] };
   }
 
+  const hasProductScope = this.applicableProducts?.length > 0;
+  const hasCategoryScope = this.applicableCategories?.length > 0;
+  if (!hasProductScope && !hasCategoryScope) {
+    return { discount: 0, appliedItems: [] };
+  }
+
   const rule = this.freebieRule || {};
   const buyBase = toBaseQuantity(rule.buyQuantity, rule.buyUnit);
   const freeBase = toBaseQuantity(rule.freeQuantity, rule.freeUnit);
@@ -213,7 +219,7 @@ couponSchema.methods.calculateFreeQuantityDiscount = function (items, products) 
   const appliedItems = [];
 
   for (const item of items || []) {
-    const product = (products || []).find((p) => toId(p) === toId(item.product));
+    const product = (products || []).find((p) => toId(p?._id || p) === toId(item.product));
     if (!product || !this.matchesProduct(product)) continue;
 
     const productUnit = product.unit || rule.buyUnit;
@@ -229,12 +235,17 @@ couponSchema.methods.calculateFreeQuantityDiscount = function (items, products) 
     const freeBaseForItem = freeSets * freeBase;
     const discountForItem = Math.min((itemPrice / unitValueBase) * freeBaseForItem, itemPrice * itemQuantity);
     const roundedDiscount = Number(discountForItem.toFixed(2));
+    const displayFreeQuantity = freeSets * (Number(rule.freeQuantity) || 0);
+    const displayFreeUnit = rule.freeUnit || (buyGroup === "weight" ? "g" : buyGroup === "volume" ? "ml" : "piece");
     discount += roundedDiscount;
     appliedItems.push({
       product: product._id,
       name: product.name,
       freeQuantity: freeBaseForItem,
       freeUnit: buyGroup === "weight" ? "g" : buyGroup === "volume" ? "ml" : "piece",
+      displayFreeQuantity,
+      displayFreeUnit,
+      benefitLabel: `${displayFreeQuantity}${displayFreeUnit} free`,
       discount: roundedDiscount
     });
   }

@@ -781,6 +781,7 @@ exports.createOrder = async (req, res) => {
           handlingCharge,
           numberOfShops,
           total,
+          coupon: appliedCoupon || {},
           scratchCouponDiscount,
           finalAmount,
           walletDeduction,
@@ -881,6 +882,7 @@ exports.createOrder = async (req, res) => {
         handlingCharge: handlingCharge,
         numberOfShops: numberOfShops,
         total: total,
+        coupon: appliedCoupon || {},
         scratchCouponDiscount,
         finalAmount: finalAmount,
         walletDeduction: walletDeduction,
@@ -2512,6 +2514,8 @@ const buildInvoiceDataForSeller = (order, items, sellerInfo, { includeOrderLevel
   const couponDiscount = includeOrderLevelCharges ? roundMoney(order.coupon?.discount) : 0;
   const scratchCouponDiscount = includeOrderLevelCharges ? roundMoney(order.scratchCouponDiscount) : 0;
   const couponCode = includeOrderLevelCharges ? (order.coupon?.code || null) : null;
+  const couponBenefitType = includeOrderLevelCharges ? (order.coupon?.benefitType || null) : null;
+  const couponAppliedItems = includeOrderLevelCharges ? (order.coupon?.appliedItems || []) : [];
   const correctedFinalAmount = getDisplayFinalAmount(order);
 
   const subtotal = includeOrderLevelCharges ? orderSubtotal : itemsSubtotal;
@@ -2556,6 +2560,8 @@ const buildInvoiceDataForSeller = (order, items, sellerInfo, { includeOrderLevel
       couponDiscount,
       scratchCouponDiscount,
       couponCode,
+      couponBenefitType,
+      couponAppliedItems,
       totalBeforeGST: roundMoney(subtotal + deliveryFee + handlingFee - couponDiscount - scratchCouponDiscount),
       totalGST,
       totalCGST: includeOrderLevelCharges ? totalCGST : totalCGST,
@@ -3105,7 +3111,10 @@ exports.generatePDFInvoice = async (invoiceData) => {
         const couponLbl = invoiceData.summary.couponCode
           ? `Coupon (${invoiceData.summary.couponCode}):`
           : 'Coupon Discount:';
-        y = row(couponLbl, `-Rs ${invoiceData.summary.couponDiscount.toFixed(2)}`, y);
+        const freebieText = invoiceData.summary.couponBenefitType === 'free_quantity'
+          ? invoiceData.summary.couponAppliedItems?.map(item => item.benefitLabel || `${item.displayFreeQuantity || item.freeQuantity}${item.displayFreeUnit || item.freeUnit} free`).join(', ')
+          : '';
+        y = row(couponLbl, freebieText ? `- ${freebieText}` : `-Rs ${invoiceData.summary.couponDiscount.toFixed(2)}`, y);
       }
       if ((invoiceData.summary.scratchCouponDiscount || 0) > 0) {
         y = row('Scratch Coupon:', `-Rs ${invoiceData.summary.scratchCouponDiscount.toFixed(2)}`, y);
@@ -3346,7 +3355,12 @@ exports.generatePDFInvoiceA4 = async (invoiceData) => {
       if (s.totalDiscount > 0) totalRow('Discount', `- ${money(s.totalDiscount)}`);
       if (s.deliveryFee) totalRow('Delivery Fee', money(s.deliveryFee));
       if (s.handlingFee) totalRow('Handling Fee', money(s.handlingFee));
-      if (s.couponDiscount > 0) totalRow(`Coupon (${s.couponCode || ''})`, `- ${money(s.couponDiscount)}`);
+      if (s.couponDiscount > 0) {
+        const freebieText = s.couponBenefitType === 'free_quantity'
+          ? s.couponAppliedItems?.map(item => item.benefitLabel || `${item.displayFreeQuantity || item.freeQuantity}${item.displayFreeUnit || item.freeUnit} free`).join(', ')
+          : '';
+        totalRow(`Coupon (${s.couponCode || ''})`, freebieText ? `- ${freebieText}` : `- ${money(s.couponDiscount)}`);
+      }
       if (s.scratchCouponDiscount > 0) totalRow('Scratch Coupon', `- ${money(s.scratchCouponDiscount)}`);
       if (invoiceData.gstSummary?.withinState) {
         totalRow('CGST', money(s.totalCGST));

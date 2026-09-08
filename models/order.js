@@ -126,7 +126,20 @@ const orderSchema = new mongoose.Schema(
         buyUnit: String,
         freeQuantity: Number,
         freeUnit: String
-      }
+      },
+      appliedItems: [{
+        product: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Product"
+        },
+        name: String,
+        freeQuantity: Number,
+        freeUnit: String,
+        displayFreeQuantity: Number,
+        displayFreeUnit: String,
+        benefitLabel: String,
+        discount: Number
+      }]
     },
     scratchCouponDiscount: {
       type: Number,

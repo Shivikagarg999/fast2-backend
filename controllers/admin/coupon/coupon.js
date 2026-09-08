@@ -33,6 +33,9 @@ const normalizeCouponPayload = (body) => {
     if (!payload.freebieRule.buyQuantity || !payload.freebieRule.freeQuantity) {
       throw new Error("Buy quantity and free quantity are required");
     }
+    if (!payload.applicableCategories.length && !payload.applicableProducts.length) {
+      throw new Error("Select at least one category or product for freebie coupon");
+    }
   } else {
     payload.discountType = body.discountType;
     payload.discountValue = Number(body.discountValue);
