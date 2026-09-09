@@ -108,6 +108,15 @@ const toBaseQuantity = (quantity, unit) => {
   return value;
 };
 
+const fromBaseQuantity = (quantity, unit) => {
+  const value = Number(quantity) || 0;
+  const normalized = String(unit || "").toLowerCase();
+  if (["kg", "kilogram", "kilograms", "l", "liter", "litre", "liters", "litres"].includes(normalized)) {
+    return value / 1000;
+  }
+  return value;
+};
+
 couponSchema.statics.validateCoupon = async function (code, userId, orderAmount) {
   const coupon = await this.findOne({
     code: code.toUpperCase(),
@@ -217,8 +226,11 @@ couponSchema.methods.calculateFreeQuantityDiscount = function (items, products) 
 
   let discount = 0;
   const appliedItems = [];
+  let remainingFreeBase = freeBase;
 
   for (const item of items || []) {
+    if (remainingFreeBase <= 0) break;
+
     const product = (products || []).find((p) => toId(p?._id || p) === toId(item.product));
     if (!product || !this.matchesProduct(product)) continue;
 
@@ -229,14 +241,14 @@ couponSchema.methods.calculateFreeQuantityDiscount = function (items, products) 
     const itemPrice = Number(item.price) || Number(product.effectivePrice) || Number(product.price) || 0;
     const unitValueBase = toBaseQuantity(product.unitValue || 1, productUnit);
     const purchasedBase = unitValueBase * itemQuantity;
-    const freeSets = Math.floor(purchasedBase / buyBase);
-    if (!freeSets) continue;
+    if (purchasedBase < buyBase) continue;
 
-    const freeBaseForItem = freeSets * freeBase;
+    const freeBaseForItem = Math.min(remainingFreeBase, purchasedBase);
     const discountForItem = Math.min((itemPrice / unitValueBase) * freeBaseForItem, itemPrice * itemQuantity);
     const roundedDiscount = Number(discountForItem.toFixed(2));
-    const displayFreeQuantity = freeSets * (Number(rule.freeQuantity) || 0);
+    const displayFreeQuantity = Number(fromBaseQuantity(freeBaseForItem, rule.freeUnit).toFixed(3));
     const displayFreeUnit = rule.freeUnit || (buyGroup === "weight" ? "g" : buyGroup === "volume" ? "ml" : "piece");
+    remainingFreeBase -= freeBaseForItem;
     discount += roundedDiscount;
     appliedItems.push({
       product: product._id,
