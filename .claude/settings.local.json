@@ -8,7 +8,8 @@
       "Bash(node -e ' *)",
       "Bash(xargs grep *)",
       "Bash(find \"c:\\\\Users\\\\Shivika\\\\Desktop\\\\GMKart-frontend\\\\scripts\" -type f 2>&1)",
-      "Read(//c/Users/Shivika/Desktop/GMKart-frontend/scripts/**)"
+      "Read(//c/Users/Shivika/Desktop/GMKart-frontend/scripts/**)",
+      "WebFetch(domain:unsplash.com)"
     ]
   }
 }

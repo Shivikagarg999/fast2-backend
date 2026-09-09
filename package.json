@@ -25,6 +25,7 @@
   "main": "index.js",
   "scripts": {
     "backfill:product-slugs": "node scripts/backfillProductSlugs.js",
+    "backfill:default-subcategories": "node scripts/backfillDefaultSubcategories.js",
     "backfill:shop-location": "node scripts/backfillShopLocationByPincode.js",
     "test:nearby-products": "node scripts/testNearbyProducts.js",
     "test": "echo \"Error: no test specified\" && exit 1"

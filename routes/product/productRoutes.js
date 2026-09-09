@@ -4,7 +4,8 @@ const {
   getProducts, 
   getProductById, 
   updateProduct,
-  getProductsByCategory, 
+  getProductsByCategory,
+  getProductsBySubcategory,
   deleteProduct,
   getProductsByPincode,
   getProductStats,
@@ -49,6 +50,7 @@ router.get('/for-pincode', getProductsForPincode);
 router.get('/:id', getProductById);
 router.delete('/:id', deleteProduct);
 router.get('/category/:categoryId', getProductsByCategory);
+router.get('/subcategory/:subcategoryId', getProductsBySubcategory);
 router.get('/by-pincode', getProductsByPincode);
 router.get("/admin/stats", getProductStats);
 router.get("/admin/low-stock-alerts", getLowStockAlerts);

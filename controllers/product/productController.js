@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const Category = require('../../models/category');
+const Subcategory = require('../../models/subcategory');
 const Promotor = require('../../models/promotor');
 const Product = require('../../models/product');
 const Order = require('../../models/order');
@@ -148,6 +149,18 @@ const createProduct = async (req, res) => {
         success: false,
         message: 'Category not found'
       });
+    }
+
+    let subcategoryId;
+    if (productData.subcategory) {
+      const subcategory = await Subcategory.findById(productData.subcategory);
+      if (!subcategory) {
+        return res.status(404).json({
+          success: false,
+          message: 'Subcategory not found'
+        });
+      }
+      subcategoryId = subcategory._id;
     }
 
     if (!productData.seller) {
@@ -303,6 +316,7 @@ const createProduct = async (req, res) => {
       description: productData.description,
       brand: productData.brand,
       category: categoryId,
+      subcategory: subcategoryId,
       seller: seller._id,
       price: price,
       oldPrice: oldPrice,
@@ -493,6 +507,20 @@ const updateProduct = async (req, res) => {
         });
       }
       categoryId = category._id;
+    }
+
+    let subcategoryId = existingProduct.subcategory;
+    if (req.body.subcategory) {
+      const subcategory = await Subcategory.findById(req.body.subcategory);
+      if (!subcategory) {
+        return res.status(404).json({
+          success: false,
+          message: 'Subcategory not found'
+        });
+      }
+      subcategoryId = subcategory._id;
+    } else if (req.body.subcategory === '') {
+      subcategoryId = undefined;
     }
 
     let sellerId = existingProduct.seller;
@@ -702,6 +730,7 @@ const updateProduct = async (req, res) => {
       description: req.body.description !== undefined ? req.body.description : existingProduct.description,
       brand: req.body.brand !== undefined ? req.body.brand : existingProduct.brand,
       category: categoryId,
+      subcategory: subcategoryId,
       seller: sellerId,
       price: req.body.price !== undefined ? parseFloat(req.body.price) : existingProduct.price,
       oldPrice: req.body.oldPrice !== undefined ? parseFloat(req.body.oldPrice) : existingProduct.oldPrice,
@@ -753,7 +782,7 @@ const updateProduct = async (req, res) => {
       updateData,
       { new: true, runValidators: true }
     )
-      .populate('category')
+      .populate('category').populate('subcategory')
       .populate('promotor.id')
       .populate('seller');
 
@@ -883,7 +912,7 @@ const getProducts = async (req, res) => {
     const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
 
     const products = await Product.find(filter)
-      .populate('category')
+      .populate('category').populate('subcategory')
       .populate('promotor.id')
       .populate('warehouse.id')
       .sort(sort)
@@ -960,7 +989,7 @@ const getProductsAdmin = async (req, res) => {
     const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
 
     const products = await Product.find(filter)
-      .populate('category')
+      .populate('category').populate('subcategory')
       .populate('seller', 'name businessName')
       .populate('promotor.id')
       .populate('warehouse.id')
@@ -1027,7 +1056,7 @@ const getProductsByPincode = async (req, res) => {
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
     const products = await Product.find(filter)
-      .populate('category')
+      .populate('category').populate('subcategory')
       .populate('promotor.id')
       .populate('warehouse.id')
       .skip(skip)
@@ -1560,7 +1589,7 @@ const getProductById = async (req, res) => {
       : { slug: id };
 
     let product = await Product.findOne(query)
-      .populate('category')
+      .populate('category').populate('subcategory')
       .populate('promotor.id')
       .select('-__v');
 
@@ -1579,7 +1608,7 @@ const getProductById = async (req, res) => {
 
       if (matchedCandidate) {
         product = await Product.findById(matchedCandidate._id)
-          .populate('category')
+          .populate('category').populate('subcategory')
           .populate('promotor.id')
           .select('-__v');
       }
@@ -1604,13 +1633,37 @@ const getProductsByCategory = async (req, res) => {
     }
     const { productFilter, serviceRadiusKm } = await getNearbyShopProductFilter(latitude, longitude);
     const products = await Product.find({ category: categoryId, isActive: true, ...productFilter })
-      .populate('category')
+      .populate('category').populate('subcategory')
       .populate('promotor.id');
 
     const discounts = await getActiveDiscounts();
     const productsWithDiscount = products.map(p => applyDiscountToProduct(p.toObject(), discounts));
 
     res.json({ category: category.name, products: productsWithDiscount, serviceRadiusKm });
+  } catch (error) {
+    console.error(error);
+    res.status(error.statusCode || 500).json({ message: error.message });
+  }
+};
+
+const getProductsBySubcategory = async (req, res) => {
+  try {
+    const { subcategoryId } = req.params;
+    const { latitude, longitude } = req.query;
+
+    const subcategory = await Subcategory.findById(subcategoryId).populate('category');
+    if (!subcategory || !subcategory.isActive) {
+      return res.status(404).json({ message: 'Subcategory not found' });
+    }
+    const { productFilter, serviceRadiusKm } = await getNearbyShopProductFilter(latitude, longitude);
+    const products = await Product.find({ subcategory: subcategoryId, isActive: true, ...productFilter })
+      .populate('category').populate('subcategory')
+      .populate('promotor.id');
+
+    const discounts = await getActiveDiscounts();
+    const productsWithDiscount = products.map(p => applyDiscountToProduct(p.toObject(), discounts));
+
+    res.json({ subcategory: subcategory.name, category: subcategory.category?.name, products: productsWithDiscount, serviceRadiusKm });
   } catch (error) {
     console.error(error);
     res.status(error.statusCode || 500).json({ message: error.message });
@@ -1774,7 +1827,7 @@ const getProductsByWarehouse = async (req, res) => {
       'warehouse.code': warehouseCode,
       isActive: true
     })
-      .populate('category')
+      .populate('category').populate('subcategory')
       .populate('promotor.id')
       .populate('warehouse.id');
 
@@ -1811,7 +1864,7 @@ const getProductsForPincode = async (req, res) => {
       'warehouse.code': warehouse.code,
       isActive: true
     })
-      .populate('category')
+      .populate('category').populate('subcategory')
       .populate('promotor.id')
       .populate('warehouse.id');
 
@@ -1894,7 +1947,7 @@ const toggleProductActiveStatus = async (req, res) => {
         ...(activating && product.quantity > 0 ? { stockStatus: 'in-stock' } : {})
       },
       { new: true, runValidators: true }
-    ).populate('category').populate('promotor.id').populate('warehouse.id');
+    ).populate('category').populate('subcategory').populate('promotor.id').populate('warehouse.id');
 
     res.json({
       success: true,
@@ -2536,6 +2589,7 @@ module.exports = {
   deleteProduct,
   bulkDeleteProducts,
   getProductsByCategory,
+  getProductsBySubcategory,
   getProductOrders,
   getProductSalesAnalytics,
   getProductsOrderStats,
