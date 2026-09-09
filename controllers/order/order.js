@@ -2579,6 +2579,30 @@ const buildInvoiceDataForSeller = (order, items, sellerInfo, { includeOrderLevel
   };
 };
 
+const formatInvoiceQuantityValue = (value) => {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '';
+  return Number.isInteger(number) ? String(number) : Number(number.toFixed(3)).toString();
+};
+
+const getInvoiceQuantityLabel = (item) => {
+  const quantity = formatInvoiceQuantityValue(item.quantity);
+  const unitValue = formatInvoiceQuantityValue(item.product?.unitValue);
+  const unit = item.product?.unit || '';
+
+  if (quantity && unitValue && unit) {
+    return `${quantity} x ${unitValue}${unit}`;
+  }
+
+  return quantity || '-';
+};
+
+const getInvoiceItemName = (item) => {
+  const name = item.product?.name || item.name || 'Item';
+  const quantityLabel = getInvoiceQuantityLabel(item);
+  return quantityLabel && quantityLabel !== '-' ? `${name} - ${quantityLabel}` : name;
+};
+
 // Returns the persisted invoice number for this order+seller, generating and
 // saving a new one (GMK-<orderHex>-<sellerHex>-<sequence>) the first time it's
 // requested. Reused on every subsequent download so the number never changes
@@ -3037,7 +3061,7 @@ exports.generatePDFInvoice = async (invoiceData) => {
 
       invoiceData.items.forEach((item) => {
         const product = item.product;
-        const name = product?.name || 'Product';
+        const name = getInvoiceItemName(item);
         const mrpUnit   = item.mrp || item.price;
         const discUnit  = item.discountPerUnit || 0;
         const mrpLine   = (mrpUnit * item.quantity).toFixed(2);
@@ -3311,7 +3335,8 @@ exports.generatePDFInvoiceA4 = async (invoiceData) => {
       y = drawTableHeader(y);
 
       invoiceData.items.forEach((item, idx) => {
-        const name = item.product?.name || item.name || 'Item';
+        const name = getInvoiceItemName(item);
+        const quantityLabel = getInvoiceQuantityLabel(item);
         const rowHeight = Math.max(18, doc.font('Helvetica-Bold').fontSize(8).heightOfString(name, { width: cols[1].width - 6 }) + 6);
 
         if (y + rowHeight > PAGE_HEIGHT - MARGIN - 100) {
@@ -3323,7 +3348,7 @@ exports.generatePDFInvoiceA4 = async (invoiceData) => {
         const values = {
           sr: idx + 1,
           name,
-          qty: item.quantity,
+          qty: quantityLabel,
           rate: money(item.price),
           taxable: money(item.taxableValue),
           gstRate: `${item.gstRate || 0}%`,
