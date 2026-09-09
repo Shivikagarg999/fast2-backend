@@ -76,7 +76,7 @@ const couponSchema = new mongoose.Schema(
       buyQuantity: { type: Number, min: 0 },
       buyUnit: { type: String, enum: ["g", "kg", "ml", "l", "piece"], default: "kg" },
       freeQuantity: { type: Number, min: 0 },
-      freeUnit: { type: String, enum: ["g", "kg", "ml", "l", "piece"], default: "kg" }
+      freeUnit: { type: String, enum: ["g", "kg", "ml", "l", "piece"], default: "g" }
     },
     excludedProducts: [{
       type: mongoose.Schema.Types.ObjectId,

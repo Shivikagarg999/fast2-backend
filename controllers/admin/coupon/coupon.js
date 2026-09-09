@@ -27,7 +27,7 @@ const normalizeCouponPayload = (body) => {
       buyQuantity: Number(body.freebieRule?.buyQuantity),
       buyUnit: body.freebieRule?.buyUnit || "kg",
       freeQuantity: Number(body.freebieRule?.freeQuantity),
-      freeUnit: body.freebieRule?.freeUnit || "kg"
+      freeUnit: body.freebieRule?.freeUnit || "g"
     };
 
     if (!payload.freebieRule.buyQuantity || !payload.freebieRule.freeQuantity) {
