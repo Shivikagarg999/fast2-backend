@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Subcategory = require('../../models/subcategory');
 const Category = require('../../models/category');
 const imagekit = require('../../utils/imagekit');
@@ -66,7 +67,11 @@ exports.getSubcategories = async (req, res) => {
 // active subcategories are reachable by direct link on the storefront.
 exports.getSubcategoryById = async (req, res) => {
   try {
-    const subcategory = await Subcategory.findById(req.params.id).populate('category');
+    const { id } = req.params;
+    const isObjectId = mongoose.Types.ObjectId.isValid(id);
+    const query = isObjectId ? { $or: [{ _id: id }, { slug: id }] } : { slug: id };
+
+    const subcategory = await Subcategory.findOne(query).populate('category');
     if (!subcategory || !subcategory.isActive) return res.status(404).json({ message: 'Subcategory not found' });
     res.json(subcategory);
   } catch (error) {

@@ -25,6 +25,8 @@
   "main": "index.js",
   "scripts": {
     "backfill:product-slugs": "node scripts/backfillProductSlugs.js",
+    "backfill:category-slugs": "node scripts/backfillCategorySlugs.js",
+    "backfill:subcategory-slugs": "node scripts/backfillSubcategorySlugs.js",
     "backfill:default-subcategories": "node scripts/backfillDefaultSubcategories.js",
     "backfill:shop-location": "node scripts/backfillShopLocationByPincode.js",
     "test:nearby-products": "node scripts/testNearbyProducts.js",

@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Category = require('../../models/category');
 const imagekit = require('../../utils/imagekit');
 const fs = require('fs');
@@ -69,7 +70,11 @@ exports.getCategories = async (req, res) => {
 // categories here too instead of letting them be reachable by direct link.
 exports.getCategoryById = async (req, res) => {
   try {
-    const category = await Category.findById(req.params.id);
+    const { id } = req.params;
+    const isObjectId = mongoose.Types.ObjectId.isValid(id);
+    const query = isObjectId ? { $or: [{ _id: id }, { slug: id }] } : { slug: id };
+
+    const category = await Category.findOne(query);
     if (!category || !category.isActive) return res.status(404).json({ message: 'Category not found' });
     res.json(category);
   } catch (error) {
