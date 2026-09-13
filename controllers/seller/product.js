@@ -3,6 +3,7 @@ const Product = require('../../models/product');
 const Warehouse = require('../../models/warehouse');
 const Promotor = require('../../models/promotor');
 const Category = require('../../models/category');
+const Subcategory = require('../../models/subcategory');
 const Order = require('../../models/order');
 const Shop = require('../../models/shop');
 const mongoose = require('mongoose');
@@ -93,6 +94,18 @@ exports.addProduct = async (req, res) => {
       taxType: productData.taxType || foundCategory?.taxType
     };
 
+    let subcategoryId;
+    if (productData.subcategory) {
+      const subcategory = await Subcategory.findById(productData.subcategory);
+      if (!subcategory) {
+        return res.status(404).json({
+          success: false,
+          message: 'Subcategory not found'
+        });
+      }
+      subcategoryId = subcategory._id;
+    }
+
     const stockStatus = productData.quantity > 0 ? 'in-stock' : 'out-of-stock';
     const promotorCommission = seller.promotor?.commissionRate || 5;
     const commissionType = seller.promotor?.commissionType || 'percentage';
@@ -109,11 +122,12 @@ exports.addProduct = async (req, res) => {
 
     let uploadedImages = [];
 
-    if (req.files && req.files.length > 0) {
+    const imageFiles = req.files && req.files.images ? req.files.images : [];
+    if (imageFiles.length > 0) {
       console.log('Uploading images to ImageKit...');
 
-      for (let i = 0; i < req.files.length; i++) {
-        const imageFile = req.files[i];
+      for (let i = 0; i < imageFiles.length; i++) {
+        const imageFile = imageFiles[i];
 
         try {
           const uploadedImage = await imagekit.upload({
@@ -139,11 +153,39 @@ exports.addProduct = async (req, res) => {
 
     console.log('Final images array:', uploadedImages);
 
+    let videoInfo = {};
+    if (req.files && req.files.video) {
+      const videoFile = Array.isArray(req.files.video) ? req.files.video[0] : req.files.video;
+      try {
+        const videoUploadResponse = await imagekit.upload({
+          file: videoFile.buffer.toString('base64'),
+          fileName: `product_video_${sellerId}_${Date.now()}.mp4`,
+          folder: '/seller-products/videos',
+          useUniqueFileName: true,
+          tags: ['product', 'video', sellerId]
+        });
+
+        videoInfo = {
+          url: videoUploadResponse.url,
+          fileId: videoUploadResponse.fileId,
+          filename: videoUploadResponse.name,
+          size: videoUploadResponse.size,
+          mimetype: videoUploadResponse.mimeType,
+          thumbnail: videoUploadResponse.thumbnailUrl,
+          duration: productData.videoDuration || 0,
+          fileSize: productData.videoFileSize || videoFile.size
+        };
+      } catch (videoUploadError) {
+        console.error('Error uploading video:', videoUploadError);
+      }
+    }
+
     const newProduct = new Product({
       name: productData.name,
       description: productData.description,
       brand: productData.brand,
       category: categoryId,
+      subcategory: subcategoryId,
       price: productData.price,
       oldPrice: productData.oldPrice || 0,
       discountPercentage: discountPercentage,
@@ -168,6 +210,7 @@ exports.addProduct = async (req, res) => {
       weightUnit: productData.weightUnit || 'g',
       dimensions: productData.dimensions,
       images: uploadedImages,
+      video: videoInfo,
       delivery: {
         estimatedDeliveryTime: productData.estimatedDeliveryTime,
         deliveryCharges: productData.deliveryCharges || 0,
@@ -267,6 +310,20 @@ exports.updateProduct = async (req, res) => {
       }
     }
     const foundCategory = await Category.findById(categoryId);
+
+    let subcategoryId = existingProduct.subcategory;
+    if (req.body.subcategory) {
+      const subcategory = await Subcategory.findById(req.body.subcategory);
+      if (!subcategory) {
+        return res.status(404).json({
+          success: false,
+          message: 'Subcategory not found'
+        });
+      }
+      subcategoryId = subcategory._id;
+    } else if (req.body.subcategory === '') {
+      subcategoryId = undefined;
+    }
 
     const price = req.body.price !== undefined ? parseFloat(req.body.price) : existingProduct.price;
     const oldPrice = req.body.oldPrice !== undefined ? parseFloat(req.body.oldPrice) : existingProduct.oldPrice;
@@ -402,6 +459,7 @@ exports.updateProduct = async (req, res) => {
       description: req.body.description !== undefined ? req.body.description : existingProduct.description,
       brand: req.body.brand !== undefined ? req.body.brand : existingProduct.brand,
       category: categoryId,
+      subcategory: subcategoryId,
       price: price,
       oldPrice: oldPrice,
       discountPercentage: discountPercentage,
@@ -440,6 +498,7 @@ exports.updateProduct = async (req, res) => {
       { new: true, runValidators: true }
     )
       .populate('category', 'name')
+      .populate('subcategory', 'name')
       .populate('seller', 'name email');
 
     res.status(200).json({
@@ -516,6 +575,7 @@ exports.getSellerProducts = async (req, res) => {
 
     const products = await Product.find(filter)
       .populate('category', 'name')
+      .populate('subcategory', 'name')
       .sort(sort)
       .limit(limit * 1)
       .skip((page - 1) * limit)
@@ -619,6 +679,7 @@ exports.getProductById = async (req, res) => {
 
     const product = await Product.findOne({ _id: productId, seller: sellerId })
       .populate('category', 'name hsnCode gstPercent')
+      .populate('subcategory', 'name')
       .populate('seller', 'name businessName email phone address')
       .populate('warehouse.id', 'name code storageType location')
       .lean();
