@@ -32,7 +32,7 @@ const loginAdmin = async (req, res) => {
       roleId: admin.role?._id,
       roleName: admin.role?.displayName,
       permissions: admin.role?.permissions,
-      isSuperAdmin: admin?._doc?.roleString == 'super-admin',
+      isSuperAdmin: admin.role?.name === 'super_admin',
       token: generateToken(admin._id),
     });
   } catch (error) {
