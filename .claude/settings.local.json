@@ -9,7 +9,9 @@
       "Bash(xargs grep *)",
       "Bash(find \"c:\\\\Users\\\\Shivika\\\\Desktop\\\\GMKart-frontend\\\\scripts\" -type f 2>&1)",
       "Read(//c/Users/Shivika/Desktop/GMKart-frontend/scripts/**)",
-      "WebFetch(domain:unsplash.com)"
+      "WebFetch(domain:unsplash.com)",
+      "Bash(grep -rln \"benefitLabel\\\\|freebieRule\\\\|free_quantity\\\\|couponDiscount\\\\|appliedItems\" \"/d/fast2-user-app/lib\" 2>/dev/null)",
+      "Read(//d/fast2-user-app/lib/**)"
     ]
   }
 }

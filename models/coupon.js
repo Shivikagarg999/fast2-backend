@@ -230,12 +230,13 @@ couponSchema.methods.calculateFreeQuantityDiscount = function (items, products) 
   // seller/warehouse packing instructions). The aggregate `discount` returned here is
   // always 0; `value` on each applied item is only the informational worth of the
   // freebie (e.g. "worth Rs100"), it is never subtracted from what the customer pays.
+  //
+  // The freebie SCALES with how many times the buy-threshold was met, per item - e.g.
+  // "buy 1kg get 250g free" on a 3kg purchase gives 3 x 250g = 750g free, not a flat
+  // one-time 250g regardless of how much over the threshold was bought.
   const appliedItems = [];
-  let remainingFreeBase = freeBase;
 
   for (const item of items || []) {
-    if (remainingFreeBase <= 0) break;
-
     const product = (products || []).find((p) => toId(p?._id || p) === toId(item.product));
     if (!product || !this.matchesProduct(product)) continue;
 
@@ -248,12 +249,12 @@ couponSchema.methods.calculateFreeQuantityDiscount = function (items, products) 
     const purchasedBase = unitValueBase * itemQuantity;
     if (purchasedBase < buyBase) continue;
 
-    const freeBaseForItem = Math.min(remainingFreeBase, purchasedBase);
-    const freebieValue = Math.min((itemPrice / unitValueBase) * freeBaseForItem, itemPrice * itemQuantity);
+    const multiples = Math.floor(purchasedBase / buyBase);
+    const freeBaseForItem = multiples * freeBase;
+    const freebieValue = (itemPrice / unitValueBase) * freeBaseForItem;
     const roundedValue = Number(freebieValue.toFixed(2));
     const displayFreeQuantity = Number(fromBaseQuantity(freeBaseForItem, rule.freeUnit).toFixed(3));
     const displayFreeUnit = rule.freeUnit || (buyGroup === "weight" ? "g" : buyGroup === "volume" ? "ml" : "piece");
-    remainingFreeBase -= freeBaseForItem;
     appliedItems.push({
       product: product._id,
       name: product.name,

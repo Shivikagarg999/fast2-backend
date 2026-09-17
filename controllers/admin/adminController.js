@@ -44,7 +44,6 @@ const registerAdmin = async (req, res) => {
       return res.status(400).json({ message: 'Admin already exists' });
     }
 
-    // If no roleId provided, find or create default admin role
     let role;
     if (roleId) {
       role = await Role.findById(roleId);
