@@ -3088,6 +3088,16 @@ exports.generatePDFInvoice = async (invoiceData) => {
           : 'GST: Nil';
         const detail = [hsn ? `HSN:${hsn}` : '', gstLabel].filter(Boolean).join('  ');
         y = measuredText(detail, MARGIN, y, CONTENT_WIDTH, { size: 5, color: '#555555', minHeight: 7, gap: 2 });
+
+        // Row 3: freebie bonus on this item, if any - tells the packer to add the
+        // extra quantity for free (not a discount, the item itself was paid in full).
+        const freebieForItem = invoiceData.summary.couponAppliedItems?.find(
+          (ai) => ai.product?.toString?.() === product?._id?.toString?.()
+        );
+        if (freebieForItem) {
+          const label = `+ ${freebieForItem.benefitLabel || `${freebieForItem.displayFreeQuantity || freebieForItem.freeQuantity}${freebieForItem.displayFreeUnit || freebieForItem.freeUnit} free`} (pack extra)`;
+          y = measuredText(label, MARGIN, y, CONTENT_WIDTH, { size: 5, bold: true, color: '#000000', minHeight: 7, gap: 2 });
+        }
       });
 
       dashedLine(y); y += 8;
@@ -3130,15 +3140,22 @@ exports.generatePDFInvoice = async (invoiceData) => {
       // 4. Delivery charges
       y = row('Delivery Charges:', `Rs ${(invoiceData.summary.deliveryFee || 0).toFixed(2)}`, y);
 
-      // 5. Coupon discount
-      if ((invoiceData.summary.couponDiscount || 0) > 0) {
+      // 5. Coupon discount / freebie bonus
+      const isFreebieCoupon = invoiceData.summary.couponBenefitType === 'free_quantity';
+      const freebieText = isFreebieCoupon
+        ? invoiceData.summary.couponAppliedItems?.map(item => item.benefitLabel || `${item.displayFreeQuantity || item.freeQuantity}${item.displayFreeUnit || item.freeUnit} free`).join(', ')
+        : '';
+      if (isFreebieCoupon && freebieText) {
+        // Bonus quantity at no extra charge - not a price reduction, so no "-Rs" here.
+        const couponLbl = invoiceData.summary.couponCode
+          ? `Coupon (${invoiceData.summary.couponCode}):`
+          : 'Coupon Bonus:';
+        y = row(couponLbl, freebieText, y);
+      } else if ((invoiceData.summary.couponDiscount || 0) > 0) {
         const couponLbl = invoiceData.summary.couponCode
           ? `Coupon (${invoiceData.summary.couponCode}):`
           : 'Coupon Discount:';
-        const freebieText = invoiceData.summary.couponBenefitType === 'free_quantity'
-          ? invoiceData.summary.couponAppliedItems?.map(item => item.benefitLabel || `${item.displayFreeQuantity || item.freeQuantity}${item.displayFreeUnit || item.freeUnit} free`).join(', ')
-          : '';
-        y = row(couponLbl, freebieText ? `- ${freebieText}` : `-Rs ${invoiceData.summary.couponDiscount.toFixed(2)}`, y);
+        y = row(couponLbl, `-Rs ${invoiceData.summary.couponDiscount.toFixed(2)}`, y);
       }
       if ((invoiceData.summary.scratchCouponDiscount || 0) > 0) {
         y = row('Scratch Coupon:', `-Rs ${invoiceData.summary.scratchCouponDiscount.toFixed(2)}`, y);
@@ -3335,8 +3352,19 @@ exports.generatePDFInvoiceA4 = async (invoiceData) => {
       y = drawTableHeader(y);
 
       invoiceData.items.forEach((item, idx) => {
-        const name = getInvoiceItemName(item);
+        const baseName = getInvoiceItemName(item);
         const quantityLabel = getInvoiceQuantityLabel(item);
+
+        // Freebie bonus on this item, if any - tells the packer to add the extra
+        // quantity for free (not a discount, the item itself was paid in full).
+        const freebieForItem = invoiceData.summary.couponAppliedItems?.find(
+          (ai) => ai.product?.toString?.() === item.product?._id?.toString?.()
+        );
+        const freebieNote = freebieForItem
+          ? `\n+ ${freebieForItem.benefitLabel || `${freebieForItem.displayFreeQuantity || freebieForItem.freeQuantity}${freebieForItem.displayFreeUnit || freebieForItem.freeUnit} free`} (pack extra)`
+          : '';
+        const name = baseName + freebieNote;
+
         const rowHeight = Math.max(18, doc.font('Helvetica-Bold').fontSize(8).heightOfString(name, { width: cols[1].width - 6 }) + 6);
 
         if (y + rowHeight > PAGE_HEIGHT - MARGIN - 100) {
@@ -3380,11 +3408,15 @@ exports.generatePDFInvoiceA4 = async (invoiceData) => {
       if (s.totalDiscount > 0) totalRow('Discount', `- ${money(s.totalDiscount)}`);
       if (s.deliveryFee) totalRow('Delivery Fee', money(s.deliveryFee));
       if (s.handlingFee) totalRow('Handling Fee', money(s.handlingFee));
-      if (s.couponDiscount > 0) {
-        const freebieText = s.couponBenefitType === 'free_quantity'
-          ? s.couponAppliedItems?.map(item => item.benefitLabel || `${item.displayFreeQuantity || item.freeQuantity}${item.displayFreeUnit || item.freeUnit} free`).join(', ')
-          : '';
-        totalRow(`Coupon (${s.couponCode || ''})`, freebieText ? `- ${freebieText}` : `- ${money(s.couponDiscount)}`);
+      const isFreebieCoupon2 = s.couponBenefitType === 'free_quantity';
+      const freebieText2 = isFreebieCoupon2
+        ? s.couponAppliedItems?.map(item => item.benefitLabel || `${item.displayFreeQuantity || item.freeQuantity}${item.displayFreeUnit || item.freeUnit} free`).join(', ')
+        : '';
+      if (isFreebieCoupon2 && freebieText2) {
+        // Bonus quantity at no extra charge - not a price reduction, so no "-" here.
+        totalRow(`Coupon (${s.couponCode || ''})`, freebieText2);
+      } else if (s.couponDiscount > 0) {
+        totalRow(`Coupon (${s.couponCode || ''})`, `- ${money(s.couponDiscount)}`);
       }
       if (s.scratchCouponDiscount > 0) totalRow('Scratch Coupon', `- ${money(s.scratchCouponDiscount)}`);
       if (invoiceData.gstSummary?.withinState) {

@@ -224,7 +224,12 @@ couponSchema.methods.calculateFreeQuantityDiscount = function (items, products) 
     throw new Error("Invalid free quantity coupon rule");
   }
 
-  let discount = 0;
+  // free_quantity coupons are fulfilled as EXTRA product at no extra charge, not as
+  // a price reduction - the customer pays full price for what they ordered, and the
+  // free amount is recorded per item so it can be packed/shown as a bonus (invoice,
+  // seller/warehouse packing instructions). The aggregate `discount` returned here is
+  // always 0; `value` on each applied item is only the informational worth of the
+  // freebie (e.g. "worth Rs100"), it is never subtracted from what the customer pays.
   const appliedItems = [];
   let remainingFreeBase = freeBase;
 
@@ -244,12 +249,11 @@ couponSchema.methods.calculateFreeQuantityDiscount = function (items, products) 
     if (purchasedBase < buyBase) continue;
 
     const freeBaseForItem = Math.min(remainingFreeBase, purchasedBase);
-    const discountForItem = Math.min((itemPrice / unitValueBase) * freeBaseForItem, itemPrice * itemQuantity);
-    const roundedDiscount = Number(discountForItem.toFixed(2));
+    const freebieValue = Math.min((itemPrice / unitValueBase) * freeBaseForItem, itemPrice * itemQuantity);
+    const roundedValue = Number(freebieValue.toFixed(2));
     const displayFreeQuantity = Number(fromBaseQuantity(freeBaseForItem, rule.freeUnit).toFixed(3));
     const displayFreeUnit = rule.freeUnit || (buyGroup === "weight" ? "g" : buyGroup === "volume" ? "ml" : "piece");
     remainingFreeBase -= freeBaseForItem;
-    discount += roundedDiscount;
     appliedItems.push({
       product: product._id,
       name: product.name,
@@ -258,12 +262,13 @@ couponSchema.methods.calculateFreeQuantityDiscount = function (items, products) 
       displayFreeQuantity,
       displayFreeUnit,
       benefitLabel: `${displayFreeQuantity}${displayFreeUnit} free`,
-      discount: roundedDiscount
+      discount: 0,
+      value: roundedValue
     });
   }
 
   return {
-    discount: Number(discount.toFixed(2)),
+    discount: 0,
     appliedItems
   };
 };

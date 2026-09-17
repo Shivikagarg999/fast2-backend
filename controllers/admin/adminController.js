@@ -2,14 +2,10 @@ const Admin = require('../../models/admin');
 const Role = require('../../models/role');
 const jwt = require('jsonwebtoken');
 
-// Generate JWT token
 const generateToken = (id) => {
   return jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: '7d' });
 };
 
-// @desc    Admin login
-// @route   POST /api/admin/login
-// @access  Public
 const loginAdmin = async (req, res) => {
   const { email, password } = req.body;
 
@@ -18,11 +14,6 @@ const loginAdmin = async (req, res) => {
     if (!admin) {
       return res.status(401).json({ message: 'Invalid email or password' });
     }
-
-    // const isMatch = await admin.matchPassword(password);
-    // if (!isMatch) {
-    //   return res.status(401).json({ message: 'Invalid email or password' });
-    // }
 
     res.json({
       _id: admin._id,

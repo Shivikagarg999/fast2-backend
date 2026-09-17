@@ -230,9 +230,11 @@ exports.applyCoupon = async (req, res) => {
       const result = coupon.calculateFreeQuantityDiscount(items, products);
       discount = result.discount;
       freebieDetails = { appliedItems: result.appliedItems };
-    }
 
-    if (discount <= 0) {
+      if (!result.appliedItems.length) {
+        return res.status(400).json({ message: "Coupon is not applicable on selected products" });
+      }
+    } else if (discount <= 0) {
       return res.status(400).json({ message: "Coupon is not applicable on selected products" });
     }
 

@@ -153,7 +153,7 @@ async function calculateOrderPricing({
       discount = result.discount;
       couponAppliedItems = result.appliedItems || [];
 
-      if (discount <= 0) {
+      if (couponAppliedItems.length === 0) {
         throw new Error('Coupon is not applicable on selected products');
       }
     } else {
