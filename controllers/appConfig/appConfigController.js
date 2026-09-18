@@ -17,7 +17,8 @@ exports.getAppConfig = async (req, res) => {
         playStoreUrl: '',
         updateMessage: '',
         productServiceRadiusKm: 5,
-        freeDeliveryThreshold: 199
+        freeDeliveryThreshold: 199,
+        deliverySlabs: []
       });
     }
 
@@ -28,7 +29,8 @@ exports.getAppConfig = async (req, res) => {
       playStoreUrl: config.playStoreUrl,
       updateMessage: config.updateMessage,
       productServiceRadiusKm: config.productServiceRadiusKm || 5,
-      freeDeliveryThreshold: config.freeDeliveryThreshold ?? 199
+      freeDeliveryThreshold: config.freeDeliveryThreshold ?? 199,
+      deliverySlabs: config.deliverySlabs || []
     });
   } catch (error) {
     console.error('Get app config error:', error);
@@ -41,7 +43,7 @@ exports.getAppConfig = async (req, res) => {
 // @access  Private (admin)
 exports.upsertAppConfig = async (req, res) => {
   try {
-    const { app, minVersionCode, latestVersionCode, playStoreUrl, updateMessage, productServiceRadiusKm, freeDeliveryThreshold } = req.body;
+    const { app, minVersionCode, latestVersionCode, playStoreUrl, updateMessage, productServiceRadiusKm, freeDeliveryThreshold, deliverySlabs } = req.body;
 
     if (!app || !['customer', 'driver'].includes(app)) {
       return res.status(400).json({ success: false, error: "app must be 'customer' or 'driver'" });
@@ -55,6 +57,41 @@ exports.upsertAppConfig = async (req, res) => {
       return res.status(400).json({ success: false, error: 'freeDeliveryThreshold must be 0 or greater' });
     }
 
+    let normalizedSlabs;
+    if (deliverySlabs !== undefined) {
+      if (!Array.isArray(deliverySlabs) || !deliverySlabs.length) {
+        return res.status(400).json({ success: false, error: 'deliverySlabs must be a non-empty array' });
+      }
+
+      normalizedSlabs = deliverySlabs
+        .map((slab) => ({
+          fromKm: Number(slab.fromKm),
+          toKm: Number(slab.toKm),
+          chargeType: slab.chargeType,
+          rate: Number(slab.rate)
+        }))
+        .sort((a, b) => a.fromKm - b.fromKm);
+
+      for (let i = 0; i < normalizedSlabs.length; i++) {
+        const slab = normalizedSlabs[i];
+        if (!Number.isFinite(slab.fromKm) || !Number.isFinite(slab.toKm) || slab.toKm <= slab.fromKm) {
+          return res.status(400).json({ success: false, error: 'Each slab must have toKm greater than fromKm' });
+        }
+        if (!['flat', 'per_km'].includes(slab.chargeType)) {
+          return res.status(400).json({ success: false, error: "Each slab's chargeType must be 'flat' or 'per_km'" });
+        }
+        if (!Number.isFinite(slab.rate) || slab.rate < 0) {
+          return res.status(400).json({ success: false, error: 'Each slab rate must be 0 or greater' });
+        }
+        if (i === 0 && slab.fromKm !== 0) {
+          return res.status(400).json({ success: false, error: 'The first slab must start at 0 km' });
+        }
+        if (i > 0 && slab.fromKm !== normalizedSlabs[i - 1].toKm) {
+          return res.status(400).json({ success: false, error: 'Slabs must be contiguous with no gaps or overlaps' });
+        }
+      }
+    }
+
     const config = await AppConfig.findOneAndUpdate(
       { app },
       {
@@ -64,7 +101,11 @@ exports.upsertAppConfig = async (req, res) => {
         ...(playStoreUrl !== undefined && { playStoreUrl }),
         ...(updateMessage !== undefined && { updateMessage }),
         ...(productServiceRadiusKm !== undefined && { productServiceRadiusKm: Number(productServiceRadiusKm) }),
-        ...(freeDeliveryThreshold !== undefined && { freeDeliveryThreshold: Number(freeDeliveryThreshold) })
+        ...(freeDeliveryThreshold !== undefined && { freeDeliveryThreshold: Number(freeDeliveryThreshold) }),
+        ...(normalizedSlabs !== undefined && {
+          deliverySlabs: normalizedSlabs,
+          productServiceRadiusKm: normalizedSlabs[normalizedSlabs.length - 1].toKm
+        })
       },
       { new: true, upsert: true, setDefaultsOnInsert: true }
     );

@@ -10,9 +10,6 @@ const razorpay = new Razorpay({
   key_secret: process.env.RAZORPAY_KEY_SECRET
 });
 
-// WhatsApp sends numbers as full international format with no "+", e.g.
-// "919981396588" — the rest of this codebase stores/matches on the plain
-// 10-digit Indian number, same normalization used for Firebase phone auth.
 const normalizeWaPhone = (waId) => {
   const digits = String(waId || "").replace(/\D/g, "");
   if (digits.length === 12 && digits.startsWith("91")) return digits.slice(2);

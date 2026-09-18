@@ -11,7 +11,12 @@
       "Read(//c/Users/Shivika/Desktop/GMKart-frontend/scripts/**)",
       "WebFetch(domain:unsplash.com)",
       "Bash(grep -rln \"benefitLabel\\\\|freebieRule\\\\|free_quantity\\\\|couponDiscount\\\\|appliedItems\" \"/d/fast2-user-app/lib\" 2>/dev/null)",
-      "Read(//d/fast2-user-app/lib/**)"
+      "Read(//d/fast2-user-app/lib/**)",
+      "Bash(grep -rn \"fast2\\\\.in\\\\|api\\\\.fast2\" \"/d/fast2-user-app/lib\" 2>/dev/null)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code} | time %{time_total}s\\\\n\" --max-time 15 \"https://www.gmkart.com/proxy/api/category/getall\")",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code} | time %{time_total}s\\\\n\" --max-time 15 \"https://admin.gmkart.com/proxy/api/category/getall\")",
+      "Read(//c/Users/Shivika/Desktop/fast2-admin/**)",
+      "Bash(npx eslint *)"
     ]
   }
 }

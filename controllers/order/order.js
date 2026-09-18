@@ -479,6 +479,8 @@ exports.createOrder = async (req, res) => {
         useWallet,
         userId,
         walletBalance,
+        customerLat: shippingAddress.lat,
+        customerLng: shippingAddress.lng,
         session
       });
     } catch (pricingError) {
@@ -960,7 +962,7 @@ exports.createOrder = async (req, res) => {
 // client-side (which drift out of sync with the backend over time).
 exports.calculateOrderTotal = async (req, res) => {
   try {
-    let { items, paymentMethod = "cod", useWallet = false, coupon, scratchCouponCode } = req.body;
+    let { items, paymentMethod = "cod", useWallet = false, coupon, scratchCouponCode, latitude, longitude } = req.body;
 
     if (typeof items === 'string') {
       try { items = JSON.parse(items); } catch (e) { /* leave as-is, validated below */ }
@@ -1004,7 +1006,9 @@ exports.calculateOrderTotal = async (req, res) => {
       paymentMethod,
       useWallet,
       userId,
-      walletBalance
+      walletBalance,
+      customerLat: latitude,
+      customerLng: longitude
     });
 
     return res.status(200).json({ success: true, data: pricing });

@@ -36,7 +36,17 @@ const appConfigSchema = new mongoose.Schema({
     type: Number,
     min: 0,
     default: 199
-  }
+  },
+  // Distance-based delivery pricing (customer app only). fromKm/toKm bands must be
+  // contiguous starting at 0; charge is cumulative/tiered across bands up to the
+  // customer's distance. productServiceRadiusKm is kept in sync with the last
+  // band's toKm whenever this is saved (see appConfigController.upsertAppConfig).
+  deliverySlabs: [{
+    fromKm: { type: Number, required: true, min: 0 },
+    toKm: { type: Number, required: true, min: 0 },
+    chargeType: { type: String, enum: ['flat', 'per_km'], required: true },
+    rate: { type: Number, required: true, min: 0 }
+  }]
 }, { timestamps: true });
 
 module.exports = mongoose.model('AppConfig', appConfigSchema);

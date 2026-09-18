@@ -2,6 +2,7 @@ const Coupon = require('../models/coupon');
 const Order = require('../models/order');
 const AppConfig = require('../models/appConfig');
 const { calculateFinalOrderAmount, roundMoney } = require('./orderAmounts');
+const { getDistanceKm, calculateSlabDeliveryCharge } = require('./geo');
 
 // Single source of truth for order pricing (subtotal, per-seller delivery charges,
 // handling charge, coupon/scratch-coupon discounts, wallet deduction, final amount).
@@ -20,6 +21,8 @@ async function calculateOrderPricing({
   userId,
   walletBalance = 0,
   freeDeliveryThreshold,
+  customerLat,
+  customerLng,
   session
 }) {
   let subtotal = 0;
@@ -72,6 +75,7 @@ async function calculateOrderPricing({
       shopDeliveryMap.set(shopKey, {
         shopKey,
         shopName: getShopName(product),
+        shop: product.shop,
         subtotal: itemTotal,
         highestDeliveryCharge: productDeliveryCharges,
         lowestFreeThreshold: productFreeThreshold,
@@ -81,13 +85,37 @@ async function calculateOrderPricing({
   }
 
   let defaultFreeDeliveryThreshold = Number(freeDeliveryThreshold);
-  if (!Number.isFinite(defaultFreeDeliveryThreshold)) {
+  let deliverySlabs = null;
+  {
     const appConfig = await AppConfig.findOne({ app: 'customer' })
-      .select('freeDeliveryThreshold')
+      .select('freeDeliveryThreshold deliverySlabs')
       .session(session || null)
       .lean();
-    defaultFreeDeliveryThreshold = appConfig?.freeDeliveryThreshold ?? 199;
+    if (!Number.isFinite(defaultFreeDeliveryThreshold)) {
+      defaultFreeDeliveryThreshold = appConfig?.freeDeliveryThreshold ?? 199;
+    }
+    deliverySlabs = appConfig?.deliverySlabs?.length ? appConfig.deliverySlabs : null;
   }
+
+  const hasCustomerLocation = Number.isFinite(Number(customerLat)) && Number.isFinite(Number(customerLng));
+
+  const getSlabDeliveryCharge = (shop) => {
+    if (!deliverySlabs || !hasCustomerLocation) return null;
+
+    const shopLat = Number(shop?.address?.coordinates?.lat);
+    const shopLng = Number(shop?.address?.coordinates?.lng);
+    if (!Number.isFinite(shopLat) || !Number.isFinite(shopLng)) return null;
+
+    const distanceKm = getDistanceKm(Number(customerLat), Number(customerLng), shopLat, shopLng);
+    const result = calculateSlabDeliveryCharge(distanceKm, deliverySlabs);
+    if (!result) return null;
+
+    if (!result.withinRange) {
+      throw new Error(`Delivery not available at this distance for ${shop?.shopName || 'this shop'}`);
+    }
+
+    return result.charge;
+  };
 
   const shopDeliveryBreakdown = [];
 
@@ -102,7 +130,8 @@ async function calculateOrderPricing({
       !freeThreshold ||
       (hasCustomFreeThreshold ? shopData.subtotal < freeThreshold : shopData.subtotal <= freeThreshold)
     ) {
-      appliedDeliveryCharge = shopData.highestDeliveryCharge;
+      const slabCharge = getSlabDeliveryCharge(shopData.shop);
+      appliedDeliveryCharge = slabCharge != null ? slabCharge : shopData.highestDeliveryCharge;
       deliveryCharges += appliedDeliveryCharge;
     }
 
