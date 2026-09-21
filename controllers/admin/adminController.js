@@ -51,7 +51,6 @@ const registerAdmin = async (req, res) => {
         return res.status(400).json({ message: 'Invalid role' });
       }
     } else {
-      // Find default admin role or create super_admin if first user
       const adminCount = await Admin.countDocuments();
       if (adminCount === 0) {
         // First admin - create super_admin role if doesn't exist

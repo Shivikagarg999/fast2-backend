@@ -54,7 +54,6 @@ const parseAddressText = (text, phone) => {
   };
 };
 
-// ─── GET: Meta's webhook verification handshake ────────────────────────────
 exports.verifyWebhook = (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -66,10 +65,7 @@ exports.verifyWebhook = (req, res) => {
   return res.sendStatus(403);
 };
 
-// ─── POST: Incoming messages, button replies, and cart/order submissions ──
 exports.receiveWebhook = async (req, res) => {
-  // Always 200 immediately — Meta retries aggressively on non-200s, and any
-  // real error here shouldn't turn into a storm of redelivered webhooks.
   res.sendStatus(200);
 
   try {
@@ -77,10 +73,8 @@ exports.receiveWebhook = async (req, res) => {
     const change = entry?.changes?.[0];
     const value = change?.value;
     const message = value?.messages?.[0];
-    if (!message) return; // status updates (sent/delivered/read) etc. — ignore
-
-    const from = message.from; // wa_id, e.g. "919981396588"
-
+    if (!message) return; 
+    const from = message.from; 
     if (message.type === "order") {
       await handleCartOrder(from, message.order);
       return;
@@ -97,8 +91,6 @@ exports.receiveWebhook = async (req, res) => {
     if (message.type === "text") {
       const text = message.text?.body?.trim() || "";
 
-      // If this customer has a cart waiting on an address, treat this text
-      // as that address rather than as a fresh "show menu" message.
       const awaiting = await WhatsappOrder.findOne({
         whatsappPhone: from,
         status: "awaiting_address"
@@ -109,7 +101,6 @@ exports.receiveWebhook = async (req, res) => {
         return;
       }
 
-      // Plain text — treat anything else as "show the menu"
       await whatsappService.sendButtons(
         from,
         "Welcome to GMKart! 🛒 Tap below to browse products.",
@@ -224,8 +215,6 @@ const handleAddressReply = async (whatsappOrder, text) => {
   await createPaymentLinkAndNotify(whatsappOrder);
 };
 
-// Creates the Razorpay payment link for a cart that now has an address, and
-// messages it back to the customer.
 const createPaymentLinkAndNotify = async (whatsappOrder, summaryOverride) => {
   const phone = normalizeWaPhone(whatsappOrder.whatsappPhone);
 
