@@ -97,7 +97,9 @@ async function calculateOrderPricing({
     deliverySlabs = appConfig?.deliverySlabs?.length ? appConfig.deliverySlabs : null;
   }
 
-  const hasCustomerLocation = Number.isFinite(Number(customerLat)) && Number.isFinite(Number(customerLng));
+  const hasCustomerLocation =
+    Number.isFinite(Number(customerLat)) && Number(customerLat) !== 0 &&
+    Number.isFinite(Number(customerLng)) && Number(customerLng) !== 0;
 
   const getSlabDeliveryCharge = (shop) => {
     if (!deliverySlabs || !hasCustomerLocation) return null;
