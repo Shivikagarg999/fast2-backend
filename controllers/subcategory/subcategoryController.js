@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const Subcategory = require('../../models/subcategory');
 const Category = require('../../models/category');
+const Product = require('../../models/product');
 const imagekit = require('../../utils/imagekit');
 
 // Create Subcategory
@@ -45,18 +46,39 @@ exports.createSubcategory = async (req, res) => {
 // `category` query param filters to that category's subcategories.
 // `isActive` follows the same convention as getCategories: omitted -> active-only
 // (storefront default), 'true'/'false' explicit, 'all' -> everything (admin).
+// `latitude`/`longitude` (storefront only): when given, subcategories with zero
+// in-range stock are dropped, so the home page never shows a tile that just
+// dead-ends into "no products found" for that customer.
 exports.getSubcategories = async (req, res) => {
   try {
-    const { category, isActive } = req.query;
+    const { category, isActive, latitude, longitude } = req.query;
     const filter = {};
     if (category) filter.category = category;
     if (isActive === 'true') filter.isActive = true;
     else if (isActive === 'false') filter.isActive = false;
     else if (isActive === undefined) filter.isActive = true;
 
-    const subcategories = await Subcategory.find(filter)
+    let subcategories = await Subcategory.find(filter)
       .populate('category')
       .sort({ sortOrder: 1, name: 1 });
+
+    if (latitude !== undefined && longitude !== undefined && latitude !== '' && longitude !== '') {
+      try {
+        const { getNearbyShopProductFilter } = require('../product/productController');
+        const { productFilter } = await getNearbyShopProductFilter(latitude, longitude);
+        const availableIds = await Product.distinct('subcategory', {
+          ...productFilter,
+          subcategory: { $ne: null },
+          isActive: { $ne: false }
+        });
+        const availableSet = new Set(availableIds.map((id) => id.toString()));
+        subcategories = subcategories.filter((s) => availableSet.has(s._id.toString()));
+      } catch (locationError) {
+        // Bad/missing coordinates shouldn't hide every subcategory - fall back to
+        // the unfiltered list instead.
+      }
+    }
+
     res.json(subcategories);
   } catch (error) {
     res.status(500).json({ message: error.message });

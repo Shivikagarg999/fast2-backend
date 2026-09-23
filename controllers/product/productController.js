@@ -2605,5 +2605,6 @@ module.exports = {
   getProductActiveStatus,
   downloadProductsByStatusCSV,
   downloadProductUploadTemplate,
-  uploadProductsCSV
+  uploadProductsCSV,
+  getNearbyShopProductFilter
 };
