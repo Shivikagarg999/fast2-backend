@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const Category = require('../../models/category');
+const Product = require('../../models/product');
 const imagekit = require('../../utils/imagekit');
 const fs = require('fs');
 const { parseCsv } = require('../../utils/csvParser');
@@ -48,16 +49,37 @@ exports.createCategory = async (req, res) => {
 // 'all' -> everything. Omitted entirely (no param) defaults to active-only,
 // which preserves existing behavior for callers that don't pass it (the
 // customer-facing storefront's nav/footer/category browsing).
+// `latitude`/`longitude` (storefront only): when given, categories with zero
+// in-range stock are dropped - mirrors subcategoryController.getSubcategories,
+// so the home page never shows a category tile that dead-ends into no products.
 exports.getCategories = async (req, res) => {
   try {
-    const { isActive } = req.query;
+    const { isActive, latitude, longitude } = req.query;
     const filter = {};
     if (isActive === 'true') filter.isActive = true;
     else if (isActive === 'false') filter.isActive = false;
     else if (isActive === undefined) filter.isActive = true;
     // isActive === 'all' (or any other value) -> no filter, return everything
 
-    const categories = await Category.find(filter).sort({ sortOrder: 1, name: 1 });
+    let categories = await Category.find(filter).sort({ sortOrder: 1, name: 1 });
+
+    if (latitude !== undefined && longitude !== undefined && latitude !== '' && longitude !== '') {
+      try {
+        const { getNearbyShopProductFilter } = require('../product/productController');
+        const { productFilter } = await getNearbyShopProductFilter(latitude, longitude);
+        const availableIds = await Product.distinct('category', {
+          ...productFilter,
+          category: { $ne: null },
+          isActive: { $ne: false }
+        });
+        const availableSet = new Set(availableIds.map((id) => id.toString()));
+        categories = categories.filter((c) => availableSet.has(c._id.toString()));
+      } catch (locationError) {
+        // Bad/missing coordinates shouldn't hide every category - fall back to
+        // the unfiltered list instead.
+      }
+    }
+
     res.json(categories);
   } catch (error) {
     res.status(500).json({ message: error.message });
