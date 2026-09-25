@@ -46,6 +46,8 @@ const adminPaymentSettingsRoutes = require('./admin/paymentSettingsRoutes');
 const appConfigRoutes = require('./appConfig/appConfigRoutes');
 const whatsappRoutes = require('./whatsapp/whatsappRoutes');
 
+const analyticsRoutes = require('./analytics/analyticsRoutes');
+
 const publicPopupRouter = express.Router();
 publicPopupRouter.get('/active', require('../controllers/admin/popupController').getActivePopup);
 
@@ -86,6 +88,8 @@ router.use('/api/admin/terms', adminTermsRoutes);
 router.use('/api/admin/products', adminProductRoutes);
 router.use('/api/admin/shops', adminShopRoutes);
 router.use('/api/admin/popups', adminPopupRoutes);
+router.use('/api/admin/analytics', analyticsRoutes.adminRouter);
+router.use('/api/analytics', analyticsRoutes.publicRouter);
 router.use('/api/popups', publicPopupRouter);
 router.use('/api/admin/payment-settings', adminPaymentSettingsRoutes);
 router.use('/api/admin', adminUserRoutes);
