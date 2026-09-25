@@ -1,6 +1,22 @@
 const Popup = require('../../models/popup');
 const imagekit = require('../../utils/imagekit');
 
+// Normalises the optional text/CTA fields. Returns { error } or { fields }.
+// A CTA needs both a label and a link; the link must be a site path or an http(s) URL.
+const parseCtaFields = (body) => {
+    const clean = (value) => (typeof value === 'string' ? value.trim() : undefined);
+    const fields = {};
+    for (const key of ['title', 'subtitle', 'ctaText', 'ctaLink']) {
+        const value = clean(body[key]);
+        if (value !== undefined) fields[key] = value;
+    }
+
+    if (fields.ctaLink && !/^(\/(?!\/)|https?:\/\/)/i.test(fields.ctaLink)) {
+        return { error: 'CTA link must start with / (a page on the site) or http(s)://' };
+    }
+    return { fields };
+};
+
 exports.getActivePopup = async (req, res) => {
     try {
         const now = new Date();
@@ -27,6 +43,18 @@ exports.getActivePopup = async (req, res) => {
 exports.createPopup = async (req, res) => {
     try {
         const { startTime, endTime, isActive = true } = req.body;
+
+        const parsed = parseCtaFields(req.body);
+        if (parsed.error) {
+            return res.status(400).json({ success: false, message: parsed.error });
+        }
+        const { title = '', subtitle = '', ctaText = '', ctaLink = '' } = parsed.fields;
+        if (!!ctaText !== !!ctaLink) {
+            return res.status(400).json({
+                success: false,
+                message: 'Provide both CTA text and CTA link, or neither'
+            });
+        }
 
         if (!startTime || !endTime) {
             return res.status(400).json({
@@ -78,6 +106,10 @@ exports.createPopup = async (req, res) => {
 
         const popup = new Popup({
             imageUrl,
+            title,
+            subtitle,
+            ctaText,
+            ctaLink,
             startTime: start,
             endTime: end,
             isActive
@@ -175,7 +207,21 @@ exports.updatePopup = async (req, res) => {
             }
         }
 
+        const parsed = parseCtaFields(req.body);
+        if (parsed.error) {
+            return res.status(400).json({ success: false, message: parsed.error });
+        }
+        const nextCtaText = parsed.fields.ctaText !== undefined ? parsed.fields.ctaText : existingPopup.ctaText;
+        const nextCtaLink = parsed.fields.ctaLink !== undefined ? parsed.fields.ctaLink : existingPopup.ctaLink;
+        if (!!nextCtaText !== !!nextCtaLink) {
+            return res.status(400).json({
+                success: false,
+                message: 'Provide both CTA text and CTA link, or neither'
+            });
+        }
+
         const updateData = {
+            ...parsed.fields,
             ...(startTime && { startTime: new Date(startTime) }),
             ...(endTime && { endTime: new Date(endTime) }),
             ...(isActive !== undefined && { isActive })

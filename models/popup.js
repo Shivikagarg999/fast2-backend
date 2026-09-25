@@ -6,6 +6,30 @@ const popupSchema = new mongoose.Schema({
         required: true,
         trim: true
     },
+    title: {
+        type: String,
+        trim: true,
+        maxlength: 80,
+        default: ''
+    },
+    subtitle: {
+        type: String,
+        trim: true,
+        maxlength: 200,
+        default: ''
+    },
+    ctaText: {
+        type: String,
+        trim: true,
+        maxlength: 30,
+        default: ''
+    },
+    ctaLink: {
+        type: String,
+        trim: true,
+        maxlength: 500,
+        default: ''
+    },
     startTime: {
         type: Date,
         required: true

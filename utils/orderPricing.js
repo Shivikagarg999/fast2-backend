@@ -128,11 +128,14 @@ async function calculateOrderPricing({
       : defaultFreeDeliveryThreshold;
     let appliedDeliveryCharge = 0;
 
+    // Evaluated for every shop (not just charged ones) so the max-distance limit
+    // also blocks orders that qualify for free delivery.
+    const slabCharge = getSlabDeliveryCharge(shopData.shop);
+
     if (
       !freeThreshold ||
       (hasCustomFreeThreshold ? shopData.subtotal < freeThreshold : shopData.subtotal <= freeThreshold)
     ) {
-      const slabCharge = getSlabDeliveryCharge(shopData.shop);
       appliedDeliveryCharge = slabCharge != null ? slabCharge : shopData.highestDeliveryCharge;
       deliveryCharges += appliedDeliveryCharge;
     }
