@@ -83,9 +83,8 @@ const createBanner = async (req, res) => {
       order
     } = req.body;
 
-    // Validate required fields
+    // Validate required fields (title/subtitle/description are optional)
     const requiredFields = [
-      'title', 'subtitle', 'description', 
       'cta', 'ctaColor', 'gradient', 'accentColor'
     ];
     
