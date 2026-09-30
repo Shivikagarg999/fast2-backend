@@ -2,6 +2,64 @@ const Cart = require("../../models/cart");
 const Product = require("../../models/product");
 const { getActiveDiscounts, getEffectivePrice } = require('../../utils/discountHelper');
 
+// Core add-to-cart logic, shared by the HTTP handler below and the chatbot's
+// add_to_cart tool. Throws an Error with .statusCode on failure.
+const addItemToCart = async (userId, productId, quantity) => {
+  const product = await Product.findById(productId).populate('category');
+  if (!product) {
+    const error = new Error("Product not found");
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const gstPercent = product.category?.gstPercent || 0;
+  const discounts = await getActiveDiscounts();
+  const { effectivePrice } = getEffectivePrice(product, discounts);
+
+  if (product.quantity < quantity) {
+    const error = new Error(`Only ${product.quantity} items available in stock`);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  let cart = await Cart.findOne({ user: userId });
+
+  if (!cart) {
+    cart = new Cart({
+      user: userId,
+      items: [{ product: productId, quantity, price: effectivePrice, gstPercent }]
+    });
+  } else {
+    const existingItemIndex = cart.items.findIndex(
+      item => item.product.toString() === productId
+    );
+
+    if (existingItemIndex > -1) {
+      const newQuantity = cart.items[existingItemIndex].quantity + quantity;
+      if (product.quantity < newQuantity) {
+        const error = new Error(`Only ${product.quantity} items available in stock`);
+        error.statusCode = 400;
+        throw error;
+      }
+      cart.items[existingItemIndex].quantity = newQuantity;
+      cart.items[existingItemIndex].price = effectivePrice;
+    } else {
+      cart.items.push({ product: productId, quantity, price: effectivePrice, gstPercent });
+    }
+  }
+
+  await cart.save();
+  await cart.populate({
+    path: "items.product",
+    populate: [
+      { path: "shop" },
+      { path: "seller", populate: { path: "shop" } }
+    ]
+  });
+
+  return cart;
+};
+
 // Get user's cart
 const getCart = async (req, res) => {
   try {
@@ -53,88 +111,15 @@ const getCart = async (req, res) => {
 const addToCart = async (req, res) => {
   try {
     const { productId, quantity } = req.body;
-    
-    // Validate input
+
     if (!productId || !quantity || quantity < 1) {
       return res.status(400).json({ message: "Invalid input" });
     }
-    
-    // Check if product exists (populate category for GST)
-    const product = await Product.findById(productId).populate('category');
-    if (!product) {
-      return res.status(404).json({ message: "Product not found" });
-    }
 
-    const gstPercent = product.category?.gstPercent || 0;
-
-    // Resolve effective price considering active campaign discounts
-    const discounts = await getActiveDiscounts();
-    const { effectivePrice } = getEffectivePrice(product, discounts);
-
-    // Check if product is in stock
-    if (product.quantity < quantity) {
-      return res.status(400).json({
-        message: `Only ${product.quantity} items available in stock`
-      });
-    }
-
-    // Find user's cart
-    let cart = await Cart.findOne({ user: req.user._id });
-
-    if (!cart) {
-      // Create new cart if it doesn't exist
-      cart = new Cart({
-        user: req.user._id,
-        items: [{
-          product: productId,
-          quantity,
-          price: effectivePrice,
-          gstPercent
-        }]
-      });
-    } else {
-      // Check if product already exists in cart
-      const existingItemIndex = cart.items.findIndex(
-        item => item.product.toString() === productId
-      );
-
-      if (existingItemIndex > -1) {
-        // Update quantity if product exists
-        const newQuantity = cart.items[existingItemIndex].quantity + quantity;
-
-        // Check stock again with updated quantity
-        if (product.quantity < newQuantity) {
-          return res.status(400).json({
-            message: `Only ${product.quantity} items available in stock`
-          });
-        }
-
-        cart.items[existingItemIndex].quantity = newQuantity;
-        // Refresh price to reflect any currently active discount
-        cart.items[existingItemIndex].price = effectivePrice;
-      } else {
-        // Add new item to cart
-        cart.items.push({
-          product: productId,
-          quantity,
-          price: effectivePrice,
-          gstPercent
-        });
-      }
-    }
-    
-    await cart.save();
-    await cart.populate({
-      path: "items.product",
-      populate: [
-        { path: "shop" },
-        { path: "seller", populate: { path: "shop" } }
-      ]
-    });
-    
+    const cart = await addItemToCart(req.user._id, productId, quantity);
     res.status(200).json(cart);
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    res.status(error.statusCode || 500).json({ message: error.message });
   }
 };
 
@@ -251,6 +236,7 @@ const clearCart = async (req, res) => {
 module.exports = {
   getCart,
   addToCart,
+  addItemToCart,
   getCartCount,
   updateCartItem,
   removeFromCart,
