@@ -18,7 +18,9 @@ exports.getAppConfig = async (req, res) => {
         updateMessage: '',
         productServiceRadiusKm: 5,
         freeDeliveryThreshold: 199,
-        deliverySlabs: []
+        deliverySlabs: [],
+        headerGradientStart: '',
+        headerGradientEnd: ''
       });
     }
 
@@ -30,7 +32,9 @@ exports.getAppConfig = async (req, res) => {
       updateMessage: config.updateMessage,
       productServiceRadiusKm: config.productServiceRadiusKm || 5,
       freeDeliveryThreshold: config.freeDeliveryThreshold ?? 199,
-      deliverySlabs: config.deliverySlabs || []
+      deliverySlabs: config.deliverySlabs || [],
+      headerGradientStart: config.headerGradientStart || '',
+      headerGradientEnd: config.headerGradientEnd || ''
     });
   } catch (error) {
     console.error('Get app config error:', error);
@@ -43,10 +47,18 @@ exports.getAppConfig = async (req, res) => {
 // @access  Private (admin)
 exports.upsertAppConfig = async (req, res) => {
   try {
-    const { app, minVersionCode, latestVersionCode, playStoreUrl, updateMessage, productServiceRadiusKm, freeDeliveryThreshold, deliverySlabs } = req.body;
+    const { app, minVersionCode, latestVersionCode, playStoreUrl, updateMessage, productServiceRadiusKm, freeDeliveryThreshold, deliverySlabs, headerGradientStart, headerGradientEnd } = req.body;
 
     if (!app || !['customer', 'driver'].includes(app)) {
       return res.status(400).json({ success: false, error: "app must be 'customer' or 'driver'" });
+    }
+
+    const hexColorPattern = /^#[0-9A-Fa-f]{6}$/;
+    if (headerGradientStart !== undefined && headerGradientStart !== '' && !hexColorPattern.test(headerGradientStart)) {
+      return res.status(400).json({ success: false, error: 'headerGradientStart must be a hex color like #F0FAFF' });
+    }
+    if (headerGradientEnd !== undefined && headerGradientEnd !== '' && !hexColorPattern.test(headerGradientEnd)) {
+      return res.status(400).json({ success: false, error: 'headerGradientEnd must be a hex color like #D6F0FB' });
     }
     if (productServiceRadiusKm !== undefined &&
         (!Number.isFinite(Number(productServiceRadiusKm)) || Number(productServiceRadiusKm) < 0.1 || Number(productServiceRadiusKm) > 100)) {
@@ -105,7 +117,9 @@ exports.upsertAppConfig = async (req, res) => {
         ...(normalizedSlabs !== undefined && {
           deliverySlabs: normalizedSlabs,
           productServiceRadiusKm: normalizedSlabs[normalizedSlabs.length - 1].toKm
-        })
+        }),
+        ...(headerGradientStart !== undefined && { headerGradientStart }),
+        ...(headerGradientEnd !== undefined && { headerGradientEnd })
       },
       { new: true, upsert: true, setDefaultsOnInsert: true }
     );

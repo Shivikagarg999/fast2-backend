@@ -46,7 +46,18 @@ const appConfigSchema = new mongoose.Schema({
     toKm: { type: Number, required: true, min: 0 },
     chargeType: { type: String, enum: ['flat', 'per_km'], required: true },
     rate: { type: Number, required: true, min: 0 }
-  }]
+  }],
+  // Mobile app home header background gradient (two hex colours). Lets admin
+  // re-theme the app's header without an app release, e.g. for a festival/sale
+  // look. Unset = app keeps its built-in default gradient.
+  headerGradientStart: {
+    type: String,
+    default: ''
+  },
+  headerGradientEnd: {
+    type: String,
+    default: ''
+  }
 }, { timestamps: true });
 
 module.exports = mongoose.model('AppConfig', appConfigSchema);
