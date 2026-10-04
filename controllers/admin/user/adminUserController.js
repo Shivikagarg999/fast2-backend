@@ -1,5 +1,6 @@
 const User = require("../../../models/user");
 const Order = require("../../../models/order");
+const SavedAddress = require("../../../models/savedAddresses");
 
 // For every user who has referred at least one signup, how many people signed
 // up with their code and how many of those actually placed an order — computed
@@ -94,6 +95,45 @@ exports.getUserById = async (req, res) => {
       message: 'Failed to fetch user',
       error: err.message 
     });
+  }
+};
+
+exports.getUserDetails = async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id).select("-password -otp -otpExpires").lean();
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    const [addresses, orders] = await Promise.all([
+      SavedAddress.find({ user: user._id }).sort({ createdAt: -1 }).lean(),
+      Order.find({ user: user._id })
+        .sort({ createdAt: -1 })
+        .limit(100)
+        .populate("items.product", "name images")
+        .lean()
+    ]);
+
+    const totalSpent = orders
+      .filter((o) => o.status === "delivered")
+      .reduce((sum, o) => sum + (Number(o.finalAmount) || 0), 0);
+
+    return res.json({
+      success: true,
+      user,
+      addresses,
+      orders,
+      stats: {
+        orderCount: orders.length,
+        deliveredCount: orders.filter((o) => o.status === "delivered").length,
+        totalSpent: Math.round(totalSpent * 100) / 100,
+        addressCount: addresses.length,
+        wallet: user.wallet || 0
+      }
+    });
+  } catch (err) {
+    console.error("❌ Error fetching user details:", err);
+    return res.status(500).json({ success: false, message: "Failed to fetch user details", error: err.message });
   }
 };
 
