@@ -5,8 +5,6 @@ const { addItemToCart } = require('../../controllers/cart/cartController');
 const { getNearbyShopProductFilter } = require('../../controllers/product/productController');
 
 const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
-// llama-3.3-70b-versatile was retired from Groq (now 404s); gpt-oss-120b is a current
-// Groq-hosted model that supports tool calling, which this shopping assistant needs.
 const GROQ_MODEL = 'openai/gpt-oss-120b';
 const MAX_HISTORY = 20;
 const MAX_TOOL_ITERATIONS = 4;
