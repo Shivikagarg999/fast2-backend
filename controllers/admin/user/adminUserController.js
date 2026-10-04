@@ -67,7 +67,7 @@ exports.createUser = async (req, res) => {
 exports.getAllUsers = async (req, res) => {
   try {
     console.log('📊 Fetching all users...');
-    const users = await User.find().select("-password -otp -otpExpires");
+    const users = await User.find().select("-password -otp -otpExpires").sort({ createdAt: -1 });
     console.log(`✅ Found ${users.length} users`);
     return res.json({ success: true, users });
   } catch (err) {

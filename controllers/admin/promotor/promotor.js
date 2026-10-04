@@ -34,7 +34,7 @@ exports.createPromotor = async (req, res) => {
 //Get All Promotors
 exports.getPromotors = async (req, res) => {
   try {
-    const promotors = await Promotor.find().select("-password");
+    const promotors = await Promotor.find().select("-password").sort({ createdAt: -1 });
     res.json(promotors);
   } catch (err) {
     res.status(500).json({ message: "Error fetching promotors", error: err.message });

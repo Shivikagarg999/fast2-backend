@@ -14,6 +14,7 @@ const createWarehouse = async (req, res) => {
 const getWarehouses = async (req, res) => {
   try {
     const warehouses = await Warehouse.find()
+      .sort({ createdAt: -1 })
       .populate('promotor')
       .populate('products');
     res.json(warehouses);
