@@ -31,7 +31,9 @@ const allowedOrigins = [
   "https://promotor.fast2.in",
   "https://www.promotor.fast2.in",
   "https://promotor.gmkart.com",
-  "https://www.promotor.gmkart.com"
+  "https://www.promotor.gmkart.com",
+  "https://taskmare.online",
+  "https://www.taskmare.online"
 ];
 
 app.use(

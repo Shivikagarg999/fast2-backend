@@ -46,6 +46,7 @@ const warehouseRoutes = require('./warehouse/warehouseRoutes');
 const adminPaymentSettingsRoutes = require('./admin/paymentSettingsRoutes');
 const appConfigRoutes = require('./appConfig/appConfigRoutes');
 const whatsappRoutes = require('./whatsapp/whatsappRoutes');
+const taskmareRoutes = require('./taskmare/enquiryRoutes');
 
 const analyticsRoutes = require('./analytics/analyticsRoutes');
 
@@ -100,5 +101,6 @@ router.use('/api/admin/reports', adminReportRoutes);
 router.use('/api/warehouse', warehouseRoutes);
 router.use('/api/app-config', appConfigRoutes);
 router.use('/api/whatsapp', whatsappRoutes);
+router.use('/api/taskmare', taskmareRoutes);
 
 module.exports = router;
