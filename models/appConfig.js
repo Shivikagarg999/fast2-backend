@@ -50,6 +50,10 @@ const appConfigSchema = new mongoose.Schema({
   // Mobile app home header background gradient (two hex colours). Lets admin
   // re-theme the app's header without an app release, e.g. for a festival/sale
   // look. Unset = app keeps its built-in default gradient.
+  homeAnimationUrl: {
+    type: String,
+    default: ''
+  },
   headerGradientStart: {
     type: String,
     default: ''

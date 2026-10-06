@@ -12,6 +12,8 @@ const analyticsEventSchema = new mongoose.Schema({
     device: { type: String, enum: ['mobile', 'tablet', 'desktop'], default: 'desktop' },
     isLoggedIn: { type: Boolean, default: false },
     referrer: { type: String, default: '' },
+    pincode: { type: String, default: '', index: true },
+    area: { type: String, default: '' },
     createdAt: { type: Date, default: Date.now }
 }, { versionKey: false });
 

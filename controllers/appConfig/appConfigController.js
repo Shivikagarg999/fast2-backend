@@ -1,4 +1,5 @@
 const AppConfig = require('../../models/appConfig');
+const imagekit = require('../../utils/imagekit');
 
 // @desc    Get force-update config for an app (public — checked on every app launch)
 // @route   GET /api/app-config?app=customer
@@ -20,7 +21,8 @@ exports.getAppConfig = async (req, res) => {
         freeDeliveryThreshold: 199,
         deliverySlabs: [],
         headerGradientStart: '',
-        headerGradientEnd: ''
+        headerGradientEnd: '',
+        homeAnimationUrl: ''
       });
     }
 
@@ -33,6 +35,7 @@ exports.getAppConfig = async (req, res) => {
       productServiceRadiusKm: config.productServiceRadiusKm || 5,
       freeDeliveryThreshold: config.freeDeliveryThreshold ?? 199,
       deliverySlabs: config.deliverySlabs || [],
+      homeAnimationUrl: config.homeAnimationUrl || '',
       headerGradientStart: config.headerGradientStart || '',
       headerGradientEnd: config.headerGradientEnd || ''
     });
@@ -128,5 +131,37 @@ exports.upsertAppConfig = async (req, res) => {
   } catch (error) {
     console.error('Upsert app config error:', error);
     res.status(500).json({ success: false, error: 'Failed to update app config' });
+  }
+};
+
+exports.uploadHomeAnimation = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'Animation file (GIF/WebP/MP4) is required' });
+    }
+    const uploaded = await imagekit.upload({
+      file: req.file.buffer,
+      fileName: `home_animation_${Date.now()}_${req.file.originalname}`,
+      folder: '/app-home-animation'
+    });
+    const config = await AppConfig.findOneAndUpdate(
+      { app: 'customer' },
+      { app: 'customer', homeAnimationUrl: uploaded.url },
+      { new: true, upsert: true, setDefaultsOnInsert: true }
+    );
+    return res.status(200).json({ success: true, url: config.homeAnimationUrl });
+  } catch (error) {
+    console.error('Upload home animation error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to upload animation' });
+  }
+};
+
+exports.removeHomeAnimation = async (req, res) => {
+  try {
+    await AppConfig.findOneAndUpdate({ app: 'customer' }, { $set: { homeAnimationUrl: '' } }, { upsert: true });
+    return res.status(200).json({ success: true });
+  } catch (error) {
+    console.error('Remove home animation error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to remove animation' });
   }
 };

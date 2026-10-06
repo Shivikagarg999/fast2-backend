@@ -40,7 +40,9 @@ const sanitizeMeta = (meta) => {
 
 exports.trackEvents = async (req, res) => {
     try {
-        const { visitorId, sessionId, device, isLoggedIn, referrer, events } = req.body || {};
+        const { visitorId, sessionId, device, isLoggedIn, referrer, events, location } = req.body || {};
+        const pincode = String(location?.pincode || '').replace(/\D/g, '').slice(0, 6);
+        const area = clip(location?.area, 80);
 
         if (!isUuidLike(visitorId) || !isUuidLike(sessionId) || !Array.isArray(events)) {
             return res.status(400).json({ success: false });
@@ -57,7 +59,9 @@ exports.trackEvents = async (req, res) => {
                 meta: sanitizeMeta(item.meta),
                 device: ['mobile', 'tablet', 'desktop'].includes(device) ? device : 'desktop',
                 isLoggedIn: !!isLoggedIn,
-                referrer: clip(referrer, 200)
+                referrer: clip(referrer, 200),
+                pincode,
+                area
             }));
 
         if (docs.length) {
@@ -103,7 +107,8 @@ exports.getSummary = async (req, res) => {
             topProductRefs,
             topCategoryRefs,
             topSearches,
-            devices
+            devices,
+            locations
         ] = await Promise.all([
             // total count + unique visitors per event
             AnalyticsEvent.aggregate([
@@ -173,6 +178,13 @@ exports.getSummary = async (req, res) => {
                 { $match: match },
                 { $group: { _id: '$device', visitors: { $addToSet: '$visitorId' } } },
                 { $project: { _id: 0, device: '$_id', visitors: { $size: '$visitors' } } }
+            ]),
+            AnalyticsEvent.aggregate([
+                { $match: { ...match, pincode: { $ne: '' } } },
+                { $group: { _id: { pincode: '$pincode', area: '$area' }, visitors: { $addToSet: '$visitorId' } } },
+                { $project: { _id: 0, pincode: '$_id.pincode', area: '$_id.area', visitors: { $size: '$visitors' } } },
+                { $sort: { visitors: -1 } },
+                { $limit: 20 }
             ])
         ]);
 
@@ -220,6 +232,7 @@ exports.getSummary = async (req, res) => {
             topCategories: topCategoryRefs,
             topSearches,
             devices,
+            locations,
             popups: {
                 loginPopupShown: stat('login_popup_shown').visitors,
                 loginPopupSubmitted: stat('login_popup_submit').visitors,

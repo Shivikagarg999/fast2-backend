@@ -124,26 +124,37 @@ const toCardProduct = (product, effectivePrice) => ({
   category: product.category?.name || undefined
 });
 
-const runSearchProducts = async ({ query, category, minPrice, maxPrice, limit }, { latitude, longitude }) => {
-  const filter = { isActive: { $ne: false }, stockStatus: 'in-stock' };
+const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-  if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
-    try {
-      const { productFilter } = await getNearbyShopProductFilter(latitude, longitude);
-      Object.assign(filter, productFilter);
-    } catch {
-      // fall through without a location filter rather than failing the whole search
-    }
+const searchTokens = (query) =>
+  String(query || '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/i)
+    .filter((t) => t.length >= 2)
+    .slice(0, 5);
+
+const runSearchProducts = async ({ query, category, minPrice, maxPrice, limit }, { latitude, longitude }) => {
+  const hasLocation = Number.isFinite(latitude) && Number.isFinite(longitude);
+  if (!hasLocation) {
+    return {
+      count: 0,
+      locationApplied: false,
+      error: 'location_required',
+      message: 'The user has not set a delivery location, so products cannot be checked for delivery. Ask them to set their location first and do not show products.',
+      products: []
+    };
   }
 
-  if (query && query.trim()) {
-    const safe = query.trim().slice(0, 60).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const regex = new RegExp(safe, 'i');
-    filter.$or = [{ name: regex }, { description: regex }];
+  const { productFilter } = await getNearbyShopProductFilter(latitude, longitude);
+  const filter = { isActive: { $ne: false }, stockStatus: 'in-stock', ...productFilter };
+
+  const tokens = searchTokens(query);
+  if (tokens.length) {
+    filter.$and = tokens.map((t) => ({ name: new RegExp(escapeRegex(t), 'i') }));
   }
 
   if (category && category.trim()) {
-    const categoryDocs = await Category.find({ name: new RegExp(category.trim().slice(0, 60).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i') })
+    const categoryDocs = await Category.find({ name: new RegExp(escapeRegex(category.trim().slice(0, 60)), 'i') })
       .select('_id').lean();
     if (categoryDocs.length) {
       filter.category = { $in: categoryDocs.map((c) => c._id) };
@@ -155,11 +166,25 @@ const runSearchProducts = async ({ query, category, minPrice, maxPrice, limit },
   if (Number.isFinite(Number(maxPrice))) priceFilter.$lte = Number(maxPrice);
   if (Object.keys(priceFilter).length) filter.price = priceFilter;
 
-  const products = await Product.find(filter)
+  let products = await Product.find(filter)
     .populate('category', 'name')
     .sort({ createdAt: -1 })
     .limit(clampLimit(limit))
     .lean();
+
+  if (!products.length && tokens.length) {
+    const fallback = { ...filter };
+    delete fallback.$and;
+    fallback.$or = [
+      { $and: tokens.map((t) => ({ name: new RegExp(escapeRegex(t), 'i') })) },
+      { $and: tokens.map((t) => ({ description: new RegExp(escapeRegex(t), 'i') })) }
+    ];
+    products = await Product.find(fallback)
+      .populate('category', 'name')
+      .sort({ createdAt: -1 })
+      .limit(clampLimit(limit))
+      .lean();
+  }
 
   const discounts = await getActiveDiscounts();
   const cardProducts = products.map((product) => {
@@ -169,7 +194,7 @@ const runSearchProducts = async ({ query, category, minPrice, maxPrice, limit },
 
   return {
     count: cardProducts.length,
-    locationApplied: Number.isFinite(latitude) && Number.isFinite(longitude),
+    locationApplied: true,
     products: cardProducts
   };
 };
@@ -235,6 +260,7 @@ const executeTool = async (toolCall, context, collectedProducts) => {
       return {
         count: result.count,
         locationApplied: result.locationApplied,
+        ...(result.error && { error: result.error, message: result.message }),
         products: result.products.map(({ image, ...rest }) => rest)
       };
     }
@@ -303,7 +329,7 @@ exports.sendMessage = async (req, res) => {
     const lng = Number(longitude);
     const locationNote = Number.isFinite(lat) && Number.isFinite(lng)
       ? 'The user currently has a delivery location set, so search_products will automatically be limited to shops that deliver there — you do not need to ask for their pincode.'
-      : 'The user has not set a delivery location yet. If they want to search for products, you can still search (results won\'t be location-filtered), but mention that setting their location (via the location picker on the site) will show them what\'s actually deliverable to them.';
+      : 'The user has not set a delivery location yet. Products can only be shown for a delivery location, so do not list any products. Ask the user to set their delivery location first (location picker in the app or site), then search again.';
 
     const languageNote = language === 'hi'
       ? 'Respond in Hindi (Devanagari script), in a warm, natural, conversational tone — not a stiff literal translation. Keep product names, brand names, and prices as-is (do not translate them).'
