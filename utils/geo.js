@@ -9,9 +9,9 @@ const getDistanceKm = (lat1, lng1, lat2, lng2) => {
   return earthRadiusKm * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 };
 
-// slabs need not be pre-sorted; bands must be contiguous starting at 0 for a
-// sensible result. Charge is cumulative/tiered: each band's rate applies only
-// to the portion of the distance that falls inside that band.
+// slabs need not be pre-sorted. The distance falls into exactly one band;
+// that band's own rate is the charge (a flat fee, or a per-km rate times the
+// full distance) — bands are not summed across each other.
 const calculateSlabDeliveryCharge = (distanceKm, slabs) => {
   if (!slabs || !slabs.length) return null;
 
@@ -22,13 +22,14 @@ const calculateSlabDeliveryCharge = (distanceKm, slabs) => {
     return { withinRange: false, maxKm };
   }
 
-  let charge = 0;
-  for (const slab of sorted) {
-    if (distanceKm <= slab.fromKm) break;
-    const coveredKm = Math.max(Math.min(distanceKm, slab.toKm) - slab.fromKm, 0);
-    if (coveredKm <= 0) continue;
-    charge += slab.chargeType === 'flat' ? slab.rate : slab.rate * coveredKm;
+  const band = sorted.find((slab) => distanceKm >= slab.fromKm && distanceKm <= slab.toKm)
+    || (distanceKm < sorted[0].fromKm ? sorted[0] : null);
+
+  if (!band) {
+    return { withinRange: false, maxKm };
   }
+
+  const charge = band.chargeType === 'flat' ? band.rate : band.rate * distanceKm;
 
   return { withinRange: true, charge: Math.round(charge * 100) / 100, maxKm };
 };
