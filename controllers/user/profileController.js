@@ -19,8 +19,25 @@ exports.updateProfile = async (req, res) => {
     const { name, email, phone, avatar, address } = req.body;
     const user = await User.findById(req.user.id);
     if (!user) return res.status(404).json({ message: "User not found" });
+
+    if (email) {
+      const normalizedEmail = email.trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+        return res.status(400).json({ success: false, message: "Enter a valid email address" });
+      }
+      const existing = await User.findOne({
+        email: normalizedEmail,
+        _id: { $ne: user._id },
+      });
+      if (existing) {
+        return res.status(400).json({
+          success: false,
+          message: "This email is already in use by another account",
+        });
+      }
+      user.email = normalizedEmail;
+    }
     if (name) user.name = name;
-    if (email) user.email = email;
     if (phone) user.phone = phone;
     if (avatar) user.avatar = avatar;
     if (address) user.address = address;
@@ -28,7 +45,15 @@ exports.updateProfile = async (req, res) => {
     await user.save();
     res.json({ success: true, message: "Profile updated successfully", user });
   } catch (error) {
-    res.status(500).json({ message: "Server error", error });
+    if (error.code === 11000) {
+      const field = Object.keys(error.keyPattern || {})[0] || "field";
+      return res.status(400).json({
+        success: false,
+        message: `This ${field} is already in use by another account`,
+      });
+    }
+    console.error("updateProfile error:", error);
+    res.status(500).json({ success: false, message: "Something went wrong. Please try again." });
   }
 };
 
