@@ -6,6 +6,7 @@ const { sendNotification } = require("../../services/notificationService");
 const { notifyOrderTaken } = require("../../services/driverNotificationService");
 const { emitOrderTaken, serverLog, getIo } = require("../../socketManager");
 const { formatOrderAmounts, formatOrdersAmounts } = require("../../utils/orderAmounts");
+const { FLAT_DELIVERY_EARNING } = require("../../utils/driverEarning");
 
 const findOrderByIdOrCustomId = (orderId) => {
   const query = mongoose.Types.ObjectId.isValid(orderId)
@@ -70,7 +71,10 @@ exports.getPendingOrders = async (req, res) => {
     res.status(200).json({
       success: true,
       count: pendingOrders.length,
-      data: formatOrdersAmounts(pendingOrders)
+      data: formatOrdersAmounts(pendingOrders).map((order) => ({
+        ...order,
+        driverEarning: FLAT_DELIVERY_EARNING,
+      })),
     });
   } catch (error) {
     console.error("Error fetching pending orders:", error);
@@ -369,7 +373,7 @@ exports.markOrderDelivered = async (req, res) => {
       );
     }
 
-    const deliveryEarning = 18;
+    const deliveryEarning = FLAT_DELIVERY_EARNING;
     const driverEarning = new DriverEarning({
       driver: driver._id,
       order: order._id,
