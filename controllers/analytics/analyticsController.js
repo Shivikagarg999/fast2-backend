@@ -180,7 +180,7 @@ exports.getSummary = async (req, res) => {
                 { $project: { _id: 0, device: '$_id', visitors: { $size: '$visitors' } } }
             ]),
             AnalyticsEvent.aggregate([
-                { $match: { ...match, pincode: { $ne: '' } } },
+                { $match: { ...match, pincode: { $exists: true, $ne: '' } } },
                 { $group: { _id: { pincode: '$pincode', area: '$area' }, visitors: { $addToSet: '$visitorId' } } },
                 { $project: { _id: 0, pincode: '$_id.pincode', area: '$_id.area', visitors: { $size: '$visitors' } } },
                 { $sort: { visitors: -1 } },
