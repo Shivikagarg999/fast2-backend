@@ -9,7 +9,8 @@ const notificationCampaignSchema = new mongoose.Schema({
     recipientCount: { type: Number, default: 0 },
     pushSent: { type: Number, default: 0 },
     pushFailed: { type: Number, default: 0 },
-    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' }
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'Admin' },
+    scheduledNotification: { type: mongoose.Schema.Types.ObjectId, ref: 'ScheduledNotification', default: null }
 }, { timestamps: true });
 
 notificationCampaignSchema.index({ createdAt: -1 });

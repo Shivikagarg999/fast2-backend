@@ -58,7 +58,10 @@ app.use(express.json({
 app.use(routes);
 
 mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log('MongoDB connected'))
+  .then(() => {
+    console.log('MongoDB connected');
+    require('./services/notificationScheduler').startNotificationScheduler();
+  })
   .catch((err) => console.error('❌ MongoDB connection error:', err));
 
 app.get('/', (req, res) => {
