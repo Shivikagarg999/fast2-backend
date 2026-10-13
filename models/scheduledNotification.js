@@ -7,13 +7,21 @@ const scheduledNotificationSchema = new mongoose.Schema({
     targetUser: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     targetLabel: { type: String, default: '' },
 
-    // 'once' fires a single time at `sendAt`. 'weekly' fires on each weekday in
-    // `daysOfWeek` at `time` (IST, "HH:mm"), from `startDate` until `endDate`
-    // (or indefinitely if `endDate` is null).
+    // 'once' fires a single time at `sendAt`. 'weekly' fires per `weeklySlots`
+    // entry — each is one weekday + one time of day (IST, "HH:mm") — so each
+    // day can carry its own independent set of times (e.g. Monday morning
+    // only, Friday morning + evening), from `startDate` until `endDate` (or
+    // indefinitely if `endDate` is null).
     scheduleType: { type: String, enum: ['once', 'weekly'], required: true },
     sendAt: { type: Date },
-    daysOfWeek: { type: [Number], default: undefined }, // 0=Sun..6=Sat
-    time: { type: String }, // "HH:mm", IST
+    weeklySlots: {
+        type: [{
+            _id: false,
+            dayOfWeek: { type: Number, min: 0, max: 6, required: true }, // 0=Sun..6=Sat
+            time: { type: String, required: true } // "HH:mm", IST
+        }],
+        default: undefined
+    },
     startDate: { type: Date },
     endDate: { type: Date, default: null },
 

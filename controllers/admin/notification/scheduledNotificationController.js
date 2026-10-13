@@ -3,7 +3,8 @@ const User = require('../../../models/user');
 const { validateContent } = require('../../../services/notificationCampaignService');
 const { computeNextWeeklyRun } = require('../../../utils/istSchedule');
 
-const MAX_DAYS_OF_WEEK = 7;
+const MAX_SLOTS = 7 * 3; // 7 days × up to 3 slots (morning/afternoon/evening) each
+const TIME_RE = /^\d{1,2}:\d{2}$/;
 
 const buildScheduleFields = (body) => {
     const scheduleType = body.scheduleType === 'weekly' ? 'weekly' : 'once';
@@ -19,15 +20,27 @@ const buildScheduleFields = (body) => {
         return { scheduleType, sendAt, nextRunAt: sendAt };
     }
 
-    const daysOfWeek = Array.isArray(body.daysOfWeek)
-        ? [...new Set(body.daysOfWeek.map(Number))].filter((d) => d >= 0 && d <= 6)
-        : [];
-    if (!daysOfWeek.length || daysOfWeek.length > MAX_DAYS_OF_WEEK) {
-        return { error: 'Select at least one day of the week' };
+    const rawSlots = Array.isArray(body.weeklySlots) ? body.weeklySlots : [];
+    const seen = new Set();
+    const weeklySlots = [];
+    for (const slot of rawSlots) {
+        const dayOfWeek = Number(slot?.dayOfWeek);
+        const time = String(slot?.time || '');
+        if (!Number.isInteger(dayOfWeek) || dayOfWeek < 0 || dayOfWeek > 6) {
+            return { error: 'Invalid day of week in schedule' };
+        }
+        if (!TIME_RE.test(time)) {
+            return { error: 'Invalid time in schedule' };
+        }
+        const key = `${dayOfWeek}-${time}`;
+        if (seen.has(key)) continue; // de-dupe accidental repeats
+        seen.add(key);
+        weeklySlots.push({ dayOfWeek, time });
     }
-    if (!/^\d{1,2}:\d{2}$/.test(body.time || '')) {
-        return { error: 'Enter a valid time' };
+    if (!weeklySlots.length || weeklySlots.length > MAX_SLOTS) {
+        return { error: 'Pick at least one day and time slot' };
     }
+
     const startDate = body.startDate ? new Date(body.startDate) : new Date();
     if (Number.isNaN(startDate.getTime())) {
         return { error: 'Invalid start date' };
@@ -44,14 +57,14 @@ const buildScheduleFields = (body) => {
     }
 
     const nextRunAt = computeNextWeeklyRun(
-        { daysOfWeek, time: body.time, startDate, endDate },
+        { weeklySlots, startDate, endDate },
         new Date()
     );
     if (!nextRunAt) {
         return { error: 'No valid send time falls within the selected date range' };
     }
 
-    return { scheduleType, daysOfWeek, time: body.time, startDate, endDate, nextRunAt };
+    return { scheduleType, weeklySlots, startDate, endDate, nextRunAt };
 };
 
 exports.createScheduledNotification = async (req, res) => {
