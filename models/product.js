@@ -37,6 +37,9 @@ const productSchema = new mongoose.Schema({
   brand: { type: String },
   category: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },
   subcategory: { type: mongoose.Schema.Types.ObjectId, ref: 'Subcategory' },
+  // Free-form labels (e.g. "combo", "festive-fasting") an admin can group products
+  // under for curated home-page collections, independent of category/subcategory.
+  tags: { type: [String], default: [] },
 
   price: { type: Number, required: true },
   oldPrice: { type: Number, default: 0 },
@@ -128,6 +131,7 @@ const productSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 productSchema.index({ slug: 1 }, { unique: true, sparse: true });
+productSchema.index({ tags: 1 });
 
 productSchema.statics.createUniqueSlug = function (name, productId) {
   return buildUniqueSlug(this, name, productId);
