@@ -874,6 +874,7 @@ const getProducts = async (req, res) => {
   try {
     const {
       category,
+      tag,
       search,
       minPrice,
       maxPrice,
@@ -892,6 +893,10 @@ const getProducts = async (req, res) => {
 
     if (category) {
       filter.category = category;
+    }
+
+    if (tag) {
+      filter.tags = tag;
     }
 
     if (search) {
