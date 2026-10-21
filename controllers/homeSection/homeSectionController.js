@@ -32,10 +32,30 @@ const resolveLink = async (link) => {
 };
 
 const resolveProductsForSection = async (section, productFilter, discounts) => {
-  const { mode, manualProducts, tag, maxPrice, minDiscountPercent, limit } = section.productSource || {};
+  const { mode, manualProducts, tag, maxPrice, minDiscountPercent, limit, scheduledProducts } = section.productSource || {};
   const baseFilter = { isActive: true, ...productFilter };
 
   let products = [];
+
+  if (mode === 'scheduled') {
+    if (!scheduledProducts?.length) return [];
+    const ids = scheduledProducts.map((entry) => entry.product);
+    const found = await Product.find({ _id: { $in: ids }, ...baseFilter })
+      .populate('category').populate('subcategory');
+    // Overlay the admin-set tomorrow price in place of the catalog price — oldPrice
+    // stays the real price so the UI naturally shows a strikethrough + savings.
+    return found.map((p) => {
+      const entry = scheduledProducts.find((e) => e.product.toString() === p._id.toString());
+      const discounted = applyDiscountToProduct(p.toObject(), discounts);
+      return {
+        ...discounted,
+        oldPrice: discounted.price,
+        price: entry.tomorrowPrice,
+        effectivePrice: entry.tomorrowPrice,
+        campaignDiscountPercentage: 0
+      };
+    });
+  }
 
   if (mode === 'manual') {
     if (!manualProducts?.length) return [];
@@ -104,7 +124,8 @@ exports.getHomeSections = async (req, res) => {
           type: section.type,
           theme: section.theme,
           products,
-          viewAllLink
+          viewAllLink,
+          isScheduled: section.productSource?.mode === 'scheduled'
         };
       }
 

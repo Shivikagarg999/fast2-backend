@@ -76,7 +76,8 @@ exports.getHomeSectionsAdmin = async (req, res) => {
   try {
     const sections = await HomeSection.find({})
       .sort({ order: 1, createdAt: -1 })
-      .populate('productSource.manualProducts', 'name images price oldPrice');
+      .populate('productSource.manualProducts', 'name images price oldPrice')
+      .populate('productSource.scheduledProducts.product', 'name images price oldPrice');
     return res.status(200).json({ success: true, data: sections });
   } catch (error) {
     console.error('Get home sections (admin) error:', error);

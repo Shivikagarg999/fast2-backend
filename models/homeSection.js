@@ -30,12 +30,19 @@ const homeSectionSchema = new mongoose.Schema({
 
   // product_carousel only — how to pick which products show up.
   productSource: {
-    mode: { type: String, enum: ['manual', 'tag', 'maxPrice', 'minDiscount'], default: 'manual' },
+    mode: { type: String, enum: ['manual', 'tag', 'maxPrice', 'minDiscount', 'scheduled'], default: 'manual' },
     manualProducts: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Product' }],
     tag: { type: String, default: '' },
     maxPrice: { type: Number, default: null },
     minDiscountPercent: { type: Number, default: null },
-    limit: { type: Number, default: 20 }
+    limit: { type: Number, default: 20 },
+    // 'scheduled' mode ("Get Tomorrow") — admin hand-picks products and types the
+    // exact discounted price charged when the customer accepts next-day delivery.
+    // Validated server-side in cartController before it's ever actually charged.
+    scheduledProducts: [{
+      product: { type: mongoose.Schema.Types.ObjectId, ref: 'Product' },
+      tomorrowPrice: { type: Number }
+    }]
   },
 
   // tile_grid only.

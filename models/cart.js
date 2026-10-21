@@ -23,6 +23,10 @@ const cartItemSchema = new mongoose.Schema({
   gstAmount: {
     type: Number,
     default: 0
+  },
+  scheduledForTomorrow: {
+    type: Boolean,
+    default: false
   }
 });
 

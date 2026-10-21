@@ -1,10 +1,31 @@
 const Cart = require("../../models/cart");
 const Product = require("../../models/product");
+const HomeSection = require("../../models/homeSection");
 const { getActiveDiscounts, getEffectivePrice } = require('../../utils/discountHelper');
+
+// If the product is being added via a "scheduled" (Get Tomorrow) home section,
+// use the admin-configured tomorrow price instead of the catalog/discount price —
+// validated server-side against that section's own config so the client can never
+// spoof a price. Returns null when not applicable, so the caller falls back to
+// the normal effective price.
+const getScheduledPrice = async (homeSectionId, productId) => {
+  if (!homeSectionId) return null;
+  const section = await HomeSection.findOne({
+    _id: homeSectionId,
+    isActive: true,
+    'productSource.mode': 'scheduled'
+  }).lean();
+  if (!section) return null;
+
+  const match = (section.productSource?.scheduledProducts || []).find(
+    (entry) => entry.product.toString() === productId.toString()
+  );
+  return match ? match.tomorrowPrice : null;
+};
 
 // Core add-to-cart logic, shared by the HTTP handler below and the chatbot's
 // add_to_cart tool. Throws an Error with .statusCode on failure.
-const addItemToCart = async (userId, productId, quantity) => {
+const addItemToCart = async (userId, productId, quantity, homeSectionId) => {
   const product = await Product.findById(productId).populate('category');
   if (!product) {
     const error = new Error("Product not found");
@@ -13,8 +34,13 @@ const addItemToCart = async (userId, productId, quantity) => {
   }
 
   const gstPercent = product.category?.gstPercent || 0;
-  const discounts = await getActiveDiscounts();
-  const { effectivePrice } = getEffectivePrice(product, discounts);
+  const scheduledPrice = await getScheduledPrice(homeSectionId, productId);
+  const scheduledForTomorrow = scheduledPrice != null;
+  let effectivePrice = scheduledPrice;
+  if (!scheduledForTomorrow) {
+    const discounts = await getActiveDiscounts();
+    effectivePrice = getEffectivePrice(product, discounts).effectivePrice;
+  }
 
   if (product.quantity < quantity) {
     const error = new Error(`Only ${product.quantity} items available in stock`);
@@ -27,7 +53,7 @@ const addItemToCart = async (userId, productId, quantity) => {
   if (!cart) {
     cart = new Cart({
       user: userId,
-      items: [{ product: productId, quantity, price: effectivePrice, gstPercent }]
+      items: [{ product: productId, quantity, price: effectivePrice, gstPercent, scheduledForTomorrow }]
     });
   } else {
     const existingItemIndex = cart.items.findIndex(
@@ -43,8 +69,9 @@ const addItemToCart = async (userId, productId, quantity) => {
       }
       cart.items[existingItemIndex].quantity = newQuantity;
       cart.items[existingItemIndex].price = effectivePrice;
+      cart.items[existingItemIndex].scheduledForTomorrow = scheduledForTomorrow;
     } else {
-      cart.items.push({ product: productId, quantity, price: effectivePrice, gstPercent });
+      cart.items.push({ product: productId, quantity, price: effectivePrice, gstPercent, scheduledForTomorrow });
     }
   }
 
@@ -110,13 +137,13 @@ const getCart = async (req, res) => {
 // Add item to cart
 const addToCart = async (req, res) => {
   try {
-    const { productId, quantity } = req.body;
+    const { productId, quantity, homeSectionId } = req.body;
 
     if (!productId || !quantity || quantity < 1) {
       return res.status(400).json({ message: "Invalid input" });
     }
 
-    const cart = await addItemToCart(req.user._id, productId, quantity);
+    const cart = await addItemToCart(req.user._id, productId, quantity, homeSectionId);
     res.status(200).json(cart);
   } catch (error) {
     res.status(error.statusCode || 500).json({ message: error.message });
