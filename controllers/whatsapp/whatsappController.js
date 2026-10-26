@@ -324,7 +324,12 @@ exports.catalogFeed = async (req, res) => {
       const image = p.images?.[0]?.url || "";
       const link = `https://www.gmkart.com/product/${Product.slugifyProductName(p.name) || p.slug || p._id}`;
       const availability = p.stockStatus === "in-stock" ? "in stock" : "out of stock";
-      const description = (p.description || p.name || "").replace(/[\r\n\t]/g, " ").slice(0, 500);
+      const description = (p.description || p.name || "")
+        .replace(/<[^>]*>/g, " ") // strip HTML tags — Meta's catalog shows raw text, not markup
+        .replace(/&nbsp;/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 500);
       return [
         p._id.toString(),
         (p.name || "").replace(/\t/g, " "),
