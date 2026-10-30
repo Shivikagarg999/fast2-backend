@@ -3,6 +3,7 @@ const User = require("../../models/user");
 const Order = require("../../models/order");
 const WhatsappOrder = require("../../models/whatsappOrder");
 const whatsappService = require("../../services/whatsappService");
+const { findOrCreateConversation, recordMessage } = require("../../services/whatsappConversationService");
 const Razorpay = require("razorpay");
 
 const razorpay = new Razorpay({
@@ -65,6 +66,14 @@ exports.verifyWebhook = (req, res) => {
   return res.sendStatus(403);
 };
 
+// Best-effort preview text for the admin inbox, per inbound message type.
+const previewForInbound = (message) => {
+  if (message.type === "order") return `🛒 Sent an order (${message.order?.product_items?.length || 0} items)`;
+  if (message.type === "interactive") return message.interactive?.button_reply?.title || "Tapped a button";
+  if (message.type === "text") return message.text?.body || "";
+  return `[${message.type}]`;
+};
+
 exports.receiveWebhook = async (req, res) => {
   res.sendStatus(200);
 
@@ -73,8 +82,22 @@ exports.receiveWebhook = async (req, res) => {
     const change = entry?.changes?.[0];
     const value = change?.value;
     const message = value?.messages?.[0];
-    if (!message) return; 
-    const from = message.from; 
+    if (!message) return;
+    const from = message.from;
+    const profileName = value?.contacts?.[0]?.profile?.name;
+
+    const conversation = await findOrCreateConversation(from, profileName);
+    await recordMessage(conversation, {
+      direction: "in",
+      sentBy: "customer",
+      body: previewForInbound(message),
+      type: message.type
+    });
+
+    // An admin has taken this conversation over manually — the bot stays
+    // quiet here until they hand it back, so replies don't collide.
+    if (conversation.isBotPaused) return;
+
     if (message.type === "order") {
       await handleCartOrder(from, message.order);
       return;

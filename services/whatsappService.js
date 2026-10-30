@@ -12,7 +12,20 @@ const isConfigured = () => !!(PHONE_NUMBER_ID && ACCESS_TOKEN);
 const graphUrl = (path) =>
   `https://graph.facebook.com/${GRAPH_API_VERSION}/${PHONE_NUMBER_ID}${path}`;
 
-const send = async (payload) => {
+// Logs every outbound message into the conversation record the admin inbox reads —
+// regardless of whether the bot or an admin sent it. Never throws: a logging
+// failure must not block the actual WhatsApp send.
+const logOutbound = async (to, body, sentBy) => {
+  try {
+    const { findOrCreateConversation, recordMessage } = require("./whatsappConversationService");
+    const conversation = await findOrCreateConversation(to);
+    await recordMessage(conversation, { direction: "out", sentBy, body });
+  } catch (error) {
+    console.error("WhatsApp outbound logging error:", error.message);
+  }
+};
+
+const send = async (payload, { sentBy = "bot", logBody } = {}) => {
   if (!isConfigured()) {
     console.warn("WhatsApp not configured (WHATSAPP_PHONE_NUMBER_ID/WHATSAPP_ACCESS_TOKEN missing) — skipping send");
     return null;
@@ -23,6 +36,7 @@ const send = async (payload) => {
       { messaging_product: "whatsapp", ...payload },
       { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } }
     );
+    if (payload.to) await logOutbound(payload.to, logBody ?? "", sentBy);
     return data;
   } catch (error) {
     console.error("WhatsApp send error:", error.response?.data || error.message);
@@ -32,8 +46,8 @@ const send = async (payload) => {
 
 exports.isConfigured = isConfigured;
 
-exports.sendText = (to, body) =>
-  send({ to, type: "text", text: { body } });
+exports.sendText = (to, body, sentBy = "bot") =>
+  send({ to, type: "text", text: { body } }, { sentBy, logBody: body });
 
 // Up to 3 quick-reply buttons — good for simple yes/no or menu choices.
 exports.sendButtons = (to, bodyText, buttons) =>
@@ -50,7 +64,7 @@ exports.sendButtons = (to, bodyText, buttons) =>
         }))
       }
     }
-  });
+  }, { logBody: bodyText });
 
 // Points the customer at the linked Commerce Catalog — tapping it opens
 // WhatsApp's native product browsing + cart UI, nothing custom-built.
@@ -63,16 +77,12 @@ exports.sendCatalogPrompt = (to, bodyText) =>
       body: { text: bodyText },
       action: { name: "catalog_message" }
     }
-  });
+  }, { logBody: bodyText });
 
-exports.sendPaymentLink = (to, orderSummary, amount, paymentLinkUrl) =>
-  send({
-    to,
-    type: "text",
-    text: {
-      body:
-        `Your order:\n\n${orderSummary}\n\n` +
-        `Total: ₹${amount}\n\n` +
-        `Pay here to confirm your order:\n${paymentLinkUrl}`
-    }
-  });
+exports.sendPaymentLink = (to, orderSummary, amount, paymentLinkUrl) => {
+  const body =
+    `Your order:\n\n${orderSummary}\n\n` +
+    `Total: ₹${amount}\n\n` +
+    `Pay here to confirm your order:\n${paymentLinkUrl}`;
+  return send({ to, type: "text", text: { body } }, { logBody: body });
+};
