@@ -6,11 +6,17 @@ const axios = require("axios");
 const GRAPH_API_VERSION = "v21.0";
 const PHONE_NUMBER_ID = process.env.WHATSAPP_PHONE_NUMBER_ID;
 const ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN;
+const BUSINESS_ACCOUNT_ID = process.env.WHATSAPP_BUSINESS_ACCOUNT_ID;
 
 const isConfigured = () => !!(PHONE_NUMBER_ID && ACCESS_TOKEN);
 
 const graphUrl = (path) =>
   `https://graph.facebook.com/${GRAPH_API_VERSION}/${PHONE_NUMBER_ID}${path}`;
+
+// Message templates live on the WhatsApp Business Account, not the phone
+// number — a separate Graph API base.
+const wabaUrl = (path) =>
+  `https://graph.facebook.com/${GRAPH_API_VERSION}/${BUSINESS_ACCOUNT_ID}${path}`;
 
 // Logs every outbound message into the conversation record the admin inbox reads —
 // regardless of whether the bot or an admin sent it. Never throws: a logging
@@ -86,3 +92,45 @@ exports.sendPaymentLink = (to, orderSummary, amount, paymentLinkUrl) => {
     `Pay here to confirm your order:\n${paymentLinkUrl}`;
   return send({ to, type: "text", text: { body } }, { logBody: body });
 };
+
+// ─── Message templates (needed to message a customer outside the 24-hour
+// window, or for anything business-initiated — marketing, reminders, etc.) ──
+
+// Throws on failure so the admin controller can surface Meta's real reason
+// (e.g. a duplicate name, invalid category) instead of a generic error.
+exports.listTemplates = async () => {
+  const { data } = await axios.get(wabaUrl("/message_templates?limit=100"), {
+    headers: { Authorization: `Bearer ${ACCESS_TOKEN}` }
+  });
+  return data.data || [];
+};
+
+// category: 'MARKETING' | 'UTILITY' | 'AUTHENTICATION'
+// bodyText may contain {{1}}, {{2}}... placeholders, per Meta's template syntax.
+exports.createTemplate = async ({ name, category, language, bodyText }) => {
+  const { data } = await axios.post(
+    wabaUrl("/message_templates"),
+    {
+      name,
+      category,
+      language,
+      components: [{ type: "BODY", text: bodyText }]
+    },
+    { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } }
+  );
+  return data;
+};
+
+// Sends an already-approved template. bodyParams fills {{1}}, {{2}}... in order.
+exports.sendTemplate = (to, name, language, bodyParams = []) =>
+  send({
+    to,
+    type: "template",
+    template: {
+      name,
+      language: { code: language },
+      ...(bodyParams.length
+        ? { components: [{ type: "body", parameters: bodyParams.map((text) => ({ type: "text", text })) }] }
+        : {})
+    }
+  }, { logBody: `[Template: ${name}]` });
