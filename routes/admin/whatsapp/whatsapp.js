@@ -8,11 +8,13 @@ const {
   setBotPaused,
   getTemplates,
   createTemplate,
-  sendTemplateMessage
+  sendTemplateMessage,
+  bulkSend
 } = require('../../../controllers/admin/whatsapp/whatsappAdminController');
 
 router.get('/templates', adminAuth, getTemplates);
 router.post('/templates', adminAuth, createTemplate);
+router.post('/bulk-send', adminAuth, bulkSend);
 router.get('/conversations', adminAuth, getConversations);
 router.get('/conversations/:phone/messages', adminAuth, getMessages);
 router.post('/conversations/:phone/send', adminAuth, sendMessage);

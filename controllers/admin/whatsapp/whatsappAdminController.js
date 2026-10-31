@@ -155,3 +155,59 @@ exports.sendTemplateMessage = async (req, res) => {
     return res.status(500).json({ success: false, message: "Failed to send template" });
   }
 };
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// @desc    Send a message (free text or an approved template) to many
+//          recipients at once. Runs sequentially with a short delay between
+//          sends — Meta rate-limits/flags accounts that fire too fast, and
+//          this keeps the admin inbox usable while it runs.
+//          Free text only reaches customers inside their 24-hour window
+//          (recent WhatsApp contact) — anyone else needs a template, or
+//          their send fails silently on Meta's side.
+// @route   POST /api/admin/whatsapp/bulk-send
+exports.bulkSend = async (req, res) => {
+  try {
+    const { phones, mode, body, templateName, templateLanguage, bodyParams } = req.body;
+
+    if (!Array.isArray(phones) || !phones.length) {
+      return res.status(400).json({ success: false, message: "At least one recipient is required" });
+    }
+    if (mode === "text" && !body?.trim()) {
+      return res.status(400).json({ success: false, message: "Message body is required" });
+    }
+    if (mode === "template" && (!templateName || !templateLanguage)) {
+      return res.status(400).json({ success: false, message: "Template name and language are required" });
+    }
+
+    const results = [];
+    for (const phone of phones) {
+      try {
+        const conversation = await WhatsappConversation.findOne({ phone });
+        if (conversation && !conversation.isBotPaused) {
+          conversation.isBotPaused = true;
+          await conversation.save();
+        }
+
+        const sendResult = mode === "template"
+          ? await whatsappService.sendTemplate(phone, templateName, templateLanguage, Array.isArray(bodyParams) ? bodyParams : [])
+          : await whatsappService.sendText(phone, body.trim(), "admin");
+
+        results.push({ phone, success: !!sendResult });
+      } catch (error) {
+        results.push({ phone, success: false, error: error.message });
+      }
+      await sleep(400); // stay well under Meta's per-second send limits
+    }
+
+    const sent = results.filter((r) => r.success).length;
+    return res.status(200).json({
+      success: true,
+      message: `Sent to ${sent}/${phones.length} recipients`,
+      data: results
+    });
+  } catch (error) {
+    console.error("Bulk WhatsApp send error:", error.message);
+    return res.status(500).json({ success: false, message: "Failed to send bulk messages" });
+  }
+};
