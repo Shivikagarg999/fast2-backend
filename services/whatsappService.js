@@ -31,10 +31,14 @@ const logOutbound = async (to, body, sentBy) => {
   }
 };
 
+// Returns { ok, data, error }. `data` is the raw Graph API response body on
+// success; `error` is Meta's real error message on failure, so admin-facing
+// callers can show the customer-visible reason instead of a generic
+// "failed" message. (The bot flow in whatsappController.js only ever awaits
+// these calls without inspecting the result, so this shape change is safe there.)
 const send = async (payload, { sentBy = "bot", logBody } = {}) => {
   if (!isConfigured()) {
-    console.warn("WhatsApp not configured (WHATSAPP_PHONE_NUMBER_ID/WHATSAPP_ACCESS_TOKEN missing) — skipping send");
-    return null;
+    return { ok: false, data: null, error: "WhatsApp is not configured on the server" };
   }
   try {
     const { data } = await axios.post(
@@ -43,10 +47,11 @@ const send = async (payload, { sentBy = "bot", logBody } = {}) => {
       { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } }
     );
     if (payload.to) await logOutbound(payload.to, logBody ?? "", sentBy);
-    return data;
+    return { ok: true, data, error: null };
   } catch (error) {
+    const metaMessage = error.response?.data?.error?.message;
     console.error("WhatsApp send error:", error.response?.data || error.message);
-    return null;
+    return { ok: false, data: null, error: metaMessage || error.message };
   }
 };
 

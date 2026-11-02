@@ -64,7 +64,13 @@ exports.sendMessage = async (req, res) => {
       await conversation.save();
     }
 
-    await whatsappService.sendText(phone, body.trim(), "admin");
+    // whatsappService swallows Graph API errors and resolves { ok: false }
+    // rather than throwing — check the actual result so the admin isn't told
+    // a failed send succeeded, and sees the real reason from Meta.
+    const result = await whatsappService.sendText(phone, body.trim(), "admin");
+    if (!result.ok) {
+      return res.status(502).json({ success: false, message: `WhatsApp could not send this message: ${result.error}` });
+    }
 
     return res.status(200).json({ success: true, message: "Message sent" });
   } catch (error) {
@@ -148,7 +154,10 @@ exports.sendTemplateMessage = async (req, res) => {
       await conversation.save();
     }
 
-    await whatsappService.sendTemplate(phone, name, language, Array.isArray(bodyParams) ? bodyParams : []);
+    const result = await whatsappService.sendTemplate(phone, name, language, Array.isArray(bodyParams) ? bodyParams : []);
+    if (!result.ok) {
+      return res.status(502).json({ success: false, message: `WhatsApp could not send this template: ${result.error}` });
+    }
     return res.status(200).json({ success: true, message: "Template sent" });
   } catch (error) {
     console.error("Send WhatsApp template error:", error.message);
@@ -193,7 +202,7 @@ exports.bulkSend = async (req, res) => {
           ? await whatsappService.sendTemplate(phone, templateName, templateLanguage, Array.isArray(bodyParams) ? bodyParams : [])
           : await whatsappService.sendText(phone, body.trim(), "admin");
 
-        results.push({ phone, success: !!sendResult });
+        results.push({ phone, success: sendResult.ok, error: sendResult.ok ? undefined : sendResult.error });
       } catch (error) {
         results.push({ phone, success: false, error: error.message });
       }
