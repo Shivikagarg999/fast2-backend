@@ -24,7 +24,7 @@ const whatsappOrderSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["awaiting_address", "pending", "paid", "expired", "cancelled"],
+      enum: ["awaiting_address", "awaiting_payment_method", "pending", "paid", "cod_confirmed", "expired", "cancelled"],
       default: "pending"
     },
     order: { type: mongoose.Schema.Types.ObjectId, ref: "Order", default: null },

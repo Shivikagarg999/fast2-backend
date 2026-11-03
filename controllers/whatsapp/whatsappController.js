@@ -107,6 +107,18 @@ exports.receiveWebhook = async (req, res) => {
       const replyId = message.interactive?.button_reply?.id;
       if (replyId === "browse_catalog") {
         await whatsappService.sendCatalogPrompt(from, "Browse our products and add what you'd like to your cart:");
+      } else if (replyId === "pay_online" || replyId === "pay_cod") {
+        const whatsappOrder = await WhatsappOrder.findOne({
+          whatsappPhone: from,
+          status: "awaiting_payment_method"
+        }).sort({ createdAt: -1 });
+        if (whatsappOrder) {
+          if (replyId === "pay_online") {
+            await createPaymentLinkAndNotify(whatsappOrder);
+          } else {
+            await confirmCodOrder(whatsappOrder);
+          }
+        }
       }
       return;
     }
@@ -188,9 +200,9 @@ const handleCartOrder = async (from, order) => {
       subtotal,
       shippingAddress: knownAddress,
       user: user._id,
-      status: "awaiting_address" // set to pending right after link creation below
+      status: "awaiting_payment_method"
     });
-    await createPaymentLinkAndNotify(whatsappOrder, summary);
+    await promptPaymentMethod(from, summary, subtotal);
     return;
   }
 
@@ -206,6 +218,19 @@ const handleCartOrder = async (from, order) => {
     from,
     `Your order:\n\n${summary}\n\nTotal: ₹${subtotal}\n\n` +
       `Please reply with your full delivery address (including 6-digit pincode) to continue.`
+  );
+};
+
+// Asks whether to pay online (Razorpay link) or cash on delivery before
+// actually placing/charging the order.
+const promptPaymentMethod = async (to, summary, subtotal) => {
+  await whatsappService.sendButtons(
+    to,
+    `Your order:\n\n${summary}\n\nTotal: ₹${subtotal}\n\nHow would you like to pay?`,
+    [
+      { id: "pay_online", title: "Pay Online" },
+      { id: "pay_cod", title: "Cash on Delivery" }
+    ]
   );
 };
 
@@ -233,12 +258,14 @@ const handleAddressReply = async (whatsappOrder, text) => {
   }
 
   whatsappOrder.shippingAddress = shippingAddress;
+  whatsappOrder.status = "awaiting_payment_method";
   await whatsappOrder.save();
 
-  await createPaymentLinkAndNotify(whatsappOrder);
+  const summary = await buildSummaryFromItems(whatsappOrder.items);
+  await promptPaymentMethod(whatsappOrder.whatsappPhone, summary, whatsappOrder.subtotal);
 };
 
-const createPaymentLinkAndNotify = async (whatsappOrder, summaryOverride) => {
+const createPaymentLinkAndNotify = async (whatsappOrder) => {
   const phone = normalizeWaPhone(whatsappOrder.whatsappPhone);
 
   const paymentLink = await razorpay.paymentLink.create({
@@ -255,7 +282,7 @@ const createPaymentLinkAndNotify = async (whatsappOrder, summaryOverride) => {
   whatsappOrder.status = "pending";
   await whatsappOrder.save();
 
-  const summary = summaryOverride || (await buildSummaryFromItems(whatsappOrder.items));
+  const summary = await buildSummaryFromItems(whatsappOrder.items);
 
   await whatsappService.sendPaymentLink(
     whatsappOrder.whatsappPhone,
@@ -263,6 +290,28 @@ const createPaymentLinkAndNotify = async (whatsappOrder, summaryOverride) => {
     whatsappOrder.subtotal,
     paymentLink.short_url
   );
+};
+
+// Places the order immediately against the real Order collection, same as
+// the paid-webhook path below, but with no payment taken yet.
+const confirmCodOrder = async (whatsappOrder) => {
+  try {
+    const order = await createOrderForWhatsapp(whatsappOrder, {
+      paymentMethod: "cod",
+      paymentStatus: "pending"
+    });
+
+    whatsappOrder.status = "cod_confirmed";
+    whatsappOrder.order = order._id;
+    await whatsappOrder.save();
+
+    await whatsappService.sendText(
+      whatsappOrder.whatsappPhone,
+      `Order confirmed! ✅ Your order #${order.orderId} will be delivered — pay cash on delivery.`
+    );
+  } catch (error) {
+    console.error("confirmCodOrder error:", error.message);
+  }
 };
 
 const buildSummaryFromItems = async (items) => {
@@ -274,6 +323,50 @@ const buildSummaryFromItems = async (items) => {
     .join("\n");
 };
 
+// Shared by the COD and paid-online paths below — builds and saves the real
+// Order from a WhatsappOrder, and fires the usual driver/seller notifications.
+const createOrderForWhatsapp = async (whatsappOrder, { paymentMethod, paymentStatus, razorpayPaymentId }) => {
+  let userId = whatsappOrder.user;
+  if (!userId) {
+    const user = await getOrCreateWhatsappUser(whatsappOrder.whatsappPhone);
+    userId = user?._id;
+    whatsappOrder.user = userId;
+  }
+  if (!userId) throw new Error(`No user available for WhatsApp order ${whatsappOrder._id}`);
+
+  const primarySellerProduct = await Product.findById(whatsappOrder.items[0].product).select("seller");
+
+  const order = new Order({
+    user: userId,
+    seller: primarySellerProduct?.seller,
+    items: whatsappOrder.items,
+    subtotal: whatsappOrder.subtotal,
+    total: whatsappOrder.subtotal,
+    finalAmount: whatsappOrder.subtotal,
+    deliveryCharges: 0,
+    handlingCharge: 0,
+    totalGst: 0,
+    shippingAddress: whatsappOrder.shippingAddress,
+    paymentMethod,
+    paymentStatus,
+    ...(razorpayPaymentId && { razorpayPaymentId }),
+    status: paymentStatus === "paid" ? "confirmed" : "pending"
+  });
+  await order.save();
+
+  try {
+    const { notifyDriversForOrder, notifySellersForOrder } = require("../order/order");
+    if (typeof notifyDriversForOrder === "function") {
+      await notifyDriversForOrder(order, userId);
+    }
+    if (typeof notifySellersForOrder === "function") {
+      await notifySellersForOrder(order);
+    }
+  } catch (_) {}
+
+  return order;
+};
+
 // ─── Called from the Razorpay payment_link.paid webhook ───────────────────
 // Turns a paid WhatsApp cart into a real Order, same as any other checkout.
 exports.handleWhatsappPaymentLinkPaid = async (paymentLinkEntity, paymentEntity) => {
@@ -281,49 +374,15 @@ exports.handleWhatsappPaymentLinkPaid = async (paymentLinkEntity, paymentEntity)
     const whatsappOrder = await WhatsappOrder.findOne({ razorpayPaymentLinkId: paymentLinkEntity.id });
     if (!whatsappOrder || whatsappOrder.status === "paid") return;
 
-    let userId = whatsappOrder.user;
-    if (!userId) {
-      const user = await getOrCreateWhatsappUser(whatsappOrder.whatsappPhone);
-      userId = user?._id;
-      whatsappOrder.user = userId;
-      await whatsappOrder.save();
-    }
-
-    if (!userId) throw new Error(`No user available for WhatsApp order ${whatsappOrder._id}`);
-
-    const primarySellerProduct = await Product.findById(whatsappOrder.items[0].product).select("seller");
-
-    const order = new Order({
-      user: userId,
-      seller: primarySellerProduct?.seller,
-      items: whatsappOrder.items,
-      subtotal: whatsappOrder.subtotal,
-      total: whatsappOrder.subtotal,
-      finalAmount: whatsappOrder.subtotal,
-      deliveryCharges: 0,
-      handlingCharge: 0,
-      totalGst: 0,
-      shippingAddress: whatsappOrder.shippingAddress,
+    const order = await createOrderForWhatsapp(whatsappOrder, {
       paymentMethod: "online",
       paymentStatus: "paid",
-      razorpayPaymentId: paymentEntity?.id,
-      status: "confirmed"
+      razorpayPaymentId: paymentEntity?.id
     });
-    await order.save();
 
     whatsappOrder.status = "paid";
     whatsappOrder.order = order._id;
     await whatsappOrder.save();
-
-    try {
-      const { notifyDriversForOrder, notifySellersForOrder } = require("../order/order");
-      if (typeof notifyDriversForOrder === "function") {
-        await notifyDriversForOrder(order, userId);
-      }
-      if (typeof notifySellersForOrder === "function") {
-        await notifySellersForOrder(order);
-      }
-    } catch (_) {}
 
     await whatsappService.sendText(
       whatsappOrder.whatsappPhone,
