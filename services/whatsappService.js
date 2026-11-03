@@ -126,16 +126,58 @@ exports.createTemplate = async ({ name, category, language, bodyText }) => {
   return data;
 };
 
+// A catalog/multi-product button carries no {{1}}-style text placeholder, but
+// Meta still requires a matching "button" component (with a thumbnail product,
+// and for MPM a full product list) at send time, or it fails with 131008
+// "Required parameter is missing". Build that component from our own catalog
+// so admins never have to hand-assemble it.
+const buildCatalogButtonComponent = async (templateComponents) => {
+  const buttonsBlock = templateComponents.find((c) => c.type === "BUTTONS");
+  const catalogButtonIndex = buttonsBlock?.buttons?.findIndex((b) => b.type === "CATALOG" || b.type === "MPM");
+  if (catalogButtonIndex == null || catalogButtonIndex < 0) return null;
+
+  const subType = buttonsBlock.buttons[catalogButtonIndex].type === "MPM" ? "mpm" : "catalog";
+
+  const Product = require("../models/product");
+  const products = await Product.find({ isActive: true, stockStatus: "in-stock" })
+    .select("_id")
+    .limit(30)
+    .lean();
+  if (!products.length) return null;
+
+  const thumbnailProductId = products[0]._id.toString();
+  const action = subType === "mpm"
+    ? {
+        thumbnail_product_retailer_id: thumbnailProductId,
+        sections: [{ title: "Our Products", product_items: products.map((p) => ({ product_retailer_id: p._id.toString() })) }]
+      }
+    : { thumbnail_product_retailer_id: thumbnailProductId };
+
+  return { type: "button", sub_type: subType, index: String(catalogButtonIndex), parameters: [{ type: "action", action }] };
+};
+
 // Sends an already-approved template. bodyParams fills {{1}}, {{2}}... in order.
-exports.sendTemplate = (to, name, language, bodyParams = []) =>
-  send({
+exports.sendTemplate = async (to, name, language, bodyParams = []) => {
+  const components = bodyParams.length
+    ? [{ type: "body", parameters: bodyParams.map((text) => ({ type: "text", text })) }]
+    : [];
+
+  try {
+    const templates = await exports.listTemplates();
+    const template = templates.find((t) => t.name === name && t.language === language);
+    const catalogButton = template ? await buildCatalogButtonComponent(template.components || []) : null;
+    if (catalogButton) components.push(catalogButton);
+  } catch (error) {
+    console.error("Template lookup for catalog button failed:", error.message);
+  }
+
+  return send({
     to,
     type: "template",
     template: {
       name,
       language: { code: language },
-      ...(bodyParams.length
-        ? { components: [{ type: "body", parameters: bodyParams.map((text) => ({ type: "text", text })) }] }
-        : {})
+      ...(components.length ? { components } : {})
     }
   }, { logBody: `[Template: ${name}]` });
+};
