@@ -26,15 +26,12 @@ const whatsappOrderSchema = new mongoose.Schema(
     status: {
       type: String,
       enum: [
-        "awaiting_name",
-        "awaiting_address_line",
-        "awaiting_city",
-        "awaiting_state",
-        "awaiting_pincode",
+        "awaiting_address",
         "awaiting_payment_method",
         "pending",
         "paid",
         "cod_confirmed",
+        "undeliverable",
         "expired",
         "cancelled"
       ],

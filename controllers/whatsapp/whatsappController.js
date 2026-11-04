@@ -36,45 +36,54 @@ const getOrCreateWhatsappUser = async (waId) => {
   ).select("_id");
 };
 
-// Collects the delivery address one field at a time instead of trying to
-// parse a single free-text message — customers format addresses too
-// inconsistently for that to reliably produce a valid city/state/pincode.
-const ADDRESS_STEPS = [
-  {
-    status: "awaiting_name",
-    field: "name",
-    question: "What's your full name?",
-    validate: (text) => (text.trim().length >= 2 ? null : "Please share your full name.")
-  },
-  {
-    status: "awaiting_address_line",
-    field: "addressLine",
-    question: "Please share your full address (house/flat no., street, locality):",
-    validate: (text) => (text.trim().length >= 5 ? null : "Please share a more complete address.")
-  },
-  {
-    status: "awaiting_city",
-    field: "city",
-    question: "Which city?",
-    validate: (text) => (text.trim().length >= 2 ? null : "Please enter a valid city name.")
-  },
-  {
-    status: "awaiting_state",
-    field: "state",
-    question: "Which state?",
-    validate: (text) => (text.trim().length >= 2 ? null : "Please enter a valid state name.")
-  },
-  {
-    status: "awaiting_pincode",
-    field: "pinCode",
-    question: "What's your 6-digit delivery pincode?",
-    validate: (text) => (/^\d{6}$/.test(text.trim()) ? null : "That doesn't look like a valid 6-digit pincode — please try again.")
-  }
-];
-const ADDRESS_STEP_STATUSES = ADDRESS_STEPS.map((s) => s.status);
+const ADDRESS_PROMPT =
+  "Please share your delivery address, one line each:\n\n" +
+  "Name\nAddress (house/flat no., street, locality)\nCity\nState\nPincode\n\n" +
+  "Example:\nRahul Sharma\n12 MG Road, Sector 4\nGwalior\nMadhya Pradesh\n474001";
+
+// Expects the 5-line format from ADDRESS_PROMPT above. Accepts commas as line
+// breaks too, since customers don't always send literal newlines on mobile.
+const parseFullAddress = (text) => {
+  const parts = text
+    .split(/\n|,/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts.length < 5) return null;
+
+  const pinCode = parts[parts.length - 1];
+  if (!/^\d{6}$/.test(pinCode)) return null;
+
+  const state = parts[parts.length - 2];
+  const city = parts[parts.length - 3];
+  const name = parts[0];
+  const addressLine = parts.slice(1, parts.length - 3).join(", ");
+  if (!addressLine || !city || !state) return null;
+
+  return { name, addressLine, city, state, pinCode };
+};
 
 const formatAddress = (address) =>
   `${address.name}\n${address.addressLine}, ${address.city}, ${address.state} - ${address.pinCode}`;
+
+// Mirrors the web/app checkout's per-product serviceablePincodes check —
+// an empty list on a product means it ships everywhere.
+const checkServiceability = async (items, pinCode) => {
+  const productIds = items.map((i) => i.product);
+  const products = await Product.find({ _id: { $in: productIds } }).select("name serviceablePincodes").lean();
+  const productMap = new Map(products.map((p) => [p._id.toString(), p]));
+
+  const nonServiceableNames = [];
+  for (const item of items) {
+    const product = productMap.get(item.product.toString());
+    if (!product) continue;
+    if (product.serviceablePincodes?.length && !product.serviceablePincodes.includes(pinCode)) {
+      nonServiceableNames.push(product.name);
+    }
+  }
+
+  return { serviceable: nonServiceableNames.length === 0, nonServiceableNames };
+};
 
 exports.verifyWebhook = (req, res) => {
   const mode = req.query["hub.mode"];
@@ -161,11 +170,11 @@ exports.receiveWebhook = async (req, res) => {
 
       const awaiting = await WhatsappOrder.findOne({
         whatsappPhone: from,
-        status: { $in: ADDRESS_STEP_STATUSES }
+        status: "awaiting_address"
       }).sort({ createdAt: -1 });
 
       if (awaiting) {
-        await handleAddressStepReply(awaiting, text);
+        await handleAddressReply(awaiting, text);
         return;
       }
 
@@ -229,13 +238,12 @@ const handleCartOrder = async (from, order) => {
     items: resolvedItems,
     subtotal,
     user: user._id,
-    status: ADDRESS_STEPS[0].status
+    status: "awaiting_address"
   });
 
   await whatsappService.sendText(
     from,
-    `Your order:\n\n${summary}\n\nTotal: ₹${subtotal}\n\n` +
-      `Let's get your delivery address.\n\n${ADDRESS_STEPS[0].question}`
+    `Your order:\n\n${summary}\n\nTotal: ₹${subtotal}\n\n${ADDRESS_PROMPT}`
   );
 };
 
@@ -254,31 +262,34 @@ const promptPaymentMethod = async (whatsappOrder, summary, subtotal) => {
   );
 };
 
-// Customer replied while an address field was awaiting an answer — validates
-// it, saves it, and either asks the next question or (once all fields are in)
-// moves on to the payment-method prompt.
-const handleAddressStepReply = async (whatsappOrder, text) => {
-  const stepIndex = ADDRESS_STEPS.findIndex((s) => s.status === whatsappOrder.status);
-  const step = ADDRESS_STEPS[stepIndex];
-
-  const validationError = step.validate(text);
-  if (validationError) {
-    await whatsappService.sendText(whatsappOrder.whatsappPhone, validationError);
+// Customer replied with their full address in one message — parses it,
+// checks delivery serviceability for the pincode, and either rejects the
+// order or moves on to the payment-method prompt.
+const handleAddressReply = async (whatsappOrder, text) => {
+  const shippingAddress = parseFullAddress(text);
+  if (!shippingAddress) {
+    await whatsappService.sendText(
+      whatsappOrder.whatsappPhone,
+      `I couldn't read that address — please resend it in this exact format:\n\n${ADDRESS_PROMPT}`
+    );
     return;
   }
+  shippingAddress.phone = normalizeWaPhone(whatsappOrder.whatsappPhone);
 
-  whatsappOrder.shippingAddress = whatsappOrder.shippingAddress || {};
-  whatsappOrder.shippingAddress[step.field] = text.trim();
-  whatsappOrder.shippingAddress.phone = normalizeWaPhone(whatsappOrder.whatsappPhone);
-
-  const nextStep = ADDRESS_STEPS[stepIndex + 1];
-  if (nextStep) {
-    whatsappOrder.status = nextStep.status;
+  const { serviceable, nonServiceableNames } = await checkServiceability(whatsappOrder.items, shippingAddress.pinCode);
+  if (!serviceable) {
+    whatsappOrder.shippingAddress = shippingAddress;
+    whatsappOrder.status = "undeliverable";
     await whatsappOrder.save();
-    await whatsappService.sendText(whatsappOrder.whatsappPhone, nextStep.question);
+    await whatsappService.sendText(
+      whatsappOrder.whatsappPhone,
+      `Sorry, we don't deliver to pincode ${shippingAddress.pinCode} yet for: ${nonServiceableNames.join(", ")}.\n\n` +
+        `This order has been cancelled — feel free to browse the catalog again for items we can deliver to you.`
+    );
     return;
   }
 
+  whatsappOrder.shippingAddress = shippingAddress;
   whatsappOrder.status = "awaiting_payment_method";
   await whatsappOrder.save();
 
