@@ -1,5 +1,6 @@
 const WhatsappConversation = require("../../../models/whatsappConversation");
 const WhatsappMessage = require("../../../models/whatsappMessage");
+const WhatsappOrder = require("../../../models/whatsappOrder");
 const whatsappService = require("../../../services/whatsappService");
 
 // @desc    List all WhatsApp conversations, most recently active first.
@@ -218,5 +219,40 @@ exports.bulkSend = async (req, res) => {
   } catch (error) {
     console.error("Bulk WhatsApp send error:", error.message);
     return res.status(500).json({ success: false, message: "Failed to send bulk messages" });
+  }
+};
+
+// @desc    List orders placed via the WhatsApp bot (separate from the main
+//          web/app Order collection until payment/COD is confirmed).
+// @route   GET /api/admin/whatsapp/orders
+exports.getWhatsappOrders = async (req, res) => {
+  try {
+    const page = Math.max(1, parseInt(req.query.page) || 1);
+    const limit = Math.max(1, parseInt(req.query.limit) || 10);
+    const { status } = req.query;
+
+    const filter = status && status !== "all" ? { status } : {};
+
+    const [orders, total] = await Promise.all([
+      WhatsappOrder.find(filter)
+        .populate("items.product", "name images")
+        .populate("user", "name phone email")
+        .populate("order", "orderId status")
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      WhatsappOrder.countDocuments(filter)
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      orders,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limit))
+    });
+  } catch (error) {
+    console.error("Get WhatsApp orders error:", error.message);
+    return res.status(500).json({ success: false, message: "Failed to load WhatsApp orders" });
   }
 };

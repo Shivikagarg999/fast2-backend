@@ -9,9 +9,11 @@ const {
   getTemplates,
   createTemplate,
   sendTemplateMessage,
-  bulkSend
+  bulkSend,
+  getWhatsappOrders
 } = require('../../../controllers/admin/whatsapp/whatsappAdminController');
 
+router.get('/orders', adminAuth, getWhatsappOrders);
 router.get('/templates', adminAuth, getTemplates);
 router.post('/templates', adminAuth, createTemplate);
 router.post('/bulk-send', adminAuth, bulkSend);
