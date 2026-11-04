@@ -6,7 +6,10 @@ const whatsappMessageSchema = new mongoose.Schema({
   direction: { type: String, enum: ['in', 'out'], required: true },
   sentBy: { type: String, enum: ['customer', 'bot', 'admin'], required: true },
   body: { type: String, default: '' },
-  type: { type: String, default: 'text' } // text, interactive, order, etc. — for display hints only
+  type: { type: String, default: 'text' }, // text, interactive, order, etc. — for display hints only
+  wamid: { type: String, index: true },
+  deliveryStatus: { type: String, enum: ['sent', 'delivered', 'read', 'failed'], default: undefined },
+  failureReason: { type: String }
 }, { timestamps: true });
 
 whatsappMessageSchema.index({ conversation: 1, createdAt: 1 });

@@ -16,6 +16,7 @@ const whatsappOrderSchema = new mongoose.Schema(
     razorpayPaymentLinkId: { type: String, unique: true, sparse: true },
     paymentLinkUrl: { type: String },
     shippingAddress: {
+      name: { type: String },
       addressLine: { type: String },
       city: { type: String },
       state: { type: String },
@@ -24,7 +25,19 @@ const whatsappOrderSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ["awaiting_address", "awaiting_payment_method", "pending", "paid", "cod_confirmed", "expired", "cancelled"],
+      enum: [
+        "awaiting_name",
+        "awaiting_address_line",
+        "awaiting_city",
+        "awaiting_state",
+        "awaiting_pincode",
+        "awaiting_payment_method",
+        "pending",
+        "paid",
+        "cod_confirmed",
+        "expired",
+        "cancelled"
+      ],
       default: "pending"
     },
     order: { type: mongoose.Schema.Types.ObjectId, ref: "Order", default: null },

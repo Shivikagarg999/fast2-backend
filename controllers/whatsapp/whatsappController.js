@@ -3,7 +3,7 @@ const User = require("../../models/user");
 const Order = require("../../models/order");
 const WhatsappOrder = require("../../models/whatsappOrder");
 const whatsappService = require("../../services/whatsappService");
-const { findOrCreateConversation, recordMessage } = require("../../services/whatsappConversationService");
+const { findOrCreateConversation, recordMessage, recordStatusUpdate } = require("../../services/whatsappConversationService");
 const Razorpay = require("razorpay");
 
 const razorpay = new Razorpay({
@@ -36,24 +36,45 @@ const getOrCreateWhatsappUser = async (waId) => {
   ).select("_id");
 };
 
-const parseAddressText = (text, phone) => {
-  const pincodeMatch = text.match(/\b(\d{6})\b/);
-  if (!pincodeMatch) return null;
+// Collects the delivery address one field at a time instead of trying to
+// parse a single free-text message — customers format addresses too
+// inconsistently for that to reliably produce a valid city/state/pincode.
+const ADDRESS_STEPS = [
+  {
+    status: "awaiting_name",
+    field: "name",
+    question: "What's your full name?",
+    validate: (text) => (text.trim().length >= 2 ? null : "Please share your full name.")
+  },
+  {
+    status: "awaiting_address_line",
+    field: "addressLine",
+    question: "Please share your full address (house/flat no., street, locality):",
+    validate: (text) => (text.trim().length >= 5 ? null : "Please share a more complete address.")
+  },
+  {
+    status: "awaiting_city",
+    field: "city",
+    question: "Which city?",
+    validate: (text) => (text.trim().length >= 2 ? null : "Please enter a valid city name.")
+  },
+  {
+    status: "awaiting_state",
+    field: "state",
+    question: "Which state?",
+    validate: (text) => (text.trim().length >= 2 ? null : "Please enter a valid state name.")
+  },
+  {
+    status: "awaiting_pincode",
+    field: "pinCode",
+    question: "What's your 6-digit delivery pincode?",
+    validate: (text) => (/^\d{6}$/.test(text.trim()) ? null : "That doesn't look like a valid 6-digit pincode — please try again.")
+  }
+];
+const ADDRESS_STEP_STATUSES = ADDRESS_STEPS.map((s) => s.status);
 
-  const withoutPincode = text.replace(pincodeMatch[0], " ");
-  const parts = withoutPincode
-    .split(/[,\n]/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-
-  return {
-    addressLine: text,
-    city: parts.length >= 3 ? parts[parts.length - 2] : "Not Available",
-    state: parts.length >= 2 ? parts[parts.length - 1] : "Not Available",
-    pinCode: pincodeMatch[1],
-    phone
-  };
-};
+const formatAddress = (address) =>
+  `${address.name}\n${address.addressLine}, ${address.city}, ${address.state} - ${address.pinCode}`;
 
 exports.verifyWebhook = (req, res) => {
   const mode = req.query["hub.mode"];
@@ -81,6 +102,18 @@ exports.receiveWebhook = async (req, res) => {
     const entry = req.body?.entry?.[0];
     const change = entry?.changes?.[0];
     const value = change?.value;
+
+    // Delivery receipts for messages we sent (sent/delivered/read/failed) —
+    // this is the only way to catch a template that Meta "accepted" at send
+    // time but never actually delivered (e.g. the recipient hasn't opted in).
+    for (const statusUpdate of value?.statuses || []) {
+      const errorMessage = statusUpdate.errors?.[0]?.title || statusUpdate.errors?.[0]?.message;
+      await recordStatusUpdate(statusUpdate.id, statusUpdate.status, errorMessage);
+      if (statusUpdate.status === "failed") {
+        console.error(`WhatsApp delivery failed for ${statusUpdate.recipient_id}: ${errorMessage}`);
+      }
+    }
+
     const message = value?.messages?.[0];
     if (!message) return;
     const from = message.from;
@@ -128,11 +161,11 @@ exports.receiveWebhook = async (req, res) => {
 
       const awaiting = await WhatsappOrder.findOne({
         whatsappPhone: from,
-        status: "awaiting_address"
+        status: { $in: ADDRESS_STEP_STATUSES }
       }).sort({ createdAt: -1 });
 
       if (awaiting) {
-        await handleAddressReply(awaiting, text);
+        await handleAddressStepReply(awaiting, text);
         return;
       }
 
@@ -202,7 +235,7 @@ const handleCartOrder = async (from, order) => {
       user: user._id,
       status: "awaiting_payment_method"
     });
-    await promptPaymentMethod(from, summary, subtotal);
+    await promptPaymentMethod(whatsappOrder, summary, subtotal);
     return;
   }
 
@@ -211,22 +244,24 @@ const handleCartOrder = async (from, order) => {
     items: resolvedItems,
     subtotal,
     user: user._id,
-    status: "awaiting_address"
+    status: ADDRESS_STEPS[0].status
   });
 
   await whatsappService.sendText(
     from,
     `Your order:\n\n${summary}\n\nTotal: ₹${subtotal}\n\n` +
-      `Please reply with your full delivery address (including 6-digit pincode) to continue.`
+      `Let's get your delivery address.\n\n${ADDRESS_STEPS[0].question}`
   );
 };
 
 // Asks whether to pay online (Razorpay link) or cash on delivery before
-// actually placing/charging the order.
-const promptPaymentMethod = async (to, summary, subtotal) => {
+// actually placing/charging the order. Shows the resolved delivery address
+// back to the customer so they can catch a mistake before paying.
+const promptPaymentMethod = async (whatsappOrder, summary, subtotal) => {
   await whatsappService.sendButtons(
-    to,
-    `Your order:\n\n${summary}\n\nTotal: ₹${subtotal}\n\nHow would you like to pay?`,
+    whatsappOrder.whatsappPhone,
+    `Delivering to:\n${formatAddress(whatsappOrder.shippingAddress)}\n\n` +
+      `Your order:\n\n${summary}\n\nTotal: ₹${subtotal}\n\nHow would you like to pay?`,
     [
       { id: "pay_online", title: "Pay Online" },
       { id: "pay_cod", title: "Cash on Delivery" }
@@ -242,27 +277,40 @@ const getMostRecentAddress = async (userId) => {
     .select("shippingAddress")
     .lean();
   if (!lastOrder?.shippingAddress?.pinCode) return null;
-  const { addressLine, city, state, pinCode, phone } = lastOrder.shippingAddress;
-  return { addressLine, city, state, pinCode, phone };
+  const { name, addressLine, city, state, pinCode, phone } = lastOrder.shippingAddress;
+  return { name, addressLine, city, state, pinCode, phone };
 };
 
-// Customer replied with their address text while a cart was awaiting one.
-const handleAddressReply = async (whatsappOrder, text) => {
-  const shippingAddress = parseAddressText(text, normalizeWaPhone(whatsappOrder.whatsappPhone));
-  if (!shippingAddress) {
-    await whatsappService.sendText(
-      whatsappOrder.whatsappPhone,
-      "I couldn't find a 6-digit pincode in that — please resend your full address including the pincode."
-    );
+// Customer replied while an address field was awaiting an answer — validates
+// it, saves it, and either asks the next question or (once all fields are in)
+// moves on to the payment-method prompt.
+const handleAddressStepReply = async (whatsappOrder, text) => {
+  const stepIndex = ADDRESS_STEPS.findIndex((s) => s.status === whatsappOrder.status);
+  const step = ADDRESS_STEPS[stepIndex];
+
+  const validationError = step.validate(text);
+  if (validationError) {
+    await whatsappService.sendText(whatsappOrder.whatsappPhone, validationError);
     return;
   }
 
-  whatsappOrder.shippingAddress = shippingAddress;
+  whatsappOrder.shippingAddress = whatsappOrder.shippingAddress || {};
+  whatsappOrder.shippingAddress[step.field] = text.trim();
+  whatsappOrder.shippingAddress.phone = normalizeWaPhone(whatsappOrder.whatsappPhone);
+
+  const nextStep = ADDRESS_STEPS[stepIndex + 1];
+  if (nextStep) {
+    whatsappOrder.status = nextStep.status;
+    await whatsappOrder.save();
+    await whatsappService.sendText(whatsappOrder.whatsappPhone, nextStep.question);
+    return;
+  }
+
   whatsappOrder.status = "awaiting_payment_method";
   await whatsappOrder.save();
 
   const summary = await buildSummaryFromItems(whatsappOrder.items);
-  await promptPaymentMethod(whatsappOrder.whatsappPhone, summary, whatsappOrder.subtotal);
+  await promptPaymentMethod(whatsappOrder, summary, whatsappOrder.subtotal);
 };
 
 const createPaymentLinkAndNotify = async (whatsappOrder) => {

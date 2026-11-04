@@ -21,11 +21,11 @@ const wabaUrl = (path) =>
 // Logs every outbound message into the conversation record the admin inbox reads —
 // regardless of whether the bot or an admin sent it. Never throws: a logging
 // failure must not block the actual WhatsApp send.
-const logOutbound = async (to, body, sentBy) => {
+const logOutbound = async (to, body, sentBy, wamid) => {
   try {
     const { findOrCreateConversation, recordMessage } = require("./whatsappConversationService");
     const conversation = await findOrCreateConversation(to);
-    await recordMessage(conversation, { direction: "out", sentBy, body });
+    await recordMessage(conversation, { direction: "out", sentBy, body, wamid });
   } catch (error) {
     console.error("WhatsApp outbound logging error:", error.message);
   }
@@ -48,7 +48,7 @@ const send = async (payload, { sentBy = "bot", logBody } = {}) => {
       { messaging_product: "whatsapp", ...payload },
       { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } }
     );
-    if (payload.to) await logOutbound(payload.to, logBody ?? "", sentBy);
+    if (payload.to) await logOutbound(payload.to, logBody ?? "", sentBy, data?.messages?.[0]?.id);
     return { ok: true, data, error: null, details: null };
   } catch (error) {
     const metaMessage = error.response?.data?.error?.message;

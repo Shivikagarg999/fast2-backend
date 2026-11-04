@@ -18,14 +18,15 @@ const findOrCreateConversation = async (phone, customerName) => {
 };
 
 // direction: 'in' | 'out', sentBy: 'customer' | 'bot' | 'admin'
-const recordMessage = async (conversation, { direction, sentBy, body, type = "text" }) => {
-  await WhatsappMessage.create({
+const recordMessage = async (conversation, { direction, sentBy, body, type = "text", wamid }) => {
+  const message = await WhatsappMessage.create({
     conversation: conversation._id,
     phone: conversation.phone,
     direction,
     sentBy,
     body,
-    type
+    type,
+    ...(wamid && { wamid })
   });
 
   conversation.lastMessageAt = new Date();
@@ -34,6 +35,19 @@ const recordMessage = async (conversation, { direction, sentBy, body, type = "te
     conversation.unreadByAdmin = (conversation.unreadByAdmin || 0) + 1;
   }
   await conversation.save();
+
+  return message;
 };
 
-module.exports = { findOrCreateConversation, recordMessage };
+// Meta reports delivery outcomes asynchronously via the webhook's "statuses"
+// array, keyed by the wamid returned when we sent the message — this is the
+// only way to find out a template that was "accepted" actually failed to
+// reach the customer (e.g. they haven't opted in, or it's outside policy).
+const recordStatusUpdate = async (wamid, status, errorMessage) => {
+  if (!wamid || !["sent", "delivered", "read", "failed"].includes(status)) return;
+  const update = { deliveryStatus: status };
+  if (status === "failed" && errorMessage) update.failureReason = errorMessage;
+  await WhatsappMessage.updateOne({ wamid }, { $set: update });
+};
+
+module.exports = { findOrCreateConversation, recordMessage, recordStatusUpdate };
