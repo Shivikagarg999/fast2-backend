@@ -224,21 +224,6 @@ const handleCartOrder = async (from, order) => {
   const user = await getOrCreateWhatsappUser(from);
   const summary = summaryLines.join("\n");
 
-  const knownAddress = await getMostRecentAddress(user._id);
-
-  if (knownAddress) {
-    const whatsappOrder = await WhatsappOrder.create({
-      whatsappPhone: from,
-      items: resolvedItems,
-      subtotal,
-      shippingAddress: knownAddress,
-      user: user._id,
-      status: "awaiting_payment_method"
-    });
-    await promptPaymentMethod(whatsappOrder, summary, subtotal);
-    return;
-  }
-
   await WhatsappOrder.create({
     whatsappPhone: from,
     items: resolvedItems,
@@ -267,18 +252,6 @@ const promptPaymentMethod = async (whatsappOrder, summary, subtotal) => {
       { id: "pay_cod", title: "Cash on Delivery" }
     ]
   );
-};
-
-// Reuses the address from this user's most recent order — most WhatsApp
-// shoppers will already be existing app/web customers.
-const getMostRecentAddress = async (userId) => {
-  const lastOrder = await Order.findOne({ user: userId, "shippingAddress.pinCode": { $exists: true } })
-    .sort({ createdAt: -1 })
-    .select("shippingAddress")
-    .lean();
-  if (!lastOrder?.shippingAddress?.pinCode) return null;
-  const { name, addressLine, city, state, pinCode, phone } = lastOrder.shippingAddress;
-  return { name, addressLine, city, state, pinCode, phone };
 };
 
 // Customer replied while an address field was awaiting an answer — validates
