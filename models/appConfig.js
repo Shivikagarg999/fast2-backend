@@ -47,6 +47,15 @@ const appConfigSchema = new mongoose.Schema({
     chargeType: { type: String, enum: ['flat', 'per_km'], required: true },
     rate: { type: Number, required: true, min: 0 }
   }],
+  // Distance-based driver payout (driver app only). Same shape/semantics as
+  // deliverySlabs; a trip past the last band's toKm is paid at that band's
+  // rate rather than rejected (a driver who already has the order must be paid).
+  driverPayoutSlabs: [{
+    fromKm: { type: Number, required: true, min: 0 },
+    toKm: { type: Number, required: true, min: 0 },
+    chargeType: { type: String, enum: ['flat', 'per_km'], required: true },
+    rate: { type: Number, required: true, min: 0 }
+  }],
   // Mobile app home header background gradient (two hex colours). Lets admin
   // re-theme the app's header without an app release, e.g. for a festival/sale
   // look. Unset = app keeps its built-in default gradient.

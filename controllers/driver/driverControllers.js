@@ -6,7 +6,7 @@ const { sendNotification } = require("../../services/notificationService");
 const { notifyOrderTaken } = require("../../services/driverNotificationService");
 const { emitOrderTaken, serverLog, getIo } = require("../../socketManager");
 const { formatOrderAmounts, formatOrdersAmounts } = require("../../utils/orderAmounts");
-const { FLAT_DELIVERY_EARNING } = require("../../utils/driverEarning");
+const { calculateDriverPayout, getOrderDistanceKm, getDriverPayoutSlabs, payoutFromSlabsOrDistance } = require("../../utils/driverEarning");
 
 const findOrderByIdOrCustomId = (orderId) => {
   const query = mongoose.Types.ObjectId.isValid(orderId)
@@ -68,13 +68,22 @@ exports.getPendingOrders = async (req, res) => {
       })
       .sort({ createdAt: -1 });
 
+    const payoutSlabs = await getDriverPayoutSlabs();
+    const ordersWithPayout = formatOrdersAmounts(pendingOrders).map((order) => {
+      const distanceKm = getOrderDistanceKm(order);
+      return {
+        ...order,
+        driverEarning: payoutFromSlabsOrDistance(distanceKm, payoutSlabs),
+        distanceKm,
+        pickupAddress: order.seller?.shop?.address || null,
+        dropAddress: order.shippingAddress || null,
+      };
+    });
+
     res.status(200).json({
       success: true,
       count: pendingOrders.length,
-      data: formatOrdersAmounts(pendingOrders).map((order) => ({
-        ...order,
-        driverEarning: FLAT_DELIVERY_EARNING,
-      })),
+      data: ordersWithPayout,
     });
   } catch (error) {
     console.error("Error fetching pending orders:", error);
@@ -98,7 +107,11 @@ exports.acceptOrder = async (req, res) => {
       return res.status(400).json({ success: false, message: "Driver must be online to accept an order" });
     }
 
-    const order = await findOrderByIdOrCustomId(orderId);
+    const order = await findOrderByIdOrCustomId(orderId).populate({
+      path: "seller",
+      select: "shop",
+      populate: { path: "shop", select: "address" }
+    });
     if (!order) {
       return res.status(404).json({ success: false, message: "Order not found" });
     }
@@ -117,6 +130,11 @@ exports.acceptOrder = async (req, res) => {
     if (!order.finalAmount) {
       order.finalAmount = order.total;
     }
+
+    // Locked in now so later admin rate changes never affect what this driver
+    // was already promised for this specific delivery.
+    order.driverPayoutDistanceKm = getOrderDistanceKm(order);
+    order.driverPayout = await calculateDriverPayout(order.driverPayoutDistanceKm);
 
     await order.save();
 
@@ -139,7 +157,9 @@ exports.acceptOrder = async (req, res) => {
       data: {
         orderId: order.orderId,
         orderCustomId: order.orderId,
-        driverId: driver._id
+        driverId: driver._id,
+        driverPayout: order.driverPayout,
+        distanceKm: order.driverPayoutDistanceKm
       }
     });
   } catch (error) {
@@ -373,7 +393,9 @@ exports.markOrderDelivered = async (req, res) => {
       );
     }
 
-    const deliveryEarning = FLAT_DELIVERY_EARNING;
+    // Legacy orders accepted before driverPayout was tracked fall back to a
+    // fresh calculation (best effort — distance may be unavailable).
+    const deliveryEarning = order.driverPayout ?? await calculateDriverPayout(getOrderDistanceKm(order));
     const driverEarning = new DriverEarning({
       driver: driver._id,
       order: order._id,

@@ -65,6 +65,16 @@ const orderSchema = new mongoose.Schema(
       type: Date,
       default: null
     },
+    // Locked in at accept time (not recomputed at delivery) so a mid-delivery
+    // admin rate change never changes what a driver was promised for this order.
+    driverPayout: {
+      type: Number,
+      default: null
+    },
+    driverPayoutDistanceKm: {
+      type: Number,
+      default: null
+    },
     driverAssignedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Admin",

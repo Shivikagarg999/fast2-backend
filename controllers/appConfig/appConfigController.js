@@ -20,6 +20,7 @@ exports.getAppConfig = async (req, res) => {
         productServiceRadiusKm: 5,
         freeDeliveryThreshold: 199,
         deliverySlabs: [],
+        driverPayoutSlabs: [],
         headerGradientStart: '',
         headerGradientEnd: '',
         homeAnimationUrl: ''
@@ -35,6 +36,7 @@ exports.getAppConfig = async (req, res) => {
       productServiceRadiusKm: config.productServiceRadiusKm || 5,
       freeDeliveryThreshold: config.freeDeliveryThreshold ?? 199,
       deliverySlabs: config.deliverySlabs || [],
+      driverPayoutSlabs: config.driverPayoutSlabs || [],
       homeAnimationUrl: config.homeAnimationUrl || '',
       headerGradientStart: config.headerGradientStart || '',
       headerGradientEnd: config.headerGradientEnd || ''
@@ -45,12 +47,51 @@ exports.getAppConfig = async (req, res) => {
   }
 };
 
+// Shared by deliverySlabs (customer delivery charge) and driverPayoutSlabs
+// (driver payout) — both are the same fromKm/toKm/chargeType/rate shape.
+// Returns the normalized, sorted array, or throws with a user-facing message.
+const normalizeSlabs = (slabs, fieldName) => {
+  if (!Array.isArray(slabs) || !slabs.length) {
+    throw new Error(`${fieldName} must be a non-empty array`);
+  }
+
+  const normalized = slabs
+    .map((slab) => ({
+      fromKm: Number(slab.fromKm),
+      toKm: Number(slab.toKm),
+      chargeType: slab.chargeType,
+      rate: Number(slab.rate)
+    }))
+    .sort((a, b) => a.fromKm - b.fromKm);
+
+  for (let i = 0; i < normalized.length; i++) {
+    const slab = normalized[i];
+    if (!Number.isFinite(slab.fromKm) || !Number.isFinite(slab.toKm) || slab.toKm <= slab.fromKm) {
+      throw new Error('Each slab must have toKm greater than fromKm');
+    }
+    if (!['flat', 'per_km'].includes(slab.chargeType)) {
+      throw new Error("Each slab's chargeType must be 'flat' or 'per_km'");
+    }
+    if (!Number.isFinite(slab.rate) || slab.rate < 0) {
+      throw new Error('Each slab rate must be 0 or greater');
+    }
+    if (i === 0 && slab.fromKm !== 0) {
+      throw new Error('The first slab must start at 0 km');
+    }
+    if (i > 0 && slab.fromKm !== normalized[i - 1].toKm) {
+      throw new Error('Slabs must be contiguous with no gaps or overlaps');
+    }
+  }
+
+  return normalized;
+};
+
 // @desc    Create or update the force-update config for an app
 // @route   PUT /api/admin/app-config
 // @access  Private (admin)
 exports.upsertAppConfig = async (req, res) => {
   try {
-    const { app, minVersionCode, latestVersionCode, playStoreUrl, updateMessage, productServiceRadiusKm, freeDeliveryThreshold, deliverySlabs, headerGradientStart, headerGradientEnd } = req.body;
+    const { app, minVersionCode, latestVersionCode, playStoreUrl, updateMessage, productServiceRadiusKm, freeDeliveryThreshold, deliverySlabs, driverPayoutSlabs, headerGradientStart, headerGradientEnd } = req.body;
 
     if (!app || !['customer', 'driver'].includes(app)) {
       return res.status(400).json({ success: false, error: "app must be 'customer' or 'driver'" });
@@ -73,38 +114,12 @@ exports.upsertAppConfig = async (req, res) => {
     }
 
     let normalizedSlabs;
-    if (deliverySlabs !== undefined) {
-      if (!Array.isArray(deliverySlabs) || !deliverySlabs.length) {
-        return res.status(400).json({ success: false, error: 'deliverySlabs must be a non-empty array' });
-      }
-
-      normalizedSlabs = deliverySlabs
-        .map((slab) => ({
-          fromKm: Number(slab.fromKm),
-          toKm: Number(slab.toKm),
-          chargeType: slab.chargeType,
-          rate: Number(slab.rate)
-        }))
-        .sort((a, b) => a.fromKm - b.fromKm);
-
-      for (let i = 0; i < normalizedSlabs.length; i++) {
-        const slab = normalizedSlabs[i];
-        if (!Number.isFinite(slab.fromKm) || !Number.isFinite(slab.toKm) || slab.toKm <= slab.fromKm) {
-          return res.status(400).json({ success: false, error: 'Each slab must have toKm greater than fromKm' });
-        }
-        if (!['flat', 'per_km'].includes(slab.chargeType)) {
-          return res.status(400).json({ success: false, error: "Each slab's chargeType must be 'flat' or 'per_km'" });
-        }
-        if (!Number.isFinite(slab.rate) || slab.rate < 0) {
-          return res.status(400).json({ success: false, error: 'Each slab rate must be 0 or greater' });
-        }
-        if (i === 0 && slab.fromKm !== 0) {
-          return res.status(400).json({ success: false, error: 'The first slab must start at 0 km' });
-        }
-        if (i > 0 && slab.fromKm !== normalizedSlabs[i - 1].toKm) {
-          return res.status(400).json({ success: false, error: 'Slabs must be contiguous with no gaps or overlaps' });
-        }
-      }
+    let normalizedPayoutSlabs;
+    try {
+      if (deliverySlabs !== undefined) normalizedSlabs = normalizeSlabs(deliverySlabs, 'deliverySlabs');
+      if (driverPayoutSlabs !== undefined) normalizedPayoutSlabs = normalizeSlabs(driverPayoutSlabs, 'driverPayoutSlabs');
+    } catch (validationError) {
+      return res.status(400).json({ success: false, error: validationError.message });
     }
 
     const config = await AppConfig.findOneAndUpdate(
@@ -121,6 +136,7 @@ exports.upsertAppConfig = async (req, res) => {
           deliverySlabs: normalizedSlabs,
           productServiceRadiusKm: normalizedSlabs[normalizedSlabs.length - 1].toKm
         }),
+        ...(normalizedPayoutSlabs !== undefined && { driverPayoutSlabs: normalizedPayoutSlabs }),
         ...(headerGradientStart !== undefined && { headerGradientStart }),
         ...(headerGradientEnd !== undefined && { headerGradientEnd })
       },
