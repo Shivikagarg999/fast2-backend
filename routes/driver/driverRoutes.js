@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const {
   getPendingOrders,
+  getOrderPreview,
   acceptOrder,
   declineOrder,
   toggleAvailability,
@@ -20,6 +21,7 @@ const {
 const { authenticateToken } = require("../../middlewares/driverAuth");
 
 router.get("/orders/pending", authenticateToken, getPendingOrders);
+router.get("/orders/:orderId/preview", authenticateToken, getOrderPreview);
 
 router.get("/orders/ongoing", authenticateToken, getOngoingOrders);
 

@@ -94,6 +94,50 @@ exports.getPendingOrders = async (req, res) => {
   }
 };
 
+// @desc    Lightweight single-order preview for the ring/incoming-order
+//          screen — payout, pickup/drop address and distance, before the
+//          driver has accepted (so any online driver can look it up).
+// @route   GET /api/driver/orders/:orderId/preview
+exports.getOrderPreview = async (req, res) => {
+  try {
+    const order = await findOrderByIdOrCustomId(req.params.orderId)
+      .select("orderId subtotal total items shippingAddress seller")
+      .populate({
+        path: "seller",
+        select: "shop",
+        populate: { path: "shop", select: "shopName address" }
+      })
+      .populate("items.product", "name")
+      .lean();
+
+    if (!order) {
+      return res.status(404).json({ success: false, message: "Order not found" });
+    }
+
+    const distanceKm = getOrderDistanceKm(order);
+    const driverEarning = await calculateDriverPayout(distanceKm);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        orderId: order._id,
+        orderCustomId: order.orderId,
+        itemCount: order.items?.length || 0,
+        total: order.total,
+        driverEarning,
+        distanceKm,
+        pickupAddress: order.seller?.shop
+          ? { name: order.seller.shop.shopName, ...order.seller.shop.address }
+          : null,
+        dropAddress: order.shippingAddress || null
+      }
+    });
+  } catch (error) {
+    console.error("Error fetching order preview:", error);
+    res.status(500).json({ success: false, message: "Internal Server Error" });
+  }
+};
+
 exports.acceptOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
