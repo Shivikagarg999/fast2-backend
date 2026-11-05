@@ -4,6 +4,7 @@ const Order = require("../../models/order");
 const WhatsappOrder = require("../../models/whatsappOrder");
 const whatsappService = require("../../services/whatsappService");
 const { findOrCreateConversation, recordMessage, recordStatusUpdate } = require("../../services/whatsappConversationService");
+const { calculateOrderPricing } = require("../../utils/orderPricing");
 const Razorpay = require("razorpay");
 
 const razorpay = new Razorpay({
@@ -65,6 +66,18 @@ const parseFullAddress = (text) => {
 
 const formatAddress = (address) =>
   `${address.name}\n${address.addressLine}, ${address.city}, ${address.state} - ${address.pinCode}`;
+
+// Same breakdown style as the web/app checkout receipt — delivery/GST/handling
+// only show up as separate lines when non-zero, so a free-delivery order still
+// reads cleanly as just "Subtotal" + "Total".
+const buildBillingText = ({ subtotal, deliveryCharges, handlingCharge, totalGst, finalAmount }) => {
+  const lines = [`Subtotal: ₹${subtotal}`];
+  if (deliveryCharges > 0) lines.push(`Delivery: ₹${deliveryCharges}`);
+  if (handlingCharge > 0) lines.push(`Handling: ₹${handlingCharge}`);
+  if (totalGst > 0) lines.push(`GST: ₹${totalGst}`);
+  lines.push(`Total: ₹${finalAmount}`);
+  return lines.join("\n");
+};
 
 // Mirrors the web/app checkout's per-product serviceablePincodes check —
 // an empty list on a product means it ships everywhere.
@@ -214,12 +227,14 @@ const handleCartOrder = async (from, order) => {
   }
 
   const productIds = items.map((i) => i.product_retailer_id);
-  const products = await Product.find({ _id: { $in: productIds }, isActive: true }).select("name price stockStatus");
+  const products = await Product.find({ _id: { $in: productIds }, isActive: true })
+    .populate("seller")
+    .populate("shop")
+    .populate("category");
   const productMap = new Map(products.map((p) => [p._id.toString(), p]));
 
   const resolvedItems = [];
   const summaryLines = [];
-  let subtotal = 0;
   const unavailable = [];
 
   for (const item of items) {
@@ -230,7 +245,6 @@ const handleCartOrder = async (from, order) => {
     }
     const quantity = Number(item.quantity) || 1;
     const lineTotal = product.price * quantity;
-    subtotal += lineTotal;
     resolvedItems.push({ product: product._id, quantity, price: product.price });
     summaryLines.push(`${quantity} x ${product.name} — ₹${lineTotal}`);
   }
@@ -247,28 +261,44 @@ const handleCartOrder = async (from, order) => {
   const user = await getOrCreateWhatsappUser(from);
   const summary = summaryLines.join("\n");
 
+  // Same delivery/GST/handling math the web and app checkouts use — no
+  // customer lat/lng here (address is free text, not geocoded), so distance
+  // slabs fall back to each product's flat delivery charge, same as the app
+  // does when a customer hasn't shared their location either.
+  const pricing = await calculateOrderPricing({
+    items: resolvedItems,
+    products,
+    paymentMethod: "cod",
+    userId: user._id
+  });
+
   await WhatsappOrder.create({
     whatsappPhone: from,
     items: resolvedItems,
-    subtotal,
+    subtotal: pricing.subtotal,
+    deliveryCharges: pricing.deliveryCharges,
+    handlingCharge: pricing.handlingCharge,
+    totalGst: pricing.totalGst,
+    total: pricing.total,
+    finalAmount: pricing.finalAmount,
     user: user._id,
     status: "awaiting_address"
   });
 
   await whatsappService.sendText(
     from,
-    `Your order:\n\n${summary}\n\nTotal: ₹${subtotal}\n\n${ADDRESS_PROMPT}`
+    `Your order:\n\n${summary}\n\n${buildBillingText(pricing)}\n\n${ADDRESS_PROMPT}`
   );
 };
 
 // Asks whether to pay online (Razorpay link) or cash on delivery before
 // actually placing/charging the order. Shows the resolved delivery address
 // back to the customer so they can catch a mistake before paying.
-const promptPaymentMethod = async (whatsappOrder, summary, subtotal) => {
+const promptPaymentMethod = async (whatsappOrder, summary) => {
   await whatsappService.sendButtons(
     whatsappOrder.whatsappPhone,
     `Delivering to:\n${formatAddress(whatsappOrder.shippingAddress)}\n\n` +
-      `Your order:\n\n${summary}\n\nTotal: ₹${subtotal}\n\nHow would you like to pay?`,
+      `Your order:\n\n${summary}\n\n${buildBillingText(whatsappOrder)}\n\nHow would you like to pay?`,
     [
       { id: "pay_online", title: "Pay Online" },
       { id: "pay_cod", title: "Cash on Delivery" }
@@ -308,14 +338,14 @@ const handleAddressReply = async (whatsappOrder, text) => {
   await whatsappOrder.save();
 
   const summary = await buildSummaryFromItems(whatsappOrder.items);
-  await promptPaymentMethod(whatsappOrder, summary, whatsappOrder.subtotal);
+  await promptPaymentMethod(whatsappOrder, summary);
 };
 
 const createPaymentLinkAndNotify = async (whatsappOrder) => {
   const phone = normalizeWaPhone(whatsappOrder.whatsappPhone);
 
   const paymentLink = await razorpay.paymentLink.create({
-    amount: Math.round(whatsappOrder.subtotal * 100), // paise
+    amount: Math.round(whatsappOrder.finalAmount * 100), // paise
     currency: "INR",
     description: `GMKart order via WhatsApp (${whatsappOrder.items.length} item(s))`,
     customer: { contact: `+91${phone}` },
@@ -333,7 +363,7 @@ const createPaymentLinkAndNotify = async (whatsappOrder) => {
   await whatsappService.sendPaymentLink(
     whatsappOrder.whatsappPhone,
     summary,
-    whatsappOrder.subtotal,
+    whatsappOrder.finalAmount,
     paymentLink.short_url
   );
 };
@@ -387,11 +417,11 @@ const createOrderForWhatsapp = async (whatsappOrder, { paymentMethod, paymentSta
     seller: primarySellerProduct?.seller,
     items: whatsappOrder.items,
     subtotal: whatsappOrder.subtotal,
-    total: whatsappOrder.subtotal,
-    finalAmount: whatsappOrder.subtotal,
-    deliveryCharges: 0,
-    handlingCharge: 0,
-    totalGst: 0,
+    total: whatsappOrder.total,
+    finalAmount: whatsappOrder.finalAmount,
+    deliveryCharges: whatsappOrder.deliveryCharges,
+    handlingCharge: whatsappOrder.handlingCharge,
+    totalGst: whatsappOrder.totalGst,
     shippingAddress: whatsappOrder.shippingAddress,
     paymentMethod,
     paymentStatus,

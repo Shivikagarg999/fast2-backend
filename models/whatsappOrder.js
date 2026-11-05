@@ -13,6 +13,11 @@ const whatsappOrderSchema = new mongoose.Schema(
       price: { type: Number, required: true }
     }],
     subtotal: { type: Number, required: true },
+    deliveryCharges: { type: Number, default: 0 },
+    handlingCharge: { type: Number, default: 0 },
+    totalGst: { type: Number, default: 0 },
+    total: { type: Number, default: 0 },
+    finalAmount: { type: Number, default: 0 },
     razorpayPaymentLinkId: { type: String, unique: true, sparse: true },
     paymentLinkUrl: { type: String },
     shippingAddress: {
