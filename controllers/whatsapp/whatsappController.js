@@ -100,9 +100,14 @@ exports.verifyWebhook = (req, res) => {
 const previewForInbound = (message) => {
   if (message.type === "order") return `🛒 Sent an order (${message.order?.product_items?.length || 0} items)`;
   if (message.type === "interactive") return message.interactive?.button_reply?.title || "Tapped a button";
+  if (message.type === "button") return message.button?.text || "Tapped a template button";
   if (message.type === "text") return message.text?.body || "";
   return `[${message.type}]`;
 };
+
+// Case-insensitive match so we're not relying on a Meta-generated payload
+// string we don't control — just what the button is labelled.
+const isCatalogButtonText = (text) => /view\s*catalog/i.test(text || "");
 
 exports.receiveWebhook = async (req, res) => {
   res.sendStatus(200);
@@ -161,6 +166,15 @@ exports.receiveWebhook = async (req, res) => {
             await confirmCodOrder(whatsappOrder);
           }
         }
+      }
+      return;
+    }
+
+    // Quick-reply buttons tapped from a message *template* (as opposed to one
+    // of our own interactive messages) arrive as this separate type.
+    if (message.type === "button") {
+      if (isCatalogButtonText(message.button?.text)) {
+        await whatsappService.sendCatalogPrompt(from, "Browse our products and add what you'd like to your cart:");
       }
       return;
     }
