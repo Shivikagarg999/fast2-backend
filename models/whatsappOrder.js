@@ -26,7 +26,9 @@ const whatsappOrderSchema = new mongoose.Schema(
       city: { type: String },
       state: { type: String },
       pinCode: { type: String },
-      phone: { type: String }
+      phone: { type: String },
+      lat: { type: Number },
+      lng: { type: Number }
     },
     status: {
       type: String,

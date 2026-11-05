@@ -5,6 +5,7 @@ const WhatsappOrder = require("../../models/whatsappOrder");
 const whatsappService = require("../../services/whatsappService");
 const { findOrCreateConversation, recordMessage, recordStatusUpdate } = require("../../services/whatsappConversationService");
 const { calculateOrderPricing } = require("../../utils/orderPricing");
+const { resolvePincode } = require("../../utils/mapbox");
 const Razorpay = require("razorpay");
 
 const razorpay = new Razorpay({
@@ -260,34 +261,22 @@ const handleCartOrder = async (from, order) => {
 
   const user = await getOrCreateWhatsappUser(from);
   const summary = summaryLines.join("\n");
+  const subtotal = resolvedItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
 
-  // Same delivery/GST/handling math the web and app checkouts use — no
-  // customer lat/lng here (address is free text, not geocoded), so distance
-  // slabs fall back to each product's flat delivery charge, same as the app
-  // does when a customer hasn't shared their location either.
-  const pricing = await calculateOrderPricing({
-    items: resolvedItems,
-    products,
-    paymentMethod: "cod",
-    userId: user._id
-  });
-
+  // Delivery charge depends on the customer's location, which we only get
+  // once they've shared their pincode — final billing (delivery/handling/GST)
+  // is calculated in handleAddressReply once that's in.
   await WhatsappOrder.create({
     whatsappPhone: from,
     items: resolvedItems,
-    subtotal: pricing.subtotal,
-    deliveryCharges: pricing.deliveryCharges,
-    handlingCharge: pricing.handlingCharge,
-    totalGst: pricing.totalGst,
-    total: pricing.total,
-    finalAmount: pricing.finalAmount,
+    subtotal,
     user: user._id,
     status: "awaiting_address"
   });
 
   await whatsappService.sendText(
     from,
-    `Your order:\n\n${summary}\n\n${buildBillingText(pricing)}\n\n${ADDRESS_PROMPT}`
+    `Your order:\n\n${summary}\n\nSubtotal: ₹${subtotal}\n(delivery, handling and GST added after your address)\n\n${ADDRESS_PROMPT}`
   );
 };
 
@@ -333,7 +322,37 @@ const handleAddressReply = async (whatsappOrder, text) => {
     return;
   }
 
+  // Resolve the pincode to coordinates (not the free-text address — place
+  // names repeat across states, a pincode doesn't) so delivery charge uses
+  // the real distance-based slabs instead of falling back to a flat rate.
+  const coords = await resolvePincode(shippingAddress.pinCode);
+  if (coords) {
+    shippingAddress.lat = coords.lat;
+    shippingAddress.lng = coords.lng;
+  }
+
   whatsappOrder.shippingAddress = shippingAddress;
+
+  const products = await Product.find({ _id: { $in: whatsappOrder.items.map((i) => i.product) } })
+    .populate("seller")
+    .populate("shop")
+    .populate("category");
+
+  const pricing = await calculateOrderPricing({
+    items: whatsappOrder.items,
+    products,
+    paymentMethod: "cod",
+    userId: whatsappOrder.user,
+    customerLat: coords?.lat,
+    customerLng: coords?.lng
+  });
+
+  whatsappOrder.subtotal = pricing.subtotal;
+  whatsappOrder.deliveryCharges = pricing.deliveryCharges;
+  whatsappOrder.handlingCharge = pricing.handlingCharge;
+  whatsappOrder.totalGst = pricing.totalGst;
+  whatsappOrder.total = pricing.total;
+  whatsappOrder.finalAmount = pricing.finalAmount;
   whatsappOrder.status = "awaiting_payment_method";
   await whatsappOrder.save();
 
