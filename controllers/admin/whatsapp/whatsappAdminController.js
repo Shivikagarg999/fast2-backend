@@ -120,19 +120,39 @@ exports.getTemplates = async (req, res) => {
 // @route   POST /api/admin/whatsapp/templates
 exports.createTemplate = async (req, res) => {
   try {
-    const { name, category, language, bodyText } = req.body;
+    const { name, category, language, bodyText, buttons } = req.body;
     if (!name || !category || !language || !bodyText) {
       return res.status(400).json({ success: false, message: "name, category, language and bodyText are all required" });
     }
+
+    let normalizedButtons;
+    if (buttons !== undefined) {
+      if (!Array.isArray(buttons) || buttons.length > 3) {
+        return res.status(400).json({ success: false, message: "buttons must be an array of at most 3" });
+      }
+      normalizedButtons = buttons.map((b) => {
+        if (!["QUICK_REPLY", "URL"].includes(b.type)) {
+          throw new Error("Each button's type must be 'QUICK_REPLY' or 'URL'");
+        }
+        if (!b.text?.trim()) throw new Error("Each button needs text");
+        if (b.type === "URL" && !/^https?:\/\//.test(b.url || "")) {
+          throw new Error("URL buttons need a valid http(s) URL");
+        }
+        return b.type === "URL"
+          ? { type: "URL", text: b.text.trim(), url: b.url.trim() }
+          : { type: "QUICK_REPLY", text: b.text.trim() };
+      });
+    }
+
     // Meta requires lowercase, underscore-only template names.
     const normalizedName = name.trim().toLowerCase().replace(/[^a-z0-9_]/g, "_");
 
-    const result = await whatsappService.createTemplate({ name: normalizedName, category, language, bodyText });
+    const result = await whatsappService.createTemplate({ name: normalizedName, category, language, bodyText, buttons: normalizedButtons });
     return res.status(201).json({ success: true, message: "Template submitted for approval", data: result });
   } catch (error) {
     const metaMessage = error.response?.data?.error?.message;
     console.error("Create WhatsApp template error:", metaMessage || error.message);
-    return res.status(400).json({ success: false, message: metaMessage || "Failed to create template" });
+    return res.status(400).json({ success: false, message: metaMessage || error.message || "Failed to create template" });
   }
 };
 

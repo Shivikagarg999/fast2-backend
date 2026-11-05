@@ -119,14 +119,22 @@ exports.listTemplates = async () => {
 
 // category: 'MARKETING' | 'UTILITY' | 'AUTHENTICATION'
 // bodyText may contain {{1}}, {{2}}... placeholders, per Meta's template syntax.
-exports.createTemplate = async ({ name, category, language, bodyText }) => {
+// buttons (optional, up to 3): [{ type: 'QUICK_REPLY'|'URL', text, url? }].
+// A QUICK_REPLY button literally named "View Catalog" is handled automatically
+// by the webhook (routes it the same way as the bot's own catalog prompt) —
+// native CATALOG/MPM button types are intentionally not offered here, since
+// those bypass our backend entirely and depend on WhatsApp's own catalog sync.
+exports.createTemplate = async ({ name, category, language, bodyText, buttons }) => {
   const { data } = await axios.post(
     wabaUrl("/message_templates"),
     {
       name,
       category,
       language,
-      components: [{ type: "BODY", text: bodyText }]
+      components: [
+        { type: "BODY", text: bodyText },
+        ...(buttons?.length ? [{ type: "BUTTONS", buttons }] : [])
+      ]
     },
     { headers: { Authorization: `Bearer ${ACCESS_TOKEN}` } }
   );
