@@ -18,6 +18,9 @@ const whatsappOrderSchema = new mongoose.Schema(
     totalGst: { type: Number, default: 0 },
     total: { type: Number, default: 0 },
     finalAmount: { type: Number, default: 0 },
+    couponCode: { type: String, default: null },
+    couponDiscount: { type: Number, default: 0 },
+    couponBenefitType: { type: String, default: null },
     razorpayPaymentLinkId: { type: String, unique: true, sparse: true },
     paymentLinkUrl: { type: String },
     shippingAddress: {
@@ -35,6 +38,7 @@ const whatsappOrderSchema = new mongoose.Schema(
       enum: [
         "awaiting_address",
         "awaiting_payment_method",
+        "awaiting_coupon",
         "pending",
         "paid",
         "cod_confirmed",

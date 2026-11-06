@@ -71,11 +71,12 @@ const formatAddress = (address) =>
 // Same breakdown style as the web/app checkout receipt — delivery/GST/handling
 // only show up as separate lines when non-zero, so a free-delivery order still
 // reads cleanly as just "Subtotal" + "Total".
-const buildBillingText = ({ subtotal, deliveryCharges, handlingCharge, totalGst, finalAmount }) => {
+const buildBillingText = ({ subtotal, deliveryCharges, handlingCharge, totalGst, couponCode, couponDiscount, finalAmount }) => {
   const lines = [`Subtotal: ₹${subtotal}`];
   if (deliveryCharges > 0) lines.push(`Delivery: ₹${deliveryCharges}`);
   if (handlingCharge > 0) lines.push(`Handling: ₹${handlingCharge}`);
   if (totalGst > 0) lines.push(`GST: ₹${totalGst}`);
+  if (couponCode && couponDiscount > 0) lines.push(`Coupon (${couponCode}): -₹${couponDiscount}`);
   lines.push(`Total: ₹${finalAmount}`);
   return lines.join("\n");
 };
@@ -122,6 +123,7 @@ const previewForInbound = (message) => {
 // Case-insensitive match so we're not relying on a Meta-generated payload
 // string we don't control — just what the button is labelled.
 const isCatalogButtonText = (text) => /view\s*catalog/i.test(text || "");
+const isApplyCouponButtonText = (text) => /apply\s*coupon/i.test(text || "");
 
 exports.receiveWebhook = async (req, res) => {
   res.sendStatus(200);
@@ -180,6 +182,8 @@ exports.receiveWebhook = async (req, res) => {
             await confirmCodOrder(whatsappOrder);
           }
         }
+      } else if (replyId === "apply_coupon") {
+        await promptForCoupon(from);
       }
       return;
     }
@@ -189,6 +193,8 @@ exports.receiveWebhook = async (req, res) => {
     if (message.type === "button") {
       if (isCatalogButtonText(message.button?.text)) {
         await whatsappService.sendCatalogPrompt(from, "Browse our products and add what you'd like to your cart:");
+      } else if (isApplyCouponButtonText(message.button?.text)) {
+        await promptForCoupon(from);
       }
       return;
     }
@@ -198,11 +204,15 @@ exports.receiveWebhook = async (req, res) => {
 
       const awaiting = await WhatsappOrder.findOne({
         whatsappPhone: from,
-        status: "awaiting_address"
+        status: { $in: ["awaiting_address", "awaiting_coupon"] }
       }).sort({ createdAt: -1 });
 
-      if (awaiting) {
+      if (awaiting?.status === "awaiting_address") {
         await handleAddressReply(awaiting, text);
+        return;
+      }
+      if (awaiting?.status === "awaiting_coupon") {
+        await handleCouponReply(awaiting, text);
         return;
       }
 
@@ -284,15 +294,85 @@ const handleCartOrder = async (from, order) => {
 // actually placing/charging the order. Shows the resolved delivery address
 // back to the customer so they can catch a mistake before paying.
 const promptPaymentMethod = async (whatsappOrder, summary) => {
+  const buttons = [
+    { id: "pay_online", title: "Pay Online" },
+    { id: "pay_cod", title: "Cash on Delivery" }
+  ];
+  if (!whatsappOrder.couponCode) buttons.push({ id: "apply_coupon", title: "Apply Coupon" });
+
   await whatsappService.sendButtons(
     whatsappOrder.whatsappPhone,
     `Delivering to:\n${formatAddress(whatsappOrder.shippingAddress)}\n\n` +
       `Your order:\n\n${summary}\n\n${buildBillingText(whatsappOrder)}\n\nHow would you like to pay?`,
-    [
-      { id: "pay_online", title: "Pay Online" },
-      { id: "pay_cod", title: "Cash on Delivery" }
-    ]
+    buttons
   );
+};
+
+// Triggered either from the "Apply Coupon" button at the payment-method stage,
+// or from a marketing template's own "Apply Coupon" quick-reply button.
+const promptForCoupon = async (from) => {
+  const whatsappOrder = await WhatsappOrder.findOne({
+    whatsappPhone: from,
+    status: "awaiting_payment_method"
+  }).sort({ createdAt: -1 });
+
+  if (!whatsappOrder) {
+    await whatsappService.sendButtons(
+      from,
+      "Add some products to your cart first, then I'll help you apply a coupon!",
+      [{ id: "browse_catalog", title: "View Catalog" }]
+    );
+    return;
+  }
+
+  whatsappOrder.status = "awaiting_coupon";
+  await whatsappOrder.save();
+  await whatsappService.sendText(from, "Please reply with your coupon code:");
+};
+
+// Customer replied with a coupon code while an order was awaiting one —
+// re-runs the same pricing math with the coupon included, same validation
+// (expiry, per-user limit, min order amount, product scope) as web/app
+// checkout. On any failure, falls back to showing payment options without it
+// rather than leaving the customer stuck.
+const handleCouponReply = async (whatsappOrder, text) => {
+  const products = await Product.find({ _id: { $in: whatsappOrder.items.map((i) => i.product) } })
+    .populate("seller")
+    .populate("shop")
+    .populate("category");
+
+  try {
+    const pricing = await calculateOrderPricing({
+      items: whatsappOrder.items,
+      products,
+      coupon: { code: text.trim() },
+      paymentMethod: "cod",
+      userId: whatsappOrder.user,
+      customerLat: whatsappOrder.shippingAddress?.lat,
+      customerLng: whatsappOrder.shippingAddress?.lng
+    });
+
+    whatsappOrder.subtotal = pricing.subtotal;
+    whatsappOrder.deliveryCharges = pricing.deliveryCharges;
+    whatsappOrder.handlingCharge = pricing.handlingCharge;
+    whatsappOrder.totalGst = pricing.totalGst;
+    whatsappOrder.total = pricing.total;
+    whatsappOrder.finalAmount = pricing.finalAmount;
+    whatsappOrder.couponCode = pricing.appliedCoupon?.code || null;
+    whatsappOrder.couponDiscount = pricing.discount || 0;
+    whatsappOrder.couponBenefitType = pricing.appliedCoupon?.benefitType || null;
+    whatsappOrder.status = "awaiting_payment_method";
+    await whatsappOrder.save();
+
+    await whatsappService.sendText(whatsappOrder.whatsappPhone, `Coupon ${whatsappOrder.couponCode} applied! 🎉`);
+  } catch (error) {
+    whatsappOrder.status = "awaiting_payment_method";
+    await whatsappOrder.save();
+    await whatsappService.sendText(whatsappOrder.whatsappPhone, error.message || "That coupon couldn't be applied.");
+  }
+
+  const summary = await buildSummaryFromItems(whatsappOrder.items);
+  await promptPaymentMethod(whatsappOrder, summary);
 };
 
 // Customer replied with their full address in one message — parses it,
@@ -445,9 +525,17 @@ const createOrderForWhatsapp = async (whatsappOrder, { paymentMethod, paymentSta
     paymentMethod,
     paymentStatus,
     ...(razorpayPaymentId && { razorpayPaymentId }),
+    ...(whatsappOrder.couponCode && {
+      coupon: { code: whatsappOrder.couponCode, discount: whatsappOrder.couponDiscount, benefitType: whatsappOrder.couponBenefitType }
+    }),
     status: paymentStatus === "paid" ? "confirmed" : "pending"
   });
   await order.save();
+
+  if (whatsappOrder.couponCode) {
+    const Coupon = require("../../models/coupon");
+    await Coupon.findOneAndUpdate({ code: whatsappOrder.couponCode }, { $inc: { usedCount: 1 } });
+  }
 
   try {
     const { notifyDriversForOrder, notifySellersForOrder } = require("../order/order");
