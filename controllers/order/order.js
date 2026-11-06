@@ -1132,7 +1132,7 @@ exports.razorpayWebhook = async (req, res) => {
     const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
 
     const shasum = crypto.createHmac('sha256', secret);
-    shasum.update(JSON.stringify(req.body));
+    shasum.update(req.rawBody);
     const digest = shasum.digest('hex');
 
     if (digest !== req.headers['x-razorpay-signature']) {
