@@ -78,6 +78,7 @@ const buildBillingText = ({ subtotal, deliveryCharges, handlingCharge, totalGst,
   if (totalGst > 0) lines.push(`GST: ₹${totalGst}`);
   if (couponCode && couponDiscount > 0) lines.push(`Coupon (${couponCode}): -₹${couponDiscount}`);
   lines.push(`Total: ₹${finalAmount}`);
+  if (couponCode && couponDiscount > 0) lines.push(`You saved ₹${couponDiscount} 🎉`);
   return lines.join("\n");
 };
 
@@ -462,7 +463,7 @@ const createPaymentLinkAndNotify = async (whatsappOrder) => {
   await whatsappService.sendPaymentLink(
     whatsappOrder.whatsappPhone,
     summary,
-    whatsappOrder.finalAmount,
+    buildBillingText(whatsappOrder),
     paymentLink.short_url
   );
 };
@@ -482,7 +483,8 @@ const confirmCodOrder = async (whatsappOrder) => {
 
     await whatsappService.sendText(
       whatsappOrder.whatsappPhone,
-      `Order confirmed! ✅ Your order #${order.orderId} will be delivered — pay cash on delivery.`
+      `Order confirmed! ✅ Your order #${order.orderId} will be delivered — pay cash on delivery.\n\n` +
+        `${await buildSummaryFromItems(whatsappOrder.items)}\n\n${buildBillingText(whatsappOrder)}`
     );
   } catch (error) {
     console.error("confirmCodOrder error:", error.message);
@@ -569,7 +571,8 @@ exports.handleWhatsappPaymentLinkPaid = async (paymentLinkEntity, paymentEntity)
 
     await whatsappService.sendText(
       whatsappOrder.whatsappPhone,
-      `Payment received! ✅ Your order #${order.orderId} has been placed and is being prepared.`
+      `Payment received! ✅ Your order #${order.orderId} has been placed and is being prepared.\n\n` +
+        `${await buildSummaryFromItems(whatsappOrder.items)}\n\n${buildBillingText(whatsappOrder)}`
     );
   } catch (error) {
     console.error("handleWhatsappPaymentLinkPaid error:", error.message);

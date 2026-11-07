@@ -97,10 +97,13 @@ exports.sendCatalogPrompt = (to, bodyText) =>
     }
   }, { logBody: bodyText });
 
-exports.sendPaymentLink = (to, orderSummary, amount, paymentLinkUrl) => {
+// billingText is the full breakdown (subtotal, charges, coupon, total) built
+// by the controller, so the payment message matches what the customer saw
+// when choosing how to pay.
+exports.sendPaymentLink = (to, orderSummary, billingText, paymentLinkUrl) => {
   const body =
     `Your order:\n\n${orderSummary}\n\n` +
-    `Total: ₹${amount}\n\n` +
+    `${billingText}\n\n` +
     `Pay here to confirm your order:\n${paymentLinkUrl}`;
   return send({ to, type: "text", text: { body } }, { logBody: body });
 };
