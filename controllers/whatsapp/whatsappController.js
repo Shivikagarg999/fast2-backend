@@ -140,6 +140,28 @@ const buildFullBill = async (order) => {
   return `${text}\n\n${buildBillingText(order, totalMRP)}`;
 };
 
+// Sent once an order is actually confirmed — paid online, or COD accepted.
+// paymentLabel: "Paid" | "COD".
+const buildOrderConfirmedMessage = (order, paymentLabel) => {
+  const date = new Date().toLocaleDateString("en-GB"); // DD/MM/YYYY
+  return (
+    `🎉 *ORDER CONFIRMED – GMKART.COM* 💚\n\n` +
+    `Hello Dear Customer! 👋\n\n` +
+    `Thank you for choosing GMKart.com! Your order is confirmed. ❤️\n\n` +
+    `🧾 *ORDER DETAILS*\n` +
+    `- 🆔 Order No.: #${order.orderId}\n` +
+    `- 📅 Date: ${date}\n` +
+    `- 💰 Amount: ₹${order.finalAmount}\n` +
+    `- 💳 Payment: ${paymentLabel}\n` +
+    `- ✅ Status: Confirmed\n\n` +
+    `🛒 Your order is being prepared with care.\n\n` +
+    `🚀 *Delivery: 20–45 Minutes*\n\n` +
+    `💡 *Save More!* Schedule your next delivery in advance through the *GMKart* App. 📅\n\n` +
+    `Thank you for shopping with us!\n\n` +
+    `💚 *GMKart.com – Shop Smart. Save More.*`
+  );
+};
+
 // Mirrors the web/app checkout's per-product serviceablePincodes check —
 // an empty list on a product means it ships everywhere.
 const checkServiceability = async (items, pinCode) => {
@@ -538,11 +560,8 @@ const confirmCodOrder = async (whatsappOrder) => {
     whatsappOrder.order = order._id;
     await whatsappOrder.save();
 
-    await whatsappService.sendText(
-      whatsappOrder.whatsappPhone,
-      `Order confirmed! ✅ Your order #${order.orderId} will be delivered — pay cash on delivery.\n\n` +
-        `${await buildFullBill(whatsappOrder)}`
-    );
+    await whatsappService.sendText(whatsappOrder.whatsappPhone, buildOrderConfirmedMessage(order, "COD"));
+    await whatsappService.sendText(whatsappOrder.whatsappPhone, await buildFullBill(whatsappOrder));
   } catch (error) {
     console.error("confirmCodOrder error:", error.message);
   }
@@ -623,11 +642,8 @@ exports.handleWhatsappPaymentLinkPaid = async (paymentLinkEntity, paymentEntity)
     whatsappOrder.order = order._id;
     await whatsappOrder.save();
 
-    await whatsappService.sendText(
-      whatsappOrder.whatsappPhone,
-      `Payment received! ✅ Your order #${order.orderId} has been placed and is being prepared.\n\n` +
-        `${await buildFullBill(whatsappOrder)}`
-    );
+    await whatsappService.sendText(whatsappOrder.whatsappPhone, buildOrderConfirmedMessage(order, "Paid"));
+    await whatsappService.sendText(whatsappOrder.whatsappPhone, await buildFullBill(whatsappOrder));
   } catch (error) {
     console.error("handleWhatsappPaymentLinkPaid error:", error.message);
   }
