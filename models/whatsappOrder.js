@@ -21,6 +21,9 @@ const whatsappOrderSchema = new mongoose.Schema(
     couponCode: { type: String, default: null },
     couponDiscount: { type: Number, default: 0 },
     couponBenefitType: { type: String, default: null },
+    // free_quantity coupons: per-item freebies (shown on the bill and copied to the Order for packing)
+    couponAppliedItems: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    couponFreebieRule: { type: mongoose.Schema.Types.Mixed, default: null },
     razorpayPaymentLinkId: { type: String, unique: true, sparse: true },
     paymentLinkUrl: { type: String },
     shippingAddress: {

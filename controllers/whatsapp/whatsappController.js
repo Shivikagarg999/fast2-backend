@@ -5,6 +5,7 @@ const WhatsappOrder = require("../../models/whatsappOrder");
 const whatsappService = require("../../services/whatsappService");
 const { findOrCreateConversation, recordMessage, recordStatusUpdate } = require("../../services/whatsappConversationService");
 const { calculateOrderPricing } = require("../../utils/orderPricing");
+const { getActiveDiscounts, getEffectivePrice } = require("../../utils/discountHelper");
 const { resolvePincode } = require("../../utils/mapbox");
 const Razorpay = require("razorpay");
 
@@ -68,18 +69,75 @@ const parseFullAddress = (text) => {
 const formatAddress = (address) =>
   `${address.name}\n${address.addressLine}, ${address.city}, ${address.state} - ${address.pinCode}`;
 
-// Same breakdown style as the web/app checkout receipt — delivery/GST/handling
-// only show up as separate lines when non-zero, so a free-delivery order still
-// reads cleanly as just "Subtotal" + "Total".
-const buildBillingText = ({ subtotal, deliveryCharges, handlingCharge, totalGst, couponCode, couponDiscount, finalAmount }) => {
-  const lines = [`Subtotal: ₹${subtotal}`];
-  if (deliveryCharges > 0) lines.push(`Delivery: ₹${deliveryCharges}`);
-  if (handlingCharge > 0) lines.push(`Handling: ₹${handlingCharge}`);
-  if (totalGst > 0) lines.push(`GST: ₹${totalGst}`);
-  if (couponCode && couponDiscount > 0) lines.push(`Coupon (${couponCode}): -₹${couponDiscount}`);
-  lines.push(`Total: ₹${finalAmount}`);
-  if (couponCode && couponDiscount > 0) lines.push(`You saved ₹${couponDiscount} 🎉`);
+const formatMoney = (value) => {
+  const n = Math.round((Number(value) || 0) * 100) / 100;
+  return Number.isInteger(n) ? `${n}` : n.toFixed(2);
+};
+
+// Item lines the way the app cart shows them — selling price, with the MRP
+// struck through (WhatsApp ~strike~) when the product is sold below it.
+// Returns the MRP total too so the bill can show the product discount.
+const buildItemLines = async (items) => {
+  const products = await Product.find({ _id: { $in: items.map((i) => i.product) } })
+    .select("name price oldPrice")
+    .lean();
+  const productMap = new Map(products.map((p) => [p._id.toString(), p]));
+
+  let totalMRP = 0;
+  const lines = items.map((i) => {
+    const product = productMap.get(i.product.toString());
+    const mrp = Math.max(Number(product?.oldPrice) || 0, Number(product?.price) || 0, i.price);
+    totalMRP += mrp * i.quantity;
+    const lineTotal = i.price * i.quantity;
+    const mrpLine = mrp * i.quantity;
+    const strike = mrpLine > lineTotal ? ` ~₹${formatMoney(mrpLine)}~` : "";
+    return `${i.quantity} x ${product?.name || "Item"} — ₹${formatMoney(lineTotal)}${strike}`;
+  });
+
+  return { text: lines.join("\n"), totalMRP };
+};
+
+// Same breakdown as the app cart / invoice: MRP → product discount → item
+// total → delivery (FREE when waived) → handling → GST → coupon → to pay,
+// then a "You saved" line totalling every discount on the order.
+const buildBillingText = (order, totalMRP = order.subtotal) => {
+  const {
+    subtotal, deliveryCharges, handlingCharge, totalGst,
+    couponCode, couponDiscount, couponBenefitType, couponAppliedItems, finalAmount
+  } = order;
+  const productDiscount = Math.max(0, totalMRP - subtotal);
+
+  const lines = ["*Bill Details*"];
+  if (productDiscount > 0) {
+    lines.push(`MRP Total: ₹${formatMoney(totalMRP)}`);
+    lines.push(`Product Discount: -₹${formatMoney(productDiscount)}`);
+  }
+  lines.push(`Item Total: ₹${formatMoney(subtotal)}`);
+  lines.push(`Delivery: ${deliveryCharges > 0 ? `₹${formatMoney(deliveryCharges)}` : "FREE"}`);
+  if (handlingCharge > 0) lines.push(`Handling: ₹${formatMoney(handlingCharge)}`);
+  if (totalGst > 0) lines.push(`GST: ₹${formatMoney(totalGst)}`);
+
+  if (couponCode) {
+    if (couponBenefitType === "free_quantity" && couponAppliedItems?.length) {
+      // Freebie coupons add extra quantity instead of reducing the price.
+      const freebies = couponAppliedItems.map((i) => `${i.benefitLabel} (${i.name})`).join(", ");
+      lines.push(`Coupon (${couponCode}): ${freebies}`);
+    } else if (couponDiscount > 0) {
+      lines.push(`Coupon (${couponCode}): -₹${formatMoney(couponDiscount)}`);
+    }
+  }
+
+  lines.push(`*To Pay: ₹${formatMoney(finalAmount)}*`);
+
+  const totalSaved = productDiscount + (couponDiscount || 0);
+  if (totalSaved > 0) lines.push(`You saved ₹${formatMoney(totalSaved)} on this order 🎉`);
   return lines.join("\n");
+};
+
+// Items + full bill, used for every message that shows the customer their bill.
+const buildFullBill = async (order) => {
+  const { text, totalMRP } = await buildItemLines(order.items);
+  return `${text}\n\n${buildBillingText(order, totalMRP)}`;
 };
 
 // Mirrors the web/app checkout's per-product serviceablePincodes check —
@@ -246,8 +304,9 @@ const handleCartOrder = async (from, order) => {
   const productMap = new Map(products.map((p) => [p._id.toString(), p]));
 
   const resolvedItems = [];
-  const summaryLines = [];
   const unavailable = [];
+  // Same price the app cart would charge — active admin discount campaigns applied.
+  const discounts = await getActiveDiscounts();
 
   for (const item of items) {
     const product = productMap.get(item.product_retailer_id);
@@ -256,9 +315,8 @@ const handleCartOrder = async (from, order) => {
       continue;
     }
     const quantity = Number(item.quantity) || 1;
-    const lineTotal = product.price * quantity;
-    resolvedItems.push({ product: product._id, quantity, price: product.price });
-    summaryLines.push(`${quantity} x ${product.name} — ₹${lineTotal}`);
+    const { effectivePrice } = getEffectivePrice(product, discounts);
+    resolvedItems.push({ product: product._id, quantity, price: effectivePrice });
   }
 
   if (!resolvedItems.length) {
@@ -266,12 +324,12 @@ const handleCartOrder = async (from, order) => {
     return;
   }
 
-  if (unavailable.length) {
-    summaryLines.push(`\n(${unavailable.length} item(s) removed — out of stock)`);
-  }
+  const { text: itemLines, totalMRP } = await buildItemLines(resolvedItems);
+  const summary = unavailable.length
+    ? `${itemLines}\n\n(${unavailable.length} item(s) removed — out of stock)`
+    : itemLines;
 
   const user = await getOrCreateWhatsappUser(from);
-  const summary = summaryLines.join("\n");
   const subtotal = resolvedItems.reduce((sum, i) => sum + i.price * i.quantity, 0);
 
   // Delivery charge depends on the customer's location, which we only get
@@ -287,14 +345,16 @@ const handleCartOrder = async (from, order) => {
 
   await whatsappService.sendText(
     from,
-    `Your order:\n\n${summary}\n\nSubtotal: ₹${subtotal}\n(delivery, handling and GST added after your address)\n\n${ADDRESS_PROMPT}`
+    `Your order:\n\n${summary}\n\n` +
+      (totalMRP > subtotal ? `MRP Total: ₹${formatMoney(totalMRP)}\nProduct Discount: -₹${formatMoney(totalMRP - subtotal)}\n` : "") +
+      `Item Total: ₹${formatMoney(subtotal)}\n(delivery, handling and GST added after your address)\n\n${ADDRESS_PROMPT}`
   );
 };
 
 // Asks whether to pay online (Razorpay link) or cash on delivery before
 // actually placing/charging the order. Shows the resolved delivery address
 // back to the customer so they can catch a mistake before paying.
-const promptPaymentMethod = async (whatsappOrder, summary) => {
+const promptPaymentMethod = async (whatsappOrder) => {
   const buttons = [
     { id: "pay_online", title: "Pay Online" },
     { id: "pay_cod", title: "Cash on Delivery" }
@@ -304,7 +364,7 @@ const promptPaymentMethod = async (whatsappOrder, summary) => {
   await whatsappService.sendButtons(
     whatsappOrder.whatsappPhone,
     `Delivering to:\n${formatAddress(whatsappOrder.shippingAddress)}\n\n` +
-      `Your order:\n\n${summary}\n\n${buildBillingText(whatsappOrder)}\n\nHow would you like to pay?`,
+      `Your order:\n\n${await buildFullBill(whatsappOrder)}\n\nHow would you like to pay?`,
     buttons
   );
 };
@@ -362,6 +422,8 @@ const handleCouponReply = async (whatsappOrder, text) => {
     whatsappOrder.couponCode = pricing.appliedCoupon?.code || null;
     whatsappOrder.couponDiscount = pricing.discount || 0;
     whatsappOrder.couponBenefitType = pricing.appliedCoupon?.benefitType || null;
+    whatsappOrder.couponAppliedItems = pricing.appliedCoupon?.appliedItems || [];
+    whatsappOrder.couponFreebieRule = pricing.appliedCoupon?.freebieRule || null;
     whatsappOrder.status = "awaiting_payment_method";
     await whatsappOrder.save();
 
@@ -372,8 +434,7 @@ const handleCouponReply = async (whatsappOrder, text) => {
     await whatsappService.sendText(whatsappOrder.whatsappPhone, error.message || "That coupon couldn't be applied.");
   }
 
-  const summary = await buildSummaryFromItems(whatsappOrder.items);
-  await promptPaymentMethod(whatsappOrder, summary);
+  await promptPaymentMethod(whatsappOrder);
 };
 
 // Customer replied with their full address in one message — parses it,
@@ -437,8 +498,7 @@ const handleAddressReply = async (whatsappOrder, text) => {
   whatsappOrder.status = "awaiting_payment_method";
   await whatsappOrder.save();
 
-  const summary = await buildSummaryFromItems(whatsappOrder.items);
-  await promptPaymentMethod(whatsappOrder, summary);
+  await promptPaymentMethod(whatsappOrder);
 };
 
 const createPaymentLinkAndNotify = async (whatsappOrder) => {
@@ -458,12 +518,9 @@ const createPaymentLinkAndNotify = async (whatsappOrder) => {
   whatsappOrder.status = "pending";
   await whatsappOrder.save();
 
-  const summary = await buildSummaryFromItems(whatsappOrder.items);
-
   await whatsappService.sendPaymentLink(
     whatsappOrder.whatsappPhone,
-    summary,
-    buildBillingText(whatsappOrder),
+    await buildFullBill(whatsappOrder),
     paymentLink.short_url
   );
 };
@@ -484,20 +541,11 @@ const confirmCodOrder = async (whatsappOrder) => {
     await whatsappService.sendText(
       whatsappOrder.whatsappPhone,
       `Order confirmed! ✅ Your order #${order.orderId} will be delivered — pay cash on delivery.\n\n` +
-        `${await buildSummaryFromItems(whatsappOrder.items)}\n\n${buildBillingText(whatsappOrder)}`
+        `${await buildFullBill(whatsappOrder)}`
     );
   } catch (error) {
     console.error("confirmCodOrder error:", error.message);
   }
-};
-
-const buildSummaryFromItems = async (items) => {
-  const productIds = items.map((i) => i.product);
-  const products = await Product.find({ _id: { $in: productIds } }).select("name").lean();
-  const nameMap = new Map(products.map((p) => [p._id.toString(), p.name]));
-  return items
-    .map((i) => `${i.quantity} x ${nameMap.get(i.product.toString()) || "Item"} — ₹${i.price * i.quantity}`)
-    .join("\n");
 };
 
 // Shared by the COD and paid-online paths below — builds and saves the real
@@ -528,7 +576,13 @@ const createOrderForWhatsapp = async (whatsappOrder, { paymentMethod, paymentSta
     paymentStatus,
     ...(razorpayPaymentId && { razorpayPaymentId }),
     ...(whatsappOrder.couponCode && {
-      coupon: { code: whatsappOrder.couponCode, discount: whatsappOrder.couponDiscount, benefitType: whatsappOrder.couponBenefitType }
+      coupon: {
+        code: whatsappOrder.couponCode,
+        discount: whatsappOrder.couponDiscount,
+        benefitType: whatsappOrder.couponBenefitType,
+        ...(whatsappOrder.couponFreebieRule && { freebieRule: whatsappOrder.couponFreebieRule }),
+        ...(whatsappOrder.couponAppliedItems?.length && { appliedItems: whatsappOrder.couponAppliedItems })
+      }
     }),
     status: paymentStatus === "paid" ? "confirmed" : "pending"
   });
@@ -572,7 +626,7 @@ exports.handleWhatsappPaymentLinkPaid = async (paymentLinkEntity, paymentEntity)
     await whatsappService.sendText(
       whatsappOrder.whatsappPhone,
       `Payment received! ✅ Your order #${order.orderId} has been placed and is being prepared.\n\n` +
-        `${await buildSummaryFromItems(whatsappOrder.items)}\n\n${buildBillingText(whatsappOrder)}`
+        `${await buildFullBill(whatsappOrder)}`
     );
   } catch (error) {
     console.error("handleWhatsappPaymentLinkPaid error:", error.message);
