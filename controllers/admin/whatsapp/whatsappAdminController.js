@@ -60,11 +60,6 @@ exports.sendMessage = async (req, res) => {
       return res.status(404).json({ success: false, message: "Conversation not found" });
     }
 
-    if (!conversation.isBotPaused) {
-      conversation.isBotPaused = true;
-      await conversation.save();
-    }
-
     // whatsappService swallows Graph API errors and resolves { ok: false }
     // rather than throwing — check the actual result so the admin isn't told
     // a failed send succeeded, and sees the real reason from Meta.
@@ -170,11 +165,6 @@ exports.sendTemplateMessage = async (req, res) => {
     if (!conversation) {
       return res.status(404).json({ success: false, message: "Conversation not found" });
     }
-    if (!conversation.isBotPaused) {
-      conversation.isBotPaused = true;
-      await conversation.save();
-    }
-
     const result = await whatsappService.sendTemplate(phone, name, language, Array.isArray(bodyParams) ? bodyParams : []);
     if (!result.ok) {
       return res.status(502).json({ success: false, message: `WhatsApp could not send this template: ${result.error}` });
@@ -213,12 +203,6 @@ exports.bulkSend = async (req, res) => {
     const results = [];
     for (const phone of phones) {
       try {
-        const conversation = await WhatsappConversation.findOne({ phone });
-        if (conversation && !conversation.isBotPaused) {
-          conversation.isBotPaused = true;
-          await conversation.save();
-        }
-
         const sendResult = mode === "template"
           ? await whatsappService.sendTemplate(phone, templateName, templateLanguage, Array.isArray(bodyParams) ? bodyParams : [])
           : await whatsappService.sendText(phone, body.trim(), "admin");
