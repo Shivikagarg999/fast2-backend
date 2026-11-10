@@ -10,6 +10,29 @@ const imagekit = require("../../utils/imagekit");
 
 const PRODUCTS_PER_POST = 4;
 
+// @desc    Active, in-stock products in a category for the admin to pick from
+//          (lifestyle-post product picker). Deliberately NOT the customer-facing
+//          /api/product/category/:id route — that one requires lat/lng to only
+//          show products from nearby open shops, which doesn't apply here.
+// @route   GET /api/admin/marketing/category-products/:categoryId
+exports.getCategoryProducts = async (req, res) => {
+  try {
+    const products = await Product.find({
+      category: req.params.categoryId,
+      isActive: true,
+      stockStatus: "in-stock"
+    })
+      .select("name images")
+      .sort({ name: 1 })
+      .lean();
+
+    return res.status(200).json({ success: true, products });
+  } catch (error) {
+    console.error("Get category products error:", error.message);
+    return res.status(500).json({ success: false, message: "Failed to load products" });
+  }
+};
+
 // Best-selling products in this category over the last 30 days; falls back to
 // highest-discount active/in-stock products if the category has no sales yet
 // (new category, or just not enough order history).

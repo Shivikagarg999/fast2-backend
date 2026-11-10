@@ -53,7 +53,11 @@ const loadFonts = () => {
   fontsCache = [
     { name: "Poppins", data: fs.readFileSync(path.join(FONT_DIR, "Poppins-Regular.ttf")), weight: 400, style: "normal" },
     { name: "Poppins", data: fs.readFileSync(path.join(FONT_DIR, "Poppins-SemiBold.ttf")), weight: 600, style: "normal" },
-    { name: "Poppins", data: fs.readFileSync(path.join(FONT_DIR, "Poppins-Bold.ttf")), weight: 700, style: "normal" }
+    { name: "Poppins", data: fs.readFileSync(path.join(FONT_DIR, "Poppins-Bold.ttf")), weight: 700, style: "normal" },
+    // Rounded, friendly display face — used only for the big headline/CTA/badge
+    // punches, Poppins stays for anything that needs to read as precise data
+    // (product names, prices).
+    { name: "Baloo2", data: fs.readFileSync(path.join(FONT_DIR, "Baloo2-Variable.ttf")), weight: 700, style: "normal" }
   ];
   return fontsCache;
 };
@@ -78,9 +82,9 @@ const h = (type, props = {}, children) => ({ type, props: { ...props, children }
 
 const formatPrice = (n) => `Rs ${Math.round(n)}`;
 
-// Soft, oversized translucent circles bleeding off the canvas edges — a
-// cheap, reliable way to make the poster feel designed rather than a flat
-// fill, with no AI/network dependency.
+// Soft, oversized translucent circles + a diagonal stripe band bleeding off
+// the canvas edges — a cheap, reliable way to make the poster feel designed
+// rather than a flat fill, with no AI/network dependency.
 const buildDecorativeBlobs = (width, height) => [
   h("div", {
     style: {
@@ -101,6 +105,13 @@ const buildDecorativeBlobs = (width, height) => [
       position: "absolute", top: height * 0.32, right: -width * 0.08,
       width: width * 0.22, height: width * 0.22, borderRadius: "50%",
       background: `rgba(255,102,0,0.18)`
+    }
+  }),
+  h("div", {
+    style: {
+      position: "absolute", top: height * 0.12, left: -width * 0.1,
+      width: width * 1.3, height: width * 0.14, transform: "rotate(-7deg)",
+      background: "rgba(255,255,255,0.05)"
     }
   })
 ];
@@ -123,12 +134,15 @@ const buildDiscountBadge = (percentOff, size) =>
     }
   }, [
     h("div", { style: { display: "flex", flexDirection: "column", alignItems: "center" } }, [
-      h("div", { style: { fontSize: size * 0.3, fontWeight: 700, color: "#ffffff", lineHeight: 1 } }, `${percentOff}%`),
+      h("div", { style: { fontFamily: "Baloo2", fontSize: size * 0.32, fontWeight: 700, color: "#ffffff", lineHeight: 1 } }, `${percentOff}%`),
       h("div", { style: { fontSize: size * 0.14, fontWeight: 600, color: "#ffffff" } }, "OFF")
     ])
   ]);
 
-const buildProductCard = ({ name, price, oldPrice, imageDataUri }, cardWidth, cardHeight) => {
+// rotation: a small alternating tilt (deg) per card, purely visual — CSS
+// transforms don't affect box size/flow, so this can't reopen the overflow
+// bug the fixed-width pass above addresses.
+const buildProductCard = ({ name, price, oldPrice, imageDataUri }, cardWidth, cardHeight, rotation = 0) => {
   const hasDiscount = oldPrice > price;
   const percentOff = hasDiscount ? Math.round(((oldPrice - price) / oldPrice) * 100) : 0;
   const imageHeight = Math.round(cardHeight * 0.58);
@@ -145,6 +159,7 @@ const buildProductCard = ({ name, price, oldPrice, imageDataUri }, cardWidth, ca
       background: "#ffffff",
       borderRadius: 18,
       overflow: "visible",
+      transform: rotation ? `rotate(${rotation}deg)` : undefined,
       boxShadow: "0 8px 20px rgba(0,0,0,0.22)"
     }
   }, [
@@ -169,7 +184,7 @@ const buildProductCard = ({ name, price, oldPrice, imageDataUri }, cardWidth, ca
       h("div", {
         style: { display: "flex", alignItems: "baseline", gap: 6, marginTop: 4 }
       }, [
-        h("div", { style: { fontSize: Math.min(18, cardWidth * 0.085), fontWeight: 700, color: BRAND_GREEN_DARK } }, formatPrice(price)),
+        h("div", { style: { fontFamily: "Baloo2", fontSize: Math.min(20, cardWidth * 0.095), fontWeight: 700, color: BRAND_GREEN_DARK } }, formatPrice(price)),
         ...(hasDiscount ? [h("div", {
           style: { fontSize: Math.min(13, cardWidth * 0.06), color: "#9ca3af", textDecoration: "line-through" }
         }, formatPrice(oldPrice))] : [])
@@ -191,8 +206,12 @@ const buildTemplate = ({ categoryName, products, layout, backgroundImageDataUri 
   const contentWidth = width - padding * 2;
   const gridRows = Math.ceil(products.length / gridCols);
   const gridHeight = height - padding * 2 - logoHeight - headlineHeight - footerHeight - gap * 3;
-  const cardWidth = Math.round((contentWidth - gap * (gridCols - 1)) / gridCols);
-  const cardHeight = Math.round((gridHeight - gap * (gridRows - 1)) / gridRows);
+  // Math.floor, not round — rounding up even by 1-2px made the row's total
+  // width exceed the grid container's own explicit width, which forces the
+  // last card onto a wrapped second "row" that then renders on top of the
+  // footer below it instead of just being invisibly imprecise.
+  const cardWidth = Math.floor((contentWidth - gap * (gridCols - 1)) / gridCols);
+  const cardHeight = Math.floor((gridHeight - gap * (gridRows - 1)) / gridRows);
 
   const logoWidth = Math.round(logoHeight * 2.87); // logo.png is 612x213
 
@@ -248,22 +267,23 @@ const buildTemplate = ({ categoryName, products, layout, backgroundImageDataUri 
         h("img", { src: getLogoDataUri(), width: logoWidth - 20, height: logoHeight - 8, style: { objectFit: "contain" } })
       ]),
       h("div", {
-        style: { display: "flex", flexDirection: "column", height: headlineHeight, justifyContent: "center", marginTop: gap }
+        style: { display: "flex", flexDirection: "column", width: contentWidth, height: headlineHeight, justifyContent: "center", marginTop: gap }
       }, [
         h("div", {
           style: { display: "flex", alignItems: "center", gap: 10 }
         }, [
           h("div", { style: { width: 8, height: Math.min(54, headlineHeight * 0.44), borderRadius: 4, background: BRAND_ORANGE } }),
-          h("div", { style: { fontSize: Math.min(54, headlineHeight * 0.44), fontWeight: 700, color: "#ffffff", lineHeight: 1.1 } }, categoryName)
+          h("div", { style: { fontFamily: "Baloo2", fontSize: Math.min(56, headlineHeight * 0.46), fontWeight: 700, color: "#ffffff", lineHeight: 1.1 } }, categoryName)
         ]),
         h("div", { style: { fontSize: Math.min(24, headlineHeight * 0.2), color: "#d6f5e3", marginTop: 4, marginLeft: 18 } }, "Today's Best Picks")
       ]),
       h("div", {
-        style: { display: "flex", flexWrap: "wrap", gap, height: gridHeight, marginTop: gap }
-      }, products.map((p) => buildProductCard(p, cardWidth, cardHeight))),
+        style: { display: "flex", flexWrap: "wrap", width: contentWidth, gap, height: gridHeight, marginTop: gap }
+      }, products.map((p, i) => buildProductCard(p, cardWidth, cardHeight, i % 2 === 0 ? -1.6 : 1.6))),
       h("div", {
         style: {
           display: "flex",
+          width: contentWidth,
           height: footerHeight,
           marginTop: gap,
           alignItems: "center",
@@ -273,7 +293,7 @@ const buildTemplate = ({ categoryName, products, layout, backgroundImageDataUri 
           boxShadow: "0 6px 16px rgba(0,0,0,0.25)"
         }
       }, [
-        h("div", { style: { fontSize: Math.min(26, footerHeight * 0.38), fontWeight: 700, color: "#ffffff" } }, "Order now on GMKart")
+        h("div", { style: { fontFamily: "Baloo2", fontSize: Math.min(28, footerHeight * 0.4), fontWeight: 700, color: "#ffffff" } }, "Order now on GMKart")
       ])
     ])
   ]);
