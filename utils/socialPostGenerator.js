@@ -303,4 +303,60 @@ const generatePromoImage = async ({ categoryName, products, platform, background
   return resvg.render().asPng();
 };
 
-module.exports = { generatePromoImage, PLATFORM_SIZES: LAYOUTS };
+// Composites our REAL logo and a tagline on top of a full-bleed AI-generated
+// scene (geminiImageGenerator.generateLifestyleScene) — the scene is asked to
+// contain no logo/text of its own, so this is the only text/brand mark on the
+// final image, guaranteed accurate. Returns a PNG Buffer.
+const generateLifestylePost = async ({ sceneImageDataUri, tagline, platform }) => {
+  const layout = LAYOUTS[platform];
+  if (!layout) throw new Error(`Unknown platform: ${platform}`);
+  const { width, height } = layout;
+
+  const logoHeight = Math.round(height * 0.07);
+  const logoWidth = Math.round(logoHeight * 2.87);
+
+  const element = h("div", {
+    style: { position: "relative", display: "flex", width, height, fontFamily: "Poppins" }
+  }, [
+    h("img", { src: sceneImageDataUri, width, height, style: { position: "absolute", top: 0, left: 0, objectFit: "cover" } }),
+    h("div", {
+      style: {
+        position: "absolute",
+        top: Math.round(height * 0.04),
+        right: Math.round(height * 0.04),
+        display: "flex",
+        alignItems: "center",
+        height: logoHeight,
+        width: logoWidth,
+        background: "#ffffff",
+        borderRadius: 10,
+        padding: "4px 10px",
+        boxShadow: "0 4px 10px rgba(0,0,0,0.25)"
+      }
+    }, [
+      h("img", { src: getLogoDataUri(), width: logoWidth - 20, height: logoHeight - 8, style: { objectFit: "contain" } })
+    ]),
+    ...(tagline ? [h("div", {
+      style: {
+        position: "absolute",
+        left: Math.round(width * 0.06),
+        right: Math.round(width * 0.06),
+        bottom: Math.round(height * 0.06),
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: `${Math.round(height * 0.025)}px ${Math.round(width * 0.04)}px`,
+        background: "rgba(9,64,20,0.82)",
+        borderRadius: 16
+      }
+    }, [
+      h("div", { style: { fontSize: Math.min(40, width * 0.034), fontWeight: 700, color: "#ffffff", textAlign: "center" } }, tagline)
+    ])] : [])
+  ]);
+
+  const svg = await satori(element, { width, height, fonts: loadFonts() });
+  const resvg = new Resvg(svg, { fitTo: { mode: "width", value: width } });
+  return resvg.render().asPng();
+};
+
+module.exports = { generatePromoImage, generateLifestylePost, toDataUri, PLATFORM_SIZES: LAYOUTS };

@@ -4,8 +4,8 @@ const Product = require("../../models/product");
 const Category = require("../../models/category");
 const AnalyticsEvent = require("../../models/analyticsEvent");
 const Occasion = require("../../models/occasion");
-const { generatePromoImage, PLATFORM_SIZES } = require("../../utils/socialPostGenerator");
-const { generateBackgroundImage, isConfigured: isGeminiConfigured } = require("../../utils/geminiImageGenerator");
+const { generatePromoImage, generateLifestylePost, toDataUri, PLATFORM_SIZES } = require("../../utils/socialPostGenerator");
+const { generateBackgroundImage, generateLifestyleScene, isConfigured: isGeminiConfigured } = require("../../utils/geminiImageGenerator");
 const imagekit = require("../../utils/imagekit");
 
 const PRODUCTS_PER_POST = 4;
@@ -238,5 +238,64 @@ exports.getUpcomingOccasions = async (req, res) => {
   } catch (error) {
     console.error("Get upcoming occasions error:", error.message);
     return res.status(500).json({ success: false, message: "Failed to load upcoming occasions" });
+  }
+};
+
+// @desc    AI lifestyle post for a single product — Gemini places the real
+//          product photo in a generated scene with no logo/text of its own;
+//          our real logo + tagline are then composited on top precisely.
+//          Costs a Gemini API call — only runs when the admin explicitly
+//          triggers it from the panel.
+// @route   POST /api/admin/marketing/generate-lifestyle-post
+exports.generateLifestylePost = async (req, res) => {
+  try {
+    if (!isGeminiConfigured()) {
+      return res.status(400).json({ success: false, message: "Gemini API key is not configured" });
+    }
+
+    const { productId, platform = "instagram", sceneDescription, tagline } = req.body;
+    if (!productId) {
+      return res.status(400).json({ success: false, message: "productId is required" });
+    }
+    if (!PLATFORM_SIZES[platform]) {
+      return res.status(400).json({ success: false, message: "platform must be 'instagram' or 'facebook'" });
+    }
+
+    const product = await Product.findById(productId).select("name images").lean();
+    if (!product) {
+      return res.status(404).json({ success: false, message: "Product not found" });
+    }
+    const productImageUrl = product.images?.find((img) => img.isPrimary)?.url || product.images?.[0]?.url;
+    if (!productImageUrl) {
+      return res.status(400).json({ success: false, message: "This product has no image to work from" });
+    }
+
+    const productImageDataUri = await toDataUri(productImageUrl);
+    if (!productImageDataUri) {
+      return res.status(502).json({ success: false, message: "Could not fetch the product photo" });
+    }
+
+    const scenePrompt = sceneDescription || `a cozy, well-lit Indian home setting that fits a "${product.name}" grocery product`;
+    const sceneImageDataUri = await generateLifestyleScene(productImageDataUri, scenePrompt);
+    if (!sceneImageDataUri) {
+      return res.status(502).json({ success: false, message: "Gemini could not generate a scene for this product right now" });
+    }
+
+    const pngBuffer = await generateLifestylePost({
+      sceneImageDataUri,
+      tagline: tagline || `${product.name} — Order now on GMKart`,
+      platform
+    });
+
+    const uploaded = await imagekit.upload({
+      file: pngBuffer,
+      fileName: `${platform}_lifestyle_${product.name.replace(/\s+/g, "_")}_${Date.now()}.png`,
+      folder: "/marketing-posts"
+    });
+
+    return res.status(200).json({ success: true, data: { url: uploaded.url, platform, productName: product.name } });
+  } catch (error) {
+    console.error("Generate lifestyle post error:", error.message);
+    return res.status(500).json({ success: false, message: "Failed to generate lifestyle post" });
   }
 };
