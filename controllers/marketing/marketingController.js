@@ -6,6 +6,7 @@ const AnalyticsEvent = require("../../models/analyticsEvent");
 const Occasion = require("../../models/occasion");
 const { generatePromoImage, generateLifestylePost, toDataUri, PLATFORM_SIZES } = require("../../utils/socialPostGenerator");
 const { generateBackgroundImage, generateLifestyleScene, isConfigured: isGeminiConfigured } = require("../../utils/geminiImageGenerator");
+const { isConfigured: isMetaPublisherConfigured, postToFacebookPage, postToInstagram } = require("../../utils/metaPublisher");
 const imagekit = require("../../utils/imagekit");
 
 const PRODUCTS_PER_POST = 4;
@@ -320,5 +321,44 @@ exports.generateLifestylePost = async (req, res) => {
   } catch (error) {
     console.error("Generate lifestyle post error:", error.message);
     return res.status(500).json({ success: false, message: "Failed to generate lifestyle post" });
+  }
+};
+
+// @desc    Publish an already-generated post image directly to Facebook
+//          and/or Instagram — one click, admin picks where. Each platform's
+//          real result is reported separately (never a blanket "success")
+//          so a failure on one doesn't get masked by the other succeeding.
+// @route   POST /api/admin/marketing/publish
+exports.publishPost = async (req, res) => {
+  try {
+    const { imageUrl, caption, platforms } = req.body;
+    if (!imageUrl) {
+      return res.status(400).json({ success: false, message: "imageUrl is required" });
+    }
+    const targets = Array.isArray(platforms) && platforms.length ? platforms : ["facebook", "instagram"];
+
+    if (!isMetaPublisherConfigured()) {
+      return res.status(400).json({ success: false, message: "Meta publishing is not configured (missing access token)" });
+    }
+
+    const results = {};
+    await Promise.all(targets.map(async (platform) => {
+      try {
+        const publishFn = platform === "instagram" ? postToInstagram : platform === "facebook" ? postToFacebookPage : null;
+        if (!publishFn) {
+          results[platform] = { success: false, error: `Unknown platform: ${platform}` };
+          return;
+        }
+        const result = await publishFn(imageUrl, caption || "");
+        results[platform] = { success: true, ...result };
+      } catch (error) {
+        results[platform] = { success: false, error: error.response?.data?.error?.message || error.message };
+      }
+    }));
+
+    return res.status(200).json({ success: true, data: results });
+  } catch (error) {
+    console.error("Publish post error:", error.message);
+    return res.status(500).json({ success: false, message: "Failed to publish post" });
   }
 };

@@ -6,7 +6,8 @@ const {
   getTrendingCategories,
   getUpcomingOccasions,
   generateLifestylePost,
-  getCategoryProducts
+  getCategoryProducts,
+  publishPost
 } = require('../../../controllers/marketing/marketingController');
 
 router.post('/generate-post', adminAuth, generatePost);
@@ -14,5 +15,6 @@ router.get('/trending-categories', adminAuth, getTrendingCategories);
 router.get('/upcoming-occasions', adminAuth, getUpcomingOccasions);
 router.post('/generate-lifestyle-post', adminAuth, generateLifestylePost);
 router.get('/category-products/:categoryId', adminAuth, getCategoryProducts);
+router.post('/publish', adminAuth, publishPost);
 
 module.exports = router;
