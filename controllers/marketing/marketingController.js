@@ -11,6 +11,29 @@ const imagekit = require("../../utils/imagekit");
 
 const PRODUCTS_PER_POST = 4;
 
+// Helper to publish an image to Facebook and/or Instagram
+const publishToMeta = async (imageUrl, caption, platforms = ["facebook", "instagram"]) => {
+  const targets = Array.isArray(platforms) && platforms.length ? platforms : ["facebook", "instagram"];
+  if (!isMetaPublisherConfigured()) {
+    return { error: "Meta publishing is not configured (missing WHATSAPP_ACCESS_TOKEN)" };
+  }
+  const results = {};
+  await Promise.all(targets.map(async (platform) => {
+    try {
+      const publishFn = platform === "instagram" ? postToInstagram : platform === "facebook" ? postToFacebookPage : null;
+      if (!publishFn) {
+        results[platform] = { success: false, error: `Unknown platform: ${platform}` };
+        return;
+      }
+      const result = await publishFn(imageUrl, caption || "");
+      results[platform] = { success: true, ...result };
+    } catch (error) {
+      results[platform] = { success: false, error: error.response?.data?.error?.message || error.message };
+    }
+  }));
+  return results;
+};
+
 // @desc    Active, in-stock products in a category for the admin to pick from
 //          (lifestyle-post product picker). Deliberately NOT the customer-facing
 //          /api/product/category/:id route — that one requires lat/lng to only
@@ -90,11 +113,11 @@ const getTopProductsForCategory = async (categoryId) => {
 };
 
 // @desc    Generate a branded Instagram/Facebook promo image for a category's
-//          best products — downloadable, not auto-posted.
+//          best products — downloadable, or auto-posted if requested.
 // @route   POST /api/admin/marketing/generate-post
 exports.generatePost = async (req, res) => {
   try {
-    const { categoryId, platform = "instagram", useAiBackground, backgroundPrompt } = req.body;
+    const { categoryId, platform = "instagram", useAiBackground, backgroundPrompt, autoPublish, caption, publishPlatforms } = req.body;
     if (!categoryId) {
       return res.status(400).json({ success: false, message: "categoryId is required" });
     }
@@ -119,14 +142,12 @@ exports.generatePost = async (req, res) => {
       imageUrl: p.images?.find((img) => img.isPrimary)?.url || p.images?.[0]?.url || null
     }));
 
-    // Optional: Gemini paints only a decorative background (never the logo,
-    // products or prices — those stay precise, composited afterwards). Silently
-    // falls back to the plain brand gradient if no key is configured or the
-    // admin didn't ask for one, so this never blocks the core feature.
+    // AI paints a decorative background at ₹0 cost using Pollinations FLUX.
+    // Silently falls back to the plain brand gradient if generation fails.
     let backgroundImageDataUri = null;
     if (useAiBackground && isGeminiConfigured()) {
       const prompt = backgroundPrompt || `A festive, vibrant background themed around "${category.name}" groceries, warm green and orange tones, soft bokeh, minimal`;
-      backgroundImageDataUri = await generateBackgroundImage(prompt);
+      backgroundImageDataUri = await generateBackgroundImage(prompt, PLATFORM_SIZES[platform]);
     }
 
     const pngBuffer = await generatePromoImage({ categoryName: category.name, products: postProducts, platform, backgroundImageDataUri });
@@ -137,6 +158,12 @@ exports.generatePost = async (req, res) => {
       folder: "/marketing-posts"
     });
 
+    let publishResults = null;
+    if (autoPublish) {
+      const postCaption = caption || `Fresh essentials in ${category.name}! 🛒\nOrder on GMKart for superfast delivery to your doorstep. Best prices & top quality guaranteed.\n\n#GMKart #QuickCommerce #Grocery #OnlineGrocery #FreshDelivery`;
+      publishResults = await publishToMeta(uploaded.url, postCaption, publishPlatforms);
+    }
+
     return res.status(200).json({
       success: true,
       data: {
@@ -144,7 +171,8 @@ exports.generatePost = async (req, res) => {
         platform,
         categoryName: category.name,
         productsUsed: postProducts.map((p) => p.name),
-        usedAiBackground: !!backgroundImageDataUri
+        usedAiBackground: !!backgroundImageDataUri,
+        publishResults
       }
     });
   } catch (error) {
@@ -265,19 +293,13 @@ exports.getUpcomingOccasions = async (req, res) => {
   }
 };
 
-// @desc    AI lifestyle post for a single product — Gemini places the real
-//          product photo in a generated scene with no logo/text of its own;
-//          our real logo + tagline are then composited on top precisely.
-//          Costs a Gemini API call — only runs when the admin explicitly
-//          triggers it from the panel.
+// @desc    AI lifestyle post for a single product — Generates a photorealistic
+//          scene at ₹0 cost with Pollinations FLUX. GMKart real logo + tagline
+//          are composited cleanly on top. Supports optional auto-publish.
 // @route   POST /api/admin/marketing/generate-lifestyle-post
 exports.generateLifestylePost = async (req, res) => {
   try {
-    if (!isGeminiConfigured()) {
-      return res.status(400).json({ success: false, message: "Gemini API key is not configured" });
-    }
-
-    const { productId, platform = "instagram", sceneDescription, tagline } = req.body;
+    const { productId, platform = "instagram", sceneDescription, tagline, autoPublish, caption, publishPlatforms } = req.body;
     if (!productId) {
       return res.status(400).json({ success: false, message: "productId is required" });
     }
@@ -285,7 +307,7 @@ exports.generateLifestylePost = async (req, res) => {
       return res.status(400).json({ success: false, message: "platform must be 'instagram' or 'facebook'" });
     }
 
-    const product = await Product.findById(productId).select("name images").lean();
+    const product = await Product.findById(productId).select("name images price oldPrice").lean();
     if (!product) {
       return res.status(404).json({ success: false, message: "Product not found" });
     }
@@ -300,9 +322,9 @@ exports.generateLifestylePost = async (req, res) => {
     }
 
     const scenePrompt = sceneDescription || `a cozy, well-lit Indian home setting that fits a "${product.name}" grocery product`;
-    const sceneImageDataUri = await generateLifestyleScene(productImageDataUri, scenePrompt);
+    const sceneImageDataUri = await generateLifestyleScene(productImageDataUri, scenePrompt, product.name, PLATFORM_SIZES[platform]);
     if (!sceneImageDataUri) {
-      return res.status(502).json({ success: false, message: "Gemini could not generate a scene for this product right now" });
+      return res.status(502).json({ success: false, message: "Could not generate an AI lifestyle scene right now" });
     }
 
     const pngBuffer = await generateLifestylePost({
@@ -317,7 +339,21 @@ exports.generateLifestylePost = async (req, res) => {
       folder: "/marketing-posts"
     });
 
-    return res.status(200).json({ success: true, data: { url: uploaded.url, platform, productName: product.name } });
+    let publishResults = null;
+    if (autoPublish) {
+      const postCaption = caption || `${product.name} — Order now on GMKart! ⚡\nGet fresh groceries and daily essentials delivered to your doorstep in minutes.\n\n#GMKart #FastDelivery #GroceryDelivery #ShopLocal #FreshGroceries`;
+      publishResults = await publishToMeta(uploaded.url, postCaption, publishPlatforms);
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        url: uploaded.url,
+        platform,
+        productName: product.name,
+        publishResults
+      }
+    });
   } catch (error) {
     console.error("Generate lifestyle post error:", error.message);
     return res.status(500).json({ success: false, message: "Failed to generate lifestyle post" });
@@ -325,9 +361,7 @@ exports.generateLifestylePost = async (req, res) => {
 };
 
 // @desc    Publish an already-generated post image directly to Facebook
-//          and/or Instagram — one click, admin picks where. Each platform's
-//          real result is reported separately (never a blanket "success")
-//          so a failure on one doesn't get masked by the other succeeding.
+//          and/or Instagram.
 // @route   POST /api/admin/marketing/publish
 exports.publishPost = async (req, res) => {
   try {
@@ -335,30 +369,88 @@ exports.publishPost = async (req, res) => {
     if (!imageUrl) {
       return res.status(400).json({ success: false, message: "imageUrl is required" });
     }
-    const targets = Array.isArray(platforms) && platforms.length ? platforms : ["facebook", "instagram"];
 
-    if (!isMetaPublisherConfigured()) {
-      return res.status(400).json({ success: false, message: "Meta publishing is not configured (missing access token)" });
+    const results = await publishToMeta(imageUrl, caption, platforms);
+    if (results.error) {
+      return res.status(400).json({ success: false, message: results.error });
     }
-
-    const results = {};
-    await Promise.all(targets.map(async (platform) => {
-      try {
-        const publishFn = platform === "instagram" ? postToInstagram : platform === "facebook" ? postToFacebookPage : null;
-        if (!publishFn) {
-          results[platform] = { success: false, error: `Unknown platform: ${platform}` };
-          return;
-        }
-        const result = await publishFn(imageUrl, caption || "");
-        results[platform] = { success: true, ...result };
-      } catch (error) {
-        results[platform] = { success: false, error: error.response?.data?.error?.message || error.message };
-      }
-    }));
 
     return res.status(200).json({ success: true, data: results });
   } catch (error) {
     console.error("Publish post error:", error.message);
     return res.status(500).json({ success: false, message: "Failed to publish post" });
+  }
+};
+
+// @desc    1-Click Automated Daily Post: Picks top trending category or deal,
+//          generates the post image with FLUX background (₹0 cost), and publishes
+//          to Facebook and Instagram automatically.
+// @route   POST /api/admin/marketing/auto-daily-post
+exports.autoDailyPost = async (req, res) => {
+  try {
+    const platform = req.body.platform || "instagram";
+
+    // 1. Find the top active category with products
+    const categories = await Category.find({ isActive: true }).select("name").lean();
+    if (!categories.length) {
+      return res.status(400).json({ success: false, message: "No active categories available" });
+    }
+
+    // Pick top category by sales or random from active
+    let selectedCategory = categories[0];
+    for (const cat of categories) {
+      const prods = await getTopProductsForCategory(cat._id);
+      if (prods.length >= 2) {
+        selectedCategory = cat;
+        break;
+      }
+    }
+
+    const products = await getTopProductsForCategory(selectedCategory._id);
+    if (!products.length) {
+      return res.status(400).json({ success: false, message: "No products available for auto-post" });
+    }
+
+    const postProducts = products.slice(0, PRODUCTS_PER_POST).map((p) => ({
+      name: p.name,
+      price: p.price,
+      oldPrice: p.oldPrice,
+      imageUrl: p.images?.find((img) => img.isPrimary)?.url || p.images?.[0]?.url || null
+    }));
+
+    // Generate free AI background
+    const prompt = `A vibrant grocery market display themed around "${selectedCategory.name}", fresh produce, warm colors, soft bokeh`;
+    const backgroundImageDataUri = await generateBackgroundImage(prompt, PLATFORM_SIZES[platform]);
+
+    const pngBuffer = await generatePromoImage({
+      categoryName: selectedCategory.name,
+      products: postProducts,
+      platform,
+      backgroundImageDataUri
+    });
+
+    const uploaded = await imagekit.upload({
+      file: pngBuffer,
+      fileName: `auto_${platform}_${selectedCategory.name.replace(/\s+/g, "_")}_${Date.now()}.png`,
+      folder: "/marketing-posts"
+    });
+
+    const caption = req.body.caption || `Today's Special Deals on ${selectedCategory.name}! 🛒\nOrder now on GMKart for superfast delivery to your home in 10-15 mins. Tap to shop!\n\n#GMKart #SuperfastDelivery #DailyDeals #OnlineGrocery #${selectedCategory.name.replace(/\s+/g, '')}`;
+
+    const publishResults = await publishToMeta(uploaded.url, caption, req.body.publishPlatforms || ["facebook", "instagram"]);
+
+    return res.status(200).json({
+      success: true,
+      message: "Daily post generated and auto-published successfully",
+      data: {
+        category: selectedCategory.name,
+        imageUrl: uploaded.url,
+        platform,
+        publishResults
+      }
+    });
+  } catch (error) {
+    console.error("Auto daily post error:", error.message);
+    return res.status(500).json({ success: false, message: error.message || "Failed to auto-post" });
   }
 };
