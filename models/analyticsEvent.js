@@ -1,7 +1,5 @@
 const mongoose = require('mongoose');
 
-// One row per tracked website action. Anonymous by design: visitorId is a random id
-// generated in the browser, no name/phone/email/IP is stored.
 const analyticsEventSchema = new mongoose.Schema({
     visitorId: { type: String, required: true, index: true },
     sessionId: { type: String, required: true },

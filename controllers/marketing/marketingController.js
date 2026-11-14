@@ -4,6 +4,9 @@ const Product = require("../../models/product");
 const Category = require("../../models/category");
 const AnalyticsEvent = require("../../models/analyticsEvent");
 const Occasion = require("../../models/occasion");
+const SocialAutoPost = require("../../models/socialAutoPost");
+const SocialAutoPostLog = require("../../models/socialAutoPostLog");
+const socialAutoPostService = require("../../services/socialAutoPostService");
 const { generatePromoImage, generateLifestylePost, toDataUri, PLATFORM_SIZES } = require("../../utils/socialPostGenerator");
 const { generateBackgroundImage, generateLifestyleScene, isConfigured: isGeminiConfigured } = require("../../utils/geminiImageGenerator");
 const { isConfigured: isMetaPublisherConfigured, postToFacebookPage, postToInstagram } = require("../../utils/metaPublisher");
@@ -143,11 +146,11 @@ exports.generatePost = async (req, res) => {
     }));
 
     // AI paints a decorative background at ₹0 cost using Pollinations FLUX.
-    // Silently falls back to the plain brand gradient if generation fails.
+    // Gemini is kept disabled unless specifically requested (useGemini: true).
     let backgroundImageDataUri = null;
     if (useAiBackground && isGeminiConfigured()) {
       const prompt = backgroundPrompt || `A festive, vibrant background themed around "${category.name}" groceries, warm green and orange tones, soft bokeh, minimal`;
-      backgroundImageDataUri = await generateBackgroundImage(prompt, PLATFORM_SIZES[platform]);
+      backgroundImageDataUri = await generateBackgroundImage(prompt, PLATFORM_SIZES[platform], { allowGemini: !!req.body.useGemini });
     }
 
     const pngBuffer = await generatePromoImage({ categoryName: category.name, products: postProducts, platform, backgroundImageDataUri });
@@ -293,55 +296,81 @@ exports.getUpcomingOccasions = async (req, res) => {
   }
 };
 
-// @desc    AI lifestyle post for a single product — Generates a photorealistic
-//          scene at ₹0 cost with Pollinations FLUX. GMKart real logo + tagline
-//          are composited cleanly on top. Supports optional auto-publish.
+// @desc    AI lifestyle post for one or multiple products — Generates a photorealistic
+//          scene at ₹0 cost with Pollinations FLUX. Supports selecting multiple products.
+//          Gemini is strictly disabled unless explicitly asked (useGemini: true).
+//          GMKart real logo + tagline are composited cleanly on top.
 // @route   POST /api/admin/marketing/generate-lifestyle-post
 exports.generateLifestylePost = async (req, res) => {
   try {
-    const { productId, platform = "instagram", sceneDescription, tagline, autoPublish, caption, publishPlatforms } = req.body;
-    if (!productId) {
-      return res.status(400).json({ success: false, message: "productId is required" });
+    const { productId, productIds, platform = "instagram", sceneDescription, tagline, autoPublish, caption, publishPlatforms, useGemini = false } = req.body;
+    
+    const selectedIds = Array.isArray(productIds) && productIds.length > 0
+      ? productIds
+      : productId ? [productId] : [];
+
+    if (!selectedIds.length) {
+      return res.status(400).json({ success: false, message: "Please select at least one product" });
     }
     if (!PLATFORM_SIZES[platform]) {
       return res.status(400).json({ success: false, message: "platform must be 'instagram' or 'facebook'" });
     }
 
-    const product = await Product.findById(productId).select("name images price oldPrice").lean();
-    if (!product) {
-      return res.status(404).json({ success: false, message: "Product not found" });
-    }
-    const productImageUrl = product.images?.find((img) => img.isPrimary)?.url || product.images?.[0]?.url;
-    if (!productImageUrl) {
-      return res.status(400).json({ success: false, message: "This product has no image to work from" });
+    const products = await Product.find({ _id: { $in: selectedIds } })
+      .select("name images price oldPrice")
+      .lean();
+
+    if (!products.length) {
+      return res.status(404).json({ success: false, message: "No selected products found" });
     }
 
-    const productImageDataUri = await toDataUri(productImageUrl);
-    if (!productImageDataUri) {
-      return res.status(502).json({ success: false, message: "Could not fetch the product photo" });
-    }
+    const productNames = products.map((p) => p.name);
+    const productImages = products
+      .map((p) => p.images?.find((img) => img.isPrimary)?.url || p.images?.[0]?.url)
+      .filter(Boolean);
 
-    const scenePrompt = sceneDescription || `a cozy, well-lit Indian home setting that fits a "${product.name}" grocery product`;
-    const sceneImageDataUri = await generateLifestyleScene(productImageDataUri, scenePrompt, product.name, PLATFORM_SIZES[platform]);
+    const dataUris = await Promise.all(productImages.slice(0, 4).map((url) => toDataUri(url)));
+    const validDataUris = dataUris.filter(Boolean);
+
+    const defaultNamesLabel = productNames.length > 1
+      ? `${productNames.slice(0, 2).join(" & ")}${productNames.length > 2 ? ` + ${productNames.length - 2} more` : ""}`
+      : productNames[0];
+
+    const scenePrompt = sceneDescription || `a cozy, well-lit Indian home setting that fits ${defaultNamesLabel}`;
+    
+    // Gemini is kept disabled by default (allowGemini: false) unless useGemini is explicitly true
+    const sceneImageDataUri = await generateLifestyleScene(
+      validDataUris,
+      scenePrompt,
+      productNames,
+      PLATFORM_SIZES[platform],
+      { allowGemini: !!useGemini }
+    );
+
     if (!sceneImageDataUri) {
       return res.status(502).json({ success: false, message: "Could not generate an AI lifestyle scene right now" });
     }
 
+    const defaultTagline = productNames.length > 1
+      ? `${defaultNamesLabel} — Order now on GMKart`
+      : `${productNames[0]} — Order now on GMKart`;
+
     const pngBuffer = await generateLifestylePost({
       sceneImageDataUri,
-      tagline: tagline || `${product.name} — Order now on GMKart`,
+      tagline: tagline || defaultTagline,
       platform
     });
 
+    const safePrefix = productNames[0].slice(0, 15).replace(/[^a-zA-Z0-9]/g, "_");
     const uploaded = await imagekit.upload({
       file: pngBuffer,
-      fileName: `${platform}_lifestyle_${product.name.replace(/\s+/g, "_")}_${Date.now()}.png`,
+      fileName: `${platform}_lifestyle_${safePrefix}_${Date.now()}.png`,
       folder: "/marketing-posts"
     });
 
     let publishResults = null;
     if (autoPublish) {
-      const postCaption = caption || `${product.name} — Order now on GMKart! ⚡\nGet fresh groceries and daily essentials delivered to your doorstep in minutes.\n\n#GMKart #FastDelivery #GroceryDelivery #ShopLocal #FreshGroceries`;
+      const postCaption = caption || `${defaultNamesLabel} — Fresh deals on GMKart! ⚡\nGet your daily grocery essentials delivered in 10-15 minutes. Tap to order now!\n\n#GMKart #SuperfastDelivery #GroceryDeals #FreshProduce #ShopLocal`;
       publishResults = await publishToMeta(uploaded.url, postCaption, publishPlatforms);
     }
 
@@ -350,8 +379,9 @@ exports.generateLifestylePost = async (req, res) => {
       data: {
         url: uploaded.url,
         platform,
-        productName: product.name,
-        publishResults
+        productNames,
+        publishResults,
+        usedGemini: !!useGemini
       }
     });
   } catch (error) {
@@ -452,5 +482,103 @@ exports.autoDailyPost = async (req, res) => {
   } catch (error) {
     console.error("Auto daily post error:", error.message);
     return res.status(500).json({ success: false, message: error.message || "Failed to auto-post" });
+  }
+};
+
+// @desc    Get current social auto-post configuration and recent logs
+// @route   GET /api/admin/marketing/auto-post-config
+exports.getAutoPostConfig = async (req, res) => {
+  try {
+    const config = await socialAutoPostService.getConfig();
+    const recentLogs = await SocialAutoPostLog.find()
+      .sort({ createdAt: -1 })
+      .limit(10)
+      .lean();
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        config,
+        recentLogs
+      }
+    });
+  } catch (error) {
+    console.error("Get auto-post config error:", error.message);
+    return res.status(500).json({ success: false, message: "Failed to load auto-post settings" });
+  }
+};
+
+// @desc    Update social auto-post configuration (time, enabled, platforms, type)
+// @route   PUT /api/admin/marketing/auto-post-config
+exports.updateAutoPostConfig = async (req, res) => {
+  try {
+    const { isEnabled, scheduledTime, platforms, postType, customCaption } = req.body;
+    const config = await socialAutoPostService.getConfig();
+
+    if (typeof isEnabled === "boolean") config.isEnabled = isEnabled;
+    if (scheduledTime) config.scheduledTime = scheduledTime;
+    if (Array.isArray(platforms) && platforms.length) config.platforms = platforms;
+    if (postType) config.postType = postType;
+    if (typeof customCaption === "string") config.customCaption = customCaption;
+
+    await config.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Auto-post configuration updated",
+      data: config
+    });
+  } catch (error) {
+    console.error("Update auto-post config error:", error.message);
+    return res.status(500).json({ success: false, message: "Failed to update auto-post settings" });
+  }
+};
+
+// @desc    Manually trigger auto-post immediately (Run Now)
+// @route   POST /api/admin/marketing/auto-post-trigger
+exports.triggerAutoPostNow = async (req, res) => {
+  try {
+    const result = await socialAutoPostService.executeAutoPost({ triggerType: "manual" });
+    if (!result.success) {
+      return res.status(500).json({ success: false, message: result.error, data: result.log });
+    }
+    return res.status(200).json({ success: true, message: "Auto-post executed successfully", data: result.log });
+  } catch (error) {
+    console.error("Trigger auto-post error:", error.message);
+    return res.status(500).json({ success: false, message: error.message || "Failed to trigger auto-post" });
+  }
+};
+
+// @desc    Get paginated logs of past social auto-posts
+// @route   GET /api/admin/marketing/auto-post-logs
+exports.getAutoPostLogs = async (req, res) => {
+  try {
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+
+    const [logs, total] = await Promise.all([
+      SocialAutoPostLog.find()
+        .sort({ createdAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      SocialAutoPostLog.countDocuments()
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        logs,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit)
+        }
+      }
+    });
+  } catch (error) {
+    console.error("Get auto-post logs error:", error.message);
+    return res.status(500).json({ success: false, message: "Failed to load auto-post history" });
   }
 };
