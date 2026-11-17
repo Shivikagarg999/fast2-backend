@@ -12,7 +12,11 @@ const {
   getAutoPostConfig,
   updateAutoPostConfig,
   triggerAutoPostNow,
-  getAutoPostLogs
+  getAutoPostLogs,
+  schedulePost,
+  getScheduledPosts,
+  cancelScheduledPost,
+  publishScheduledPostNow
 } = require('../../../controllers/marketing/marketingController');
 
 router.post('/generate-post', adminAuth, generatePost);
@@ -28,5 +32,11 @@ router.get('/auto-post-config', adminAuth, getAutoPostConfig);
 router.put('/auto-post-config', adminAuth, updateAutoPostConfig);
 router.post('/auto-post-trigger', adminAuth, triggerAutoPostNow);
 router.get('/auto-post-logs', adminAuth, getAutoPostLogs);
+
+// One-off Scheduled Posts (Date & Time)
+router.post('/schedule-post', adminAuth, schedulePost);
+router.get('/scheduled-posts', adminAuth, getScheduledPosts);
+router.delete('/scheduled-posts/:id', adminAuth, cancelScheduledPost);
+router.post('/scheduled-posts/:id/publish-now', adminAuth, publishScheduledPostNow);
 
 module.exports = router;

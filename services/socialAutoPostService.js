@@ -2,6 +2,7 @@ const cron = require('node-cron');
 const mongoose = require('mongoose');
 const SocialAutoPost = require('../models/socialAutoPost');
 const SocialAutoPostLog = require('../models/socialAutoPostLog');
+const ScheduledPost = require('../models/scheduledPost');
 const Category = require('../models/category');
 const Product = require('../models/product');
 const Order = require('../models/order');
@@ -269,15 +270,63 @@ const executeAutoPost = async ({ triggerType = "cron", overrideConfig = null } =
 
 let schedulerStarted = false;
 
-// Starts the cron scheduler (every minute sweep for IST scheduledTime)
+// Publish a single scheduled post record to Meta
+const publishScheduledPost = async (post) => {
+  post.status = 'processing';
+  await post.save();
+
+  try {
+    const results = await publishToMeta(post.imageUrl, post.caption || '', post.platforms);
+    const anySuccess = Object.values(results).some((r) => r && r.success);
+    post.publishResults = results;
+    post.publishedAt = new Date();
+    post.status = anySuccess ? 'published' : 'failed';
+    if (!anySuccess) {
+      post.error = Object.values(results).map((r) => r.error).filter(Boolean).join('; ') || 'All platform publishes failed';
+    } else {
+      post.error = '';
+    }
+    await post.save();
+    return { success: anySuccess, results, post };
+  } catch (err) {
+    post.status = 'failed';
+    post.error = err.message;
+    await post.save();
+    return { success: false, error: err.message, post };
+  }
+};
+
+// Process all one-off scheduled posts that are due
+const processDueScheduledPosts = async () => {
+  try {
+    const now = new Date();
+    const duePosts = await ScheduledPost.find({
+      status: 'scheduled',
+      scheduledAt: { $lte: now }
+    }).limit(10);
+
+    for (const post of duePosts) {
+      console.log(`⏰ Executing scheduled post [${post._id} - ${post.title}] scheduled for ${post.scheduledAt}`);
+      await publishScheduledPost(post);
+    }
+  } catch (err) {
+    console.error("Process due scheduled posts error:", err.message);
+  }
+};
+
+// Starts the cron scheduler (every minute sweep for IST scheduledTime & scheduled posts)
 const startSocialAutoPostScheduler = () => {
   if (schedulerStarted) return;
   schedulerStarted = true;
 
-  console.log("🚀 Social Auto-Post scheduler initialized (sweeps every minute for scheduled IST time)");
+  console.log("🚀 Social Auto-Post scheduler initialized (sweeps every minute for scheduled posts & daily recurring)");
 
   cron.schedule('* * * * *', async () => {
     try {
+      // 1. Process one-off scheduled posts that are due
+      await processDueScheduledPosts();
+
+      // 2. Process daily recurring auto-post config
       const config = await SocialAutoPost.findOne();
       if (!config || !config.isEnabled) return;
 
@@ -294,7 +343,7 @@ const startSocialAutoPostScheduler = () => {
           return;
         }
 
-        console.log(`⏰ Scheduled time [${currentHHMM} IST] matched! Triggering social auto-post...`);
+        console.log(`⏰ Daily scheduled time [${currentHHMM} IST] matched! Triggering social auto-post...`);
         await executeAutoPost({ triggerType: "cron", overrideConfig: config });
       }
     } catch (err) {
@@ -306,5 +355,8 @@ const startSocialAutoPostScheduler = () => {
 module.exports = {
   getConfig,
   executeAutoPost,
+  publishToMeta,
+  publishScheduledPost,
+  processDueScheduledPosts,
   startSocialAutoPostScheduler
 };

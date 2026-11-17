@@ -6,6 +6,7 @@ const AnalyticsEvent = require("../../models/analyticsEvent");
 const Occasion = require("../../models/occasion");
 const SocialAutoPost = require("../../models/socialAutoPost");
 const SocialAutoPostLog = require("../../models/socialAutoPostLog");
+const ScheduledPost = require("../../models/scheduledPost");
 const socialAutoPostService = require("../../services/socialAutoPostService");
 const { generatePromoImage, generateLifestylePost, toDataUri, PLATFORM_SIZES } = require("../../utils/socialPostGenerator");
 const { generateBackgroundImage, generateLifestyleScene, isConfigured: isGeminiConfigured } = require("../../utils/geminiImageGenerator");
@@ -580,5 +581,137 @@ exports.getAutoPostLogs = async (req, res) => {
   } catch (error) {
     console.error("Get auto-post logs error:", error.message);
     return res.status(500).json({ success: false, message: "Failed to load auto-post history" });
+  }
+};
+
+// @desc    Schedule a post for a specific future date and time
+// @route   POST /api/admin/marketing/schedule-post
+exports.schedulePost = async (req, res) => {
+  try {
+    const { title, imageUrl, caption, platforms, postType, scheduledAt } = req.body;
+
+    if (!imageUrl) {
+      return res.status(400).json({ success: false, message: "Image URL is required" });
+    }
+
+    if (!scheduledAt) {
+      return res.status(400).json({ success: false, message: "Scheduled date and time is required" });
+    }
+
+    const scheduledDate = new Date(scheduledAt);
+    if (isNaN(scheduledDate.getTime())) {
+      return res.status(400).json({ success: false, message: "Invalid scheduled date and time" });
+    }
+
+    const targets = Array.isArray(platforms) && platforms.length ? platforms : ["facebook", "instagram"];
+
+    const scheduledPost = await ScheduledPost.create({
+      title: title || "Scheduled Marketing Post",
+      imageUrl,
+      caption: caption || "",
+      platforms: targets,
+      postType: postType || "lifestyle",
+      scheduledAt: scheduledDate,
+      status: "scheduled",
+      createdBy: req.user?._id || null
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: "Post scheduled successfully",
+      data: scheduledPost
+    });
+  } catch (error) {
+    console.error("Schedule post error:", error.message);
+    return res.status(500).json({ success: false, message: error.message || "Failed to schedule post" });
+  }
+};
+
+// @desc    Get all scheduled posts with optional status filtering
+// @route   GET /api/admin/marketing/scheduled-posts
+exports.getScheduledPosts = async (req, res) => {
+  try {
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(parseInt(req.query.limit) || 20, 50);
+    const filter = {};
+
+    if (req.query.status && req.query.status !== "all") {
+      filter.status = req.query.status;
+    }
+
+    const [posts, total] = await Promise.all([
+      ScheduledPost.find(filter)
+        .sort({ scheduledAt: -1 })
+        .skip((page - 1) * limit)
+        .limit(limit)
+        .lean(),
+      ScheduledPost.countDocuments(filter)
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        posts,
+        pagination: {
+          page,
+          limit,
+          total,
+          pages: Math.ceil(total / limit)
+        }
+      }
+    });
+  } catch (error) {
+    console.error("Get scheduled posts error:", error.message);
+    return res.status(500).json({ success: false, message: "Failed to load scheduled posts" });
+  }
+};
+
+// @desc    Cancel a pending scheduled post
+// @route   DELETE /api/admin/marketing/scheduled-posts/:id
+exports.cancelScheduledPost = async (req, res) => {
+  try {
+    const post = await ScheduledPost.findById(req.params.id);
+    if (!post) {
+      return res.status(404).json({ success: false, message: "Scheduled post not found" });
+    }
+
+    if (post.status === "published") {
+      return res.status(400).json({ success: false, message: "Cannot cancel a post that has already been published" });
+    }
+
+    post.status = "cancelled";
+    await post.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Scheduled post cancelled",
+      data: post
+    });
+  } catch (error) {
+    console.error("Cancel scheduled post error:", error.message);
+    return res.status(500).json({ success: false, message: "Failed to cancel scheduled post" });
+  }
+};
+
+// @desc    Publish a scheduled post immediately (skip wait)
+// @route   POST /api/admin/marketing/scheduled-posts/:id/publish-now
+exports.publishScheduledPostNow = async (req, res) => {
+  try {
+    const post = await ScheduledPost.findById(req.params.id);
+    if (!post) {
+      return res.status(404).json({ success: false, message: "Scheduled post not found" });
+    }
+
+    const result = await socialAutoPostService.publishScheduledPost(post);
+
+    return res.status(200).json({
+      success: result.success,
+      message: result.success ? "Post published successfully" : (result.error || "Post publish had errors"),
+      data: result.post,
+      results: result.results
+    });
+  } catch (error) {
+    console.error("Publish scheduled post now error:", error.message);
+    return res.status(500).json({ success: false, message: error.message || "Failed to publish post" });
   }
 };
