@@ -19,7 +19,10 @@ const ALLOWED_EVENTS = new Set([
     'checkout_start',
     'order_placed',
     'offer_popup_shown',
-    'offer_popup_cta_click'
+    'offer_popup_cta_click',
+    'app_install',
+    'app_open',
+    'session_end'
 ]);
 
 const MAX_BATCH = 20;
@@ -40,7 +43,7 @@ const sanitizeMeta = (meta) => {
 
 exports.trackEvents = async (req, res) => {
     try {
-        const { visitorId, sessionId, device, isLoggedIn, referrer, events, location } = req.body || {};
+        const { visitorId, sessionId, device, isLoggedIn, referrer, events, location, platform } = req.body || {};
         const pincode = String(location?.pincode || '').replace(/\D/g, '').slice(0, 6);
         const area = clip(location?.area, 80);
 
@@ -58,6 +61,7 @@ exports.trackEvents = async (req, res) => {
                 path: clip(item.path, 300),
                 meta: sanitizeMeta(item.meta),
                 device: ['mobile', 'tablet', 'desktop'].includes(device) ? device : 'desktop',
+                platform: platform === 'app' ? 'app' : 'web',
                 isLoggedIn: !!isLoggedIn,
                 referrer: clip(referrer, 200),
                 pincode,
@@ -98,6 +102,10 @@ exports.getSummary = async (req, res) => {
     try {
         const { from, to, days } = parseRange(req.query);
         const match = { createdAt: { $gte: from, $lte: to } };
+        // 'app' matches app-tagged events only; 'web' matches web + any older
+        // event stored before the platform field existed (those default to web).
+        if (req.query.platform === 'app') match.platform = 'app';
+        else if (req.query.platform === 'web') match.platform = { $ne: 'app' };
 
         const [
             perEvent,
@@ -108,7 +116,10 @@ exports.getSummary = async (req, res) => {
             topCategoryRefs,
             topSearches,
             devices,
-            locations
+            locations,
+            platforms,
+            installTrend,
+            sessionDuration
         ] = await Promise.all([
             // total count + unique visitors per event
             AnalyticsEvent.aggregate([
@@ -185,6 +196,26 @@ exports.getSummary = async (req, res) => {
                 { $project: { _id: 0, pincode: '$_id.pincode', area: '$_id.area', visitors: { $size: '$visitors' } } },
                 { $sort: { visitors: -1 } },
                 { $limit: 20 }
+            ]),
+            AnalyticsEvent.aggregate([
+                { $match: match },
+                { $group: { _id: { $cond: [{ $eq: ['$platform', 'app'] }, 'app', 'web'] }, visitors: { $addToSet: '$visitorId' } } },
+                { $project: { _id: 0, platform: '$_id', visitors: { $size: '$visitors' } } }
+            ]),
+            AnalyticsEvent.aggregate([
+                { $match: { ...match, event: 'app_install' } },
+                {
+                    $group: {
+                        _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'Asia/Kolkata' } },
+                        installs: { $sum: 1 }
+                    }
+                },
+                { $project: { _id: 0, date: '$_id', installs: 1 } },
+                { $sort: { date: 1 } }
+            ]),
+            AnalyticsEvent.aggregate([
+                { $match: { ...match, event: 'session_end', 'meta.duration': { $type: 'number' } } },
+                { $group: { _id: null, avgDuration: { $avg: '$meta.duration' }, sessions: { $sum: 1 } } }
             ])
         ]);
 
@@ -223,8 +254,13 @@ exports.getSummary = async (req, res) => {
                 addToCart: stat('add_to_cart').total,
                 loginPageVisitors: stat('login_page_view').visitors,
                 loginSuccess: stat('login_success').visitors,
-                ordersPlaced: stat('order_placed').total
+                ordersPlaced: stat('order_placed').total,
+                appInstalls: stat('app_install').total,
+                appOpens: stat('app_open').total,
+                avgSessionDurationSec: Math.round(sessionDuration[0]?.avgDuration || 0)
             },
+            platforms,
+            installTrend,
             funnel,
             daily,
             topPages,

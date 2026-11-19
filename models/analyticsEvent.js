@@ -8,6 +8,7 @@ const analyticsEventSchema = new mongoose.Schema({
     // Small event-specific details: { productRef, categoryRef, query, ... }
     meta: { type: mongoose.Schema.Types.Mixed, default: {} },
     device: { type: String, enum: ['mobile', 'tablet', 'desktop'], default: 'desktop' },
+    platform: { type: String, enum: ['web', 'app'], default: 'web', index: true },
     isLoggedIn: { type: Boolean, default: false },
     referrer: { type: String, default: '' },
     pincode: { type: String, default: '', index: true },
