@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const AnalyticsEvent = require('../../models/analyticsEvent');
 const Product = require('../../models/product');
+const googleAnalytics = require('../../utils/googleAnalyticsClient');
 
 // Only these events are accepted from the browser.
 const ALLOWED_EVENTS = new Set([
@@ -279,5 +280,26 @@ exports.getSummary = async (req, res) => {
     } catch (error) {
         console.error('Analytics summary error:', error);
         return res.status(500).json({ success: false, message: 'Failed to load analytics' });
+    }
+};
+
+// Real Firebase Analytics (GA4) data, pulled live from Google's Analytics Data
+// API — a separate data source from our own AnalyticsEvent collection above.
+exports.getFirebaseEventSummary = async (req, res) => {
+    try {
+        if (!googleAnalytics.isConfigured()) {
+            return res.status(200).json({
+                success: true,
+                configured: false,
+                message: 'Firebase Analytics is not connected yet — add GA4_PROPERTY_ID to .env and grant the Firebase service account Viewer access on the GA4 property.'
+            });
+        }
+
+        const days = Math.min(Math.max(parseInt(req.query.days, 10) || 7, 1), 90);
+        const data = await googleAnalytics.getEventSummary(days);
+        return res.status(200).json({ success: true, configured: true, days, ...data });
+    } catch (error) {
+        console.error('Firebase Analytics summary error:', error.message);
+        return res.status(500).json({ success: false, configured: true, message: 'Failed to load Firebase Analytics data' });
     }
 };
