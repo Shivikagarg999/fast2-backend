@@ -88,12 +88,23 @@ const parseRange = (query) => {
     return { from, to, days };
 };
 
-// Funnel steps in the order a customer moves through the site.
-const FUNNEL_STEPS = [
+// Funnel steps in the order a customer moves through the site/app.
+// The app never fires page_view/login_page_view (it has no concept of
+// "pages"), so it gets its own funnel instead of showing permanently-zero
+// website-only steps.
+const WEB_FUNNEL_STEPS = [
     { key: 'visited', label: 'Visited website', event: 'page_view' },
     { key: 'product_view', label: 'Viewed a product', event: 'product_view' },
     { key: 'add_to_cart', label: 'Added to cart', event: 'add_to_cart' },
     { key: 'login_page_view', label: 'Opened login page', event: 'login_page_view' },
+    { key: 'login_success', label: 'Logged in', event: 'login_success' },
+    { key: 'checkout_start', label: 'Reached checkout', event: 'checkout_start' },
+    { key: 'order_placed', label: 'Order placed', event: 'order_placed' }
+];
+const APP_FUNNEL_STEPS = [
+    { key: 'visited', label: 'Opened the app', event: 'app_open' },
+    { key: 'product_view', label: 'Viewed a product', event: 'product_view' },
+    { key: 'add_to_cart', label: 'Added to cart', event: 'add_to_cart' },
     { key: 'login_success', label: 'Logged in', event: 'login_success' },
     { key: 'checkout_start', label: 'Reached checkout', event: 'checkout_start' },
     { key: 'order_placed', label: 'Order placed', event: 'order_placed' }
@@ -105,8 +116,11 @@ exports.getSummary = async (req, res) => {
         const match = { createdAt: { $gte: from, $lte: to } };
         // 'app' matches app-tagged events only; 'web' matches web + any older
         // event stored before the platform field existed (those default to web).
-        if (req.query.platform === 'app') match.platform = 'app';
-        else if (req.query.platform === 'web') match.platform = { $ne: 'app' };
+        const platformFilter = req.query.platform;
+        if (platformFilter === 'app') match.platform = 'app';
+        else if (platformFilter === 'web') match.platform = { $ne: 'app' };
+        const isAppOnly = platformFilter === 'app';
+        const dailyEvent = isAppOnly ? 'app_open' : 'page_view';
 
         const [
             perEvent,
@@ -147,7 +161,7 @@ exports.getSummary = async (req, res) => {
                 }
             ]),
             AnalyticsEvent.aggregate([
-                { $match: { ...match, event: 'page_view' } },
+                { $match: { ...match, event: dailyEvent } },
                 {
                     $group: {
                         _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt', timezone: 'Asia/Kolkata' } },
@@ -158,7 +172,7 @@ exports.getSummary = async (req, res) => {
                 { $project: { _id: 0, date: '$_id', pageViews: 1, visitors: { $size: '$visitors' } } },
                 { $sort: { date: 1 } }
             ]),
-            AnalyticsEvent.aggregate([
+            isAppOnly ? Promise.resolve([]) : AnalyticsEvent.aggregate([
                 { $match: { ...match, event: 'page_view' } },
                 { $group: { _id: '$path', views: { $sum: 1 }, visitors: { $addToSet: '$visitorId' } } },
                 { $project: { _id: 0, path: '$_id', views: 1, visitors: { $size: '$visitors' } } },
@@ -166,7 +180,7 @@ exports.getSummary = async (req, res) => {
                 { $limit: 10 }
             ]),
             AnalyticsEvent.aggregate([
-                { $match: { ...match, event: 'product_click', 'meta.ref': { $exists: true } } },
+                { $match: { ...match, event: { $in: ['product_click', 'product_view'] }, 'meta.ref': { $exists: true } } },
                 { $group: { _id: '$meta.ref', clicks: { $sum: 1 }, visitors: { $addToSet: '$visitorId' } } },
                 { $project: { _id: 0, ref: '$_id', clicks: 1, visitors: { $size: '$visitors' } } },
                 { $sort: { clicks: -1 } },
@@ -223,7 +237,8 @@ exports.getSummary = async (req, res) => {
         const eventStats = Object.fromEntries(perEvent.map((row) => [row._id, { total: row.total, visitors: row.visitors }]));
         const stat = (event) => eventStats[event] || { total: 0, visitors: 0 };
 
-        const funnel = FUNNEL_STEPS.map((step) => ({
+        const funnelSteps = isAppOnly ? APP_FUNNEL_STEPS : WEB_FUNNEL_STEPS;
+        const funnel = funnelSteps.map((step) => ({
             key: step.key,
             label: step.label,
             visitors: stat(step.event).visitors,
@@ -245,11 +260,12 @@ exports.getSummary = async (req, res) => {
         return res.status(200).json({
             success: true,
             range: { from, to, days },
+            platformFilter: isAppOnly ? 'app' : (platformFilter === 'web' ? 'web' : 'all'),
             totals: {
                 visitors: totals[0]?.visitors || 0,
                 sessions: totals[0]?.sessions || 0,
                 loggedInVisitors: totals[0]?.loggedInVisitors || 0,
-                pageViews: stat('page_view').total,
+                pageViews: stat(dailyEvent).total,
                 productClicks: stat('product_click').total,
                 productClickVisitors: stat('product_click').visitors,
                 addToCart: stat('add_to_cart').total,
