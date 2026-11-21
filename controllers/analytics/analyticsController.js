@@ -47,6 +47,9 @@ exports.trackEvents = async (req, res) => {
         const { visitorId, sessionId, device, isLoggedIn, referrer, events, location, platform } = req.body || {};
         const pincode = String(location?.pincode || '').replace(/\D/g, '').slice(0, 6);
         const area = clip(location?.area, 80);
+        const lat = Number(location?.lat);
+        const lng = Number(location?.lng);
+        const hasCoords = Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
 
         if (!isUuidLike(visitorId) || !isUuidLike(sessionId) || !Array.isArray(events)) {
             return res.status(400).json({ success: false });
@@ -66,7 +69,8 @@ exports.trackEvents = async (req, res) => {
                 isLoggedIn: !!isLoggedIn,
                 referrer: clip(referrer, 200),
                 pincode,
-                area
+                area,
+                ...(hasCoords ? { lat, lng } : {})
             }));
 
         if (docs.length) {
@@ -317,5 +321,58 @@ exports.getFirebaseEventSummary = async (req, res) => {
     } catch (error) {
         console.error('Firebase Analytics summary error:', error.message);
         return res.status(500).json({ success: false, configured: true, message: 'Failed to load Firebase Analytics data' });
+    }
+};
+
+// "Live" activity map: one marker per visitor, at their last known location,
+// for anyone with an event in the last few minutes. Not true continuous GPS
+// tracking — it's the visitor's last-saved delivery location, refreshed each
+// time they're active. No extra permission or battery cost on the app side.
+exports.getLiveUsers = async (req, res) => {
+    try {
+        const minutes = Math.min(Math.max(parseInt(req.query.minutes, 10) || 5, 1), 60);
+        const since = new Date(Date.now() - minutes * 60 * 1000);
+        const platformFilter = req.query.platform === 'web' ? { $ne: 'app' } : 'app';
+
+        const rows = await AnalyticsEvent.aggregate([
+            {
+                $match: {
+                    createdAt: { $gte: since },
+                    platform: platformFilter,
+                    lat: { $exists: true },
+                    lng: { $exists: true }
+                }
+            },
+            { $sort: { createdAt: -1 } },
+            {
+                $group: {
+                    _id: '$visitorId',
+                    lat: { $first: '$lat' },
+                    lng: { $first: '$lng' },
+                    event: { $first: '$event' },
+                    pincode: { $first: '$pincode' },
+                    area: { $first: '$area' },
+                    lastSeen: { $first: '$createdAt' }
+                }
+            },
+            { $limit: 500 },
+            {
+                $project: {
+                    _id: 0,
+                    visitorId: '$_id',
+                    lat: 1,
+                    lng: 1,
+                    event: 1,
+                    pincode: 1,
+                    area: 1,
+                    lastSeen: 1
+                }
+            }
+        ]);
+
+        return res.status(200).json({ success: true, minutes, count: rows.length, users: rows });
+    } catch (error) {
+        console.error('Live users error:', error.message);
+        return res.status(500).json({ success: false, message: 'Failed to load live users' });
     }
 };

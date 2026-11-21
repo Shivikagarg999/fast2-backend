@@ -13,11 +13,15 @@ const analyticsEventSchema = new mongoose.Schema({
     referrer: { type: String, default: '' },
     pincode: { type: String, default: '', index: true },
     area: { type: String, default: '' },
+    lat: { type: Number },
+    lng: { type: Number },
     createdAt: { type: Date, default: Date.now }
 }, { versionKey: false });
 
 analyticsEventSchema.index({ event: 1, createdAt: -1 });
 analyticsEventSchema.index({ createdAt: -1 });
+// Powers the live-activity map: latest located event per visitor, recent window only.
+analyticsEventSchema.index({ platform: 1, createdAt: -1, lat: 1, lng: 1 });
 // Keep raw events for 180 days; the dashboard only needs recent history.
 analyticsEventSchema.index({ createdAt: 1 }, { expireAfterSeconds: 180 * 24 * 60 * 60 });
 

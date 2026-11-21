@@ -1,7 +1,7 @@
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const { adminAuth } = require('../../middlewares/adminAuth');
-const { trackEvents, getSummary, getFirebaseEventSummary } = require('../../controllers/analytics/analyticsController');
+const { trackEvents, getSummary, getFirebaseEventSummary, getLiveUsers } = require('../../controllers/analytics/analyticsController');
 
 const publicRouter = express.Router();
 const adminRouter = express.Router();
@@ -18,5 +18,6 @@ const trackLimiter = rateLimit({
 publicRouter.post('/track', trackLimiter, trackEvents);
 adminRouter.get('/summary', adminAuth, getSummary);
 adminRouter.get('/firebase-summary', adminAuth, getFirebaseEventSummary);
+adminRouter.get('/live-users', adminAuth, getLiveUsers);
 
 module.exports = { publicRouter, adminRouter };
