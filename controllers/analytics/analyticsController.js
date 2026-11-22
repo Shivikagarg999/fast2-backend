@@ -3,7 +3,6 @@ const AnalyticsEvent = require('../../models/analyticsEvent');
 const Product = require('../../models/product');
 const googleAnalytics = require('../../utils/googleAnalyticsClient');
 
-// Only these events are accepted from the browser.
 const ALLOWED_EVENTS = new Set([
     'page_view',
     'product_view',
