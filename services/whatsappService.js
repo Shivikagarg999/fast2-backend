@@ -126,6 +126,14 @@ exports.listTemplates = async () => {
 // native CATALOG/MPM button types are intentionally not offered here, since
 // those bypass our backend entirely and depend on WhatsApp's own catalog sync.
 exports.createTemplate = async ({ name, category, language, bodyText, buttons }) => {
+  // Meta's API (unlike the Business Manager UI, which prompts separately)
+  // requires a sample value for every {{n}} placeholder at submission time,
+  // or it rejects the template with rejected_reason INVALID_FORMAT.
+  const placeholderCount = new Set((bodyText.match(/\{\{(\d+)\}\}/g) || []).map((p) => p)).size;
+  const example = placeholderCount
+    ? { example: { body_text: [Array.from({ length: placeholderCount }, (_, i) => `Example ${i + 1}`)] } }
+    : {};
+
   const { data } = await axios.post(
     wabaUrl("/message_templates"),
     {
@@ -133,7 +141,7 @@ exports.createTemplate = async ({ name, category, language, bodyText, buttons })
       category,
       language,
       components: [
-        { type: "BODY", text: bodyText },
+        { type: "BODY", text: bodyText, ...example },
         ...(buttons?.length ? [{ type: "BUTTONS", buttons }] : [])
       ]
     },

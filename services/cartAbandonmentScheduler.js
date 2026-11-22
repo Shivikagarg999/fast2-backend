@@ -25,7 +25,7 @@ const sendReminder = async (user) => {
 
     if (user.phone) {
         try {
-            await whatsappService.sendTemplate(user.phone, 'cart_abandonment_reminder', 'en', [user.name || 'there']);
+            await whatsappService.sendTemplate(user.phone, 'cart_abandonment_reminder_v2', 'en_US', [user.name || 'there']);
         } catch (error) {
             console.error(`Cart abandonment WhatsApp failed for ${user._id}:`, error.message);
         }

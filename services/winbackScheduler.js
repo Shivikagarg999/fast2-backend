@@ -23,7 +23,7 @@ const sendWinback = async (user) => {
 
     if (user.phone) {
         try {
-            await whatsappService.sendTemplate(user.phone, 'winback_reminder', 'en', [user.name || 'there']);
+            await whatsappService.sendTemplate(user.phone, 'winback_reminder_v2', 'en_US', [user.name || 'there']);
         } catch (error) {
             console.error(`Win-back WhatsApp failed for ${user._id}:`, error.message);
         }
