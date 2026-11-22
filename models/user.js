@@ -53,6 +53,12 @@ const userSchema = new mongoose.Schema(
     referralCount: {
       type: Number,
       default: 0
+    },
+    // Prevents re-sending the win-back campaign to the same inactive
+    // customer every day while they stay inactive.
+    lastWinbackSentAt: {
+      type: Date,
+      default: null
     }
   },
   { timestamps: true }

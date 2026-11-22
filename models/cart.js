@@ -50,6 +50,12 @@ const cartSchema = new mongoose.Schema(
     finalAmount: {
       type: Number,
       default: 0
+    },
+    // Prevents re-sending the abandoned-cart reminder every sweep while the
+    // same items still sit in the cart.
+    lastAbandonReminderAt: {
+      type: Date,
+      default: null
     }
   },
   { timestamps: true }

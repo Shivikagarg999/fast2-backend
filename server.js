@@ -62,6 +62,8 @@ mongoose.connect(process.env.MONGO_URI)
     console.log('MongoDB connected');
     require('./services/notificationScheduler').startNotificationScheduler();
     require('./services/socialAutoPostService').startSocialAutoPostScheduler();
+    require('./services/cartAbandonmentScheduler').startCartAbandonmentScheduler();
+    require('./services/winbackScheduler').startWinbackScheduler();
   })
   .catch((err) => console.error('❌ MongoDB connection error:', err));
 
