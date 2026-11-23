@@ -63,4 +63,60 @@ const postToInstagram = async (imageUrl, caption) => {
   return { postId: published.id };
 };
 
-module.exports = { isConfigured, postToFacebookPage, postToInstagram };
+// Facebook video upload: unlike photos, this is `file_url`/`description` (not
+// `url`/`caption`), and the video processes in the background after Meta
+// acks the request — no polling needed for a basic feed video post.
+const postVideoToFacebookPage = async (videoUrl, caption) => {
+  const page = await getPage();
+  const { data } = await axios.post(graphUrl(`/${page.id}/videos`), null, {
+    params: { file_url: videoUrl, description: caption, access_token: page.access_token }
+  });
+  return { postId: data.post_id || data.id };
+};
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Instagram Reels container processing is async — unlike a photo container,
+// which is ready instantly, a video container must be polled until Meta
+// reports FINISHED before media_publish will succeed.
+const waitForIgContainerReady = async (containerId, accessToken, { attempts = 10, delayMs = 12000 } = {}) => {
+  for (let i = 0; i < attempts; i++) {
+    const { data } = await axios.get(graphUrl(`/${containerId}`), {
+      params: { fields: "status_code", access_token: accessToken }
+    });
+    if (data.status_code === "FINISHED") return;
+    if (data.status_code === "ERROR") {
+      throw new Error("Instagram failed to process the video container");
+    }
+    await sleep(delayMs);
+  }
+  throw new Error("Timed out waiting for Instagram to finish processing the video");
+};
+
+const postVideoToInstagram = async (videoUrl, caption) => {
+  const page = await getPage();
+  const igUserId = page.instagram_business_account?.id;
+  if (!igUserId) {
+    throw new Error("No Instagram account is linked to the Facebook Page yet");
+  }
+
+  const { data: container } = await axios.post(graphUrl(`/${igUserId}/media`), null, {
+    params: { media_type: "REELS", video_url: videoUrl, caption, access_token: page.access_token }
+  });
+
+  await waitForIgContainerReady(container.id, page.access_token);
+
+  const { data: published } = await axios.post(graphUrl(`/${igUserId}/media_publish`), null, {
+    params: { creation_id: container.id, access_token: page.access_token }
+  });
+
+  return { postId: published.id };
+};
+
+module.exports = {
+  isConfigured,
+  postToFacebookPage,
+  postToInstagram,
+  postVideoToFacebookPage,
+  postVideoToInstagram
+};

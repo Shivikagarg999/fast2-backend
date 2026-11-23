@@ -5,9 +5,21 @@ const scheduledPostSchema = new mongoose.Schema({
     type: String,
     default: "Social Post"
   },
+  // Not hard-required at the schema level — a video post uses videoUrl
+  // instead. The controller validates "one of imageUrl/videoUrl is present"
+  // for the given mediaType.
   imageUrl: {
     type: String,
-    required: true
+    default: null
+  },
+  videoUrl: {
+    type: String,
+    default: null
+  },
+  mediaType: {
+    type: String,
+    enum: ["image", "video"],
+    default: "image"
   },
   caption: {
     type: String,
@@ -19,7 +31,7 @@ const scheduledPostSchema = new mongoose.Schema({
   },
   postType: {
     type: String,
-    enum: ["lifestyle", "template", "custom"],
+    enum: ["lifestyle", "template", "custom", "video"],
     default: "lifestyle"
   },
   scheduledAt: {

@@ -6,6 +6,7 @@ const {
   getTrendingCategories,
   getUpcomingOccasions,
   generateLifestylePost,
+  generateVideoPost,
   getCategoryProducts,
   publishPost,
   autoDailyPost,
@@ -23,6 +24,7 @@ router.post('/generate-post', adminAuth, generatePost);
 router.get('/trending-categories', adminAuth, getTrendingCategories);
 router.get('/upcoming-occasions', adminAuth, getUpcomingOccasions);
 router.post('/generate-lifestyle-post', adminAuth, generateLifestylePost);
+router.post('/generate-video-post', adminAuth, generateVideoPost);
 router.get('/category-products/:categoryId', adminAuth, getCategoryProducts);
 router.post('/publish', adminAuth, publishPost);
 router.post('/auto-daily-post', adminAuth, autoDailyPost);

@@ -9,7 +9,7 @@ const Order = require('../models/order');
 const imagekit = require('../utils/imagekit');
 const { generatePromoImage, generateLifestylePost, toDataUri, PLATFORM_SIZES } = require('../utils/socialPostGenerator');
 const { generateBackgroundImage, generateLifestyleScene, isConfigured: isAiConfigured } = require('../utils/geminiImageGenerator');
-const { isConfigured: isMetaConfigured, postToFacebookPage, postToInstagram } = require('../utils/metaPublisher');
+const { isConfigured: isMetaConfigured, postToFacebookPage, postToInstagram, postVideoToFacebookPage, postVideoToInstagram } = require('../utils/metaPublisher');
 
 const PRODUCTS_PER_POST = 4;
 
@@ -81,8 +81,9 @@ const getTopProductsForCategory = async (categoryId) => {
   return [...bestSellers.map((b) => b.product), ...fallback];
 };
 
-// Publish helper
-const publishToMeta = async (imageUrl, caption, platforms = ["facebook", "instagram"]) => {
+// Publish helper. mediaType 'video' routes to the Reels/video publish
+// functions instead of the photo ones — same result shape either way.
+const publishToMeta = async (mediaUrl, caption, platforms = ["facebook", "instagram"], mediaType = "image") => {
   const targets = Array.isArray(platforms) && platforms.length ? platforms : ["facebook", "instagram"];
   if (!isMetaConfigured()) {
     throw new Error("Meta publishing is not configured (missing WHATSAPP_ACCESS_TOKEN)");
@@ -90,12 +91,14 @@ const publishToMeta = async (imageUrl, caption, platforms = ["facebook", "instag
   const results = {};
   await Promise.all(targets.map(async (platform) => {
     try {
-      const publishFn = platform === "instagram" ? postToInstagram : platform === "facebook" ? postToFacebookPage : null;
+      const publishFn = mediaType === "video"
+        ? (platform === "instagram" ? postVideoToInstagram : platform === "facebook" ? postVideoToFacebookPage : null)
+        : (platform === "instagram" ? postToInstagram : platform === "facebook" ? postToFacebookPage : null);
       if (!publishFn) {
         results[platform] = { success: false, error: `Unknown platform: ${platform}` };
         return;
       }
-      const result = await publishFn(imageUrl, caption || "");
+      const result = await publishFn(mediaUrl, caption || "");
       results[platform] = { success: true, ...result };
     } catch (error) {
       results[platform] = { success: false, error: error.response?.data?.error?.message || error.message };
@@ -276,7 +279,8 @@ const publishScheduledPost = async (post) => {
   await post.save();
 
   try {
-    const results = await publishToMeta(post.imageUrl, post.caption || '', post.platforms);
+    const mediaUrl = post.mediaType === 'video' ? post.videoUrl : post.imageUrl;
+    const results = await publishToMeta(mediaUrl, post.caption || '', post.platforms, post.mediaType || 'image');
     const anySuccess = Object.values(results).some((r) => r && r.success);
     post.publishResults = results;
     post.publishedAt = new Date();

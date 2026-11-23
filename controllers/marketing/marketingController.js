@@ -10,13 +10,16 @@ const ScheduledPost = require("../../models/scheduledPost");
 const socialAutoPostService = require("../../services/socialAutoPostService");
 const { generatePromoImage, generateLifestylePost, toDataUri, PLATFORM_SIZES } = require("../../utils/socialPostGenerator");
 const { generateBackgroundImage, generateLifestyleScene, isConfigured: isGeminiConfigured } = require("../../utils/geminiImageGenerator");
-const { isConfigured: isMetaPublisherConfigured, postToFacebookPage, postToInstagram } = require("../../utils/metaPublisher");
+const { isConfigured: isMetaPublisherConfigured, postToFacebookPage, postToInstagram, postVideoToFacebookPage, postVideoToInstagram } = require("../../utils/metaPublisher");
 const imagekit = require("../../utils/imagekit");
+const { isConfigured: isVideoConfigured, generateVideo } = require("../../utils/videoGenerator");
+const { isConfigured: isTtsConfigured, synthesizeHindiSpeech } = require("../../utils/ttsGenerator");
+const { mergeVideoWithVoiceover } = require("../../utils/videoCompositor");
 
 const PRODUCTS_PER_POST = 4;
 
-// Helper to publish an image to Facebook and/or Instagram
-const publishToMeta = async (imageUrl, caption, platforms = ["facebook", "instagram"]) => {
+// Helper to publish an image or video to Facebook and/or Instagram
+const publishToMeta = async (mediaUrl, caption, platforms = ["facebook", "instagram"], mediaType = "image") => {
   const targets = Array.isArray(platforms) && platforms.length ? platforms : ["facebook", "instagram"];
   if (!isMetaPublisherConfigured()) {
     return { error: "Meta publishing is not configured (missing WHATSAPP_ACCESS_TOKEN)" };
@@ -24,12 +27,14 @@ const publishToMeta = async (imageUrl, caption, platforms = ["facebook", "instag
   const results = {};
   await Promise.all(targets.map(async (platform) => {
     try {
-      const publishFn = platform === "instagram" ? postToInstagram : platform === "facebook" ? postToFacebookPage : null;
+      const publishFn = mediaType === "video"
+        ? (platform === "instagram" ? postVideoToInstagram : platform === "facebook" ? postVideoToFacebookPage : null)
+        : (platform === "instagram" ? postToInstagram : platform === "facebook" ? postToFacebookPage : null);
       if (!publishFn) {
         results[platform] = { success: false, error: `Unknown platform: ${platform}` };
         return;
       }
-      const result = await publishFn(imageUrl, caption || "");
+      const result = await publishFn(mediaUrl, caption || "");
       results[platform] = { success: true, ...result };
     } catch (error) {
       results[platform] = { success: false, error: error.response?.data?.error?.message || error.message };
@@ -391,17 +396,85 @@ exports.generateLifestylePost = async (req, res) => {
   }
 };
 
-// @desc    Publish an already-generated post image directly to Facebook
-//          and/or Instagram.
+// @desc    Generate a short AI video (Pollinations Veo, paid — real cost per
+//          generation, unlike the free image path) with a Hindi voiceover
+//          (Google Cloud TTS, free tier) burned in as captions, for one
+//          product or category. Admin-provided/edited script, not AI-written.
+// @route   POST /api/admin/marketing/generate-video-post
+exports.generateVideoPost = async (req, res) => {
+  try {
+    const { productId, categoryId, scenePrompt, hindiScript, autoPublish, caption, publishPlatforms } = req.body;
+
+    if (!isVideoConfigured()) {
+      return res.status(400).json({ success: false, message: "Video generation is not configured (missing POLLINATIONS_API_KEY)" });
+    }
+    if (!isTtsConfigured()) {
+      return res.status(400).json({ success: false, message: "Hindi voiceover is not configured (missing Firebase service account credentials)" });
+    }
+    if (!hindiScript || !hindiScript.trim()) {
+      return res.status(400).json({ success: false, message: "hindiScript is required" });
+    }
+
+    let subjectLabel = "fresh grocery essentials";
+    if (productId) {
+      const product = await Product.findById(productId).select("name").lean();
+      if (product) subjectLabel = product.name;
+    } else if (categoryId) {
+      const category = await Category.findById(categoryId).select("name").lean();
+      if (category) subjectLabel = `${category.name} groceries`;
+    }
+
+    const prompt = scenePrompt || `A vibrant, appetizing commercial video showcasing ${subjectLabel}, warm Indian kitchen setting, natural lighting, smooth slow pan`;
+
+    const videoBuffer = await generateVideo(prompt, { duration: 8 });
+    if (!videoBuffer) {
+      return res.status(502).json({ success: false, message: "Could not generate the AI video right now" });
+    }
+
+    const audioBuffer = await synthesizeHindiSpeech(hindiScript.trim());
+    const finalBuffer = await mergeVideoWithVoiceover(videoBuffer, audioBuffer, hindiScript.trim());
+
+    const safePrefix = subjectLabel.slice(0, 20).replace(/[^a-zA-Z0-9]/g, "_");
+    const uploaded = await imagekit.upload({
+      file: finalBuffer,
+      fileName: `video_${safePrefix}_${Date.now()}.mp4`,
+      folder: "/marketing-posts"
+    });
+
+    let publishResults = null;
+    if (autoPublish) {
+      const postCaption = caption || `${subjectLabel} — Fresh on GMKart! 🛒\nOrder now for superfast delivery.\n\n#GMKart #FreshGrocery #QuickCommerce`;
+      publishResults = await publishToMeta(uploaded.url, postCaption, publishPlatforms, "video");
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        url: uploaded.url,
+        mediaType: "video",
+        subjectLabel,
+        hindiScript: hindiScript.trim(),
+        publishResults
+      }
+    });
+  } catch (error) {
+    console.error("Generate video post error:", error.message);
+    return res.status(500).json({ success: false, message: error.message || "Failed to generate video post" });
+  }
+};
+
+// @desc    Publish an already-generated post (image or video) directly to
+//          Facebook and/or Instagram.
 // @route   POST /api/admin/marketing/publish
 exports.publishPost = async (req, res) => {
   try {
-    const { imageUrl, caption, platforms } = req.body;
-    if (!imageUrl) {
-      return res.status(400).json({ success: false, message: "imageUrl is required" });
+    const { imageUrl, videoUrl, mediaType, caption, platforms } = req.body;
+    const mediaUrl = mediaType === "video" ? videoUrl : imageUrl;
+    if (!mediaUrl) {
+      return res.status(400).json({ success: false, message: mediaType === "video" ? "videoUrl is required" : "imageUrl is required" });
     }
 
-    const results = await publishToMeta(imageUrl, caption, platforms);
+    const results = await publishToMeta(mediaUrl, caption, platforms, mediaType || "image");
     if (results.error) {
       return res.status(400).json({ success: false, message: results.error });
     }
@@ -588,10 +661,11 @@ exports.getAutoPostLogs = async (req, res) => {
 // @route   POST /api/admin/marketing/schedule-post
 exports.schedulePost = async (req, res) => {
   try {
-    const { title, imageUrl, caption, platforms, postType, scheduledAt } = req.body;
+    const { title, imageUrl, videoUrl, mediaType, caption, platforms, postType, scheduledAt } = req.body;
+    const isVideo = mediaType === "video";
 
-    if (!imageUrl) {
-      return res.status(400).json({ success: false, message: "Image URL is required" });
+    if (isVideo ? !videoUrl : !imageUrl) {
+      return res.status(400).json({ success: false, message: isVideo ? "Video URL is required" : "Image URL is required" });
     }
 
     if (!scheduledAt) {
@@ -607,10 +681,12 @@ exports.schedulePost = async (req, res) => {
 
     const scheduledPost = await ScheduledPost.create({
       title: title || "Scheduled Marketing Post",
-      imageUrl,
+      imageUrl: isVideo ? null : imageUrl,
+      videoUrl: isVideo ? videoUrl : null,
+      mediaType: isVideo ? "video" : "image",
       caption: caption || "",
       platforms: targets,
-      postType: postType || "lifestyle",
+      postType: isVideo ? "video" : (postType || "lifestyle"),
       scheduledAt: scheduledDate,
       status: "scheduled",
       createdBy: req.user?._id || null
